@@ -16,17 +16,25 @@
 const fs = require('fs');
 const path = require('path');
 
-const STATE_FILE = path.join(
-  process.env.HOME || process.env.USERPROFILE || '/tmp',
-  '.opencode-progress-state.json'
-);
+const STATE_FILE =
+  process.env.PROGRESS_STATE_PATH ||
+  path.join(
+    process.env.HOME || process.env.USERPROFILE || '/tmp',
+    '.opencode-progress-state.json'
+  );
 
 function ensureStateFile() {
   try {
     fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
   } catch (e) {}
   if (!fs.existsSync(STATE_FILE)) {
-    fs.writeFileSync(STATE_FILE, JSON.stringify({ entries: {}, version: 2 }, null, 2));
+    try {
+      fs.writeFileSync(STATE_FILE, JSON.stringify({ entries: {}, version: 2 }, null, 2), {
+        flag: 'wx',
+      });
+    } catch (e) {
+      // Another process created it first; that is fine.
+    }
   }
 }
 
@@ -68,7 +76,7 @@ function setup(context) {
   }
 
   pollProgress();
-  timer = setInterval(pollProgress, 2000);
+  timer = setInterval(pollProgress, 1000);
 
   // Also show toast notifications for new progress entries
   const seen = new Set();

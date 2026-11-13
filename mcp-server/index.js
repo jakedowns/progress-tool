@@ -1,216 +1,133 @@
 #!/usr/bin/env node
+'use strict';
+
 /**
- * Progress MCP Server for OpenCode
+ * Progress MCP Server for OpenCode (and any MCP-capable harness)
  *
  * Exposes a `progress` tool that agents can call to signal long-running work
  * without blocking. Implements the proposal from:
  * https://gist.github.com/jakedowns/ddc4eb4817184a074c82c61dc6e7228c
  *
+ * Zero-token-burn design:
+ *   The agent owns milestones and tree structure. High-frequency telemetry
+ *   (stdout, percentages, elapsed time) is streamed out-of-band by the
+ *   relay CLI, which writes to the same state file. The agent never polls.
+ *
  * Tree-like dependencies (bootvine-inspired):
  *   Each progress entry may carry a `parentId`, linking it to a parent task.
- *   The server builds a dependency tree from flat entries and rolls up
- *   parent status/progress from children, so a GUI or TUI can render nested
- *   progress bars like:
+ *   Parent status/progress roll up from children so a GUI or TUI can render:
  *
  *     ├── build [██████░░░░] 6/10 · compiling SDL2
  *     │   └── link-lib [████░░░░░░] 4/10 · linking libSDL2.a
  *     └── npm-install [██████████] 10/10 · done ✓
  *
- * Usage:
+ * Dual-mode entrypoint (same binary, no extra daemon):
+ *   node mcp-server/index.js                    # MCP stdio server (default)
+ *   node mcp-server/index.js relay --id build-1 -- npm run build
+ *   node mcp-server/index.js emit --id build-1 --status running
+ *
+ * Usage as an MCP server:
  *   opencode mcp add progress-server -- /path/to/mcp-server/index.js
  */
 
-const { createServer } = require('http');
 const fs = require('fs');
 const path = require('path');
 
-// Shared state file for progress - read by the OpenCode plugin GUI
-const STATE_FILE = path.join(process.env.HOME || process.env.USERPROFILE || '/tmp', '.opencode-progress-state.json');
+const {
+  upsertProgress,
+  ensureStateFile,
+} = require('./state-store');
 
-// Ensure state file exists
-function ensureStateFile() {
-  try {
-    fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
-  } catch (e) {}
-  if (!fs.existsSync(STATE_FILE)) {
-    fs.writeFileSync(STATE_FILE, JSON.stringify({ entries: {}, version: 2 }, null, 2));
-  }
+const SERVER_VERSION = '2.0.0';
+const VALID_STATUSES = ['running', 'waiting', 'done', 'error'];
+
+const SERVER_INSTRUCTIONS = [
+  'The `progress` tool is fire-and-forget. Call it at task milestones only:',
+  'once when a phase starts (status "running"), once when a child task is',
+  'created (parentId), and once when a phase finishes ("done" or "error").',
+  'Never poll, sleep, or loop on terminal output to refresh elapsed time or',
+  'percentages. For long-running shell commands, use the out-of-band relay',
+  'printed in the tool response (for example `progress-relay --id <id> -- <cmd>`),',
+  'which updates the GUI at zero token cost. Pass parentId to build a tree;',
+  'parent status and progress roll up from children.',
+].join(' ');
+
+const TOOL_DESCRIPTION = [
+  'Report non-blocking task progress and dependency trees to the user\'s GUI. Fire-and-forget: never pauses execution or waits for human input.',
+  '',
+  'OWNERSHIP & ZERO-POLLING CONTRACT:',
+  '- You own TASK MILESTONES and TREE STRUCTURE: call this tool once when starting a phase (status: "running"), when creating child sub-tasks (parentId), and when a phase finishes (status: "done" | "error").',
+  '- NEVER poll, sleep, or loop on terminal output just to refresh progress percentages or elapsed time.',
+  '- For long-running shell commands, delegate live stdout/progress streaming to the out-of-band CLI relay (the exact command is returned in this tool\'s response, e.g. `progress-relay --id <id> -- <cmd>`) so the OS process updates the GUI directly without burning tokens.',
+  '',
+  'TREE ROLLUP (BOOTVINE SEMANTICS):',
+  '- Pass `parentId` to nest sub-tasks under a parent task.',
+  '- Parent status and progress automatically roll up from children (any child "error" -> parent "error"; any child "running"/"waiting" -> parent "running"/"waiting"; parent progress = mean of child progress).',
+].join('\n');
+
+// --- Shell / CLI helpers ---------------------------------------------------
+
+function shellQuote(value) {
+  const text = String(value);
+  if (/^[A-Za-z0-9._:@%+,\/-]+$/.test(text)) return text;
+  return `'${text.replace(/'/g, `'\\''`)}'`;
 }
 
-function readState() {
-  try {
-    return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
-  } catch (e) {
-    return { entries: {}, version: 2 };
-  }
+function fileQuote(value) {
+  const text = String(value);
+  return /^[A-Za-z0-9._:@%+,\/-]+$/.test(text) ? text : JSON.stringify(text);
 }
 
-function writeState(state) {
-  fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
-}
-
-// Status severity for roll-up: higher = "more active"/worse
-const STATUS_SEVERITY = {
-  error: 4,
-  running: 3,
-  waiting: 2,
-  done: 1,
-};
-
-function statusOrder(a, b) {
-  return STATUS_SEVERITY[b] - STATUS_SEVERITY[a];
-}
+let cachedRelayBin = null;
 
 /**
- * Build a dependency tree from flat entries.
- * Returns roots (entries with no parentId or whose parent is missing)
- * and a map of id -> { children: [...] }.
+ * Prefer the installed `progress-relay` bin. If it is not on PATH (common
+ * when the MCP server is run from a checkout), fall back to invoking this
+ * same file with the `relay` subcommand. Either form works in any shell.
  */
-function buildTree(entries) {
-  const byId = new Map(Object.entries(entries));
-  const childrenMap = new Map();
+function relayBin() {
+  if (process.env.PROGRESS_RELAY_CMD) return process.env.PROGRESS_RELAY_CMD;
+  if (cachedRelayBin !== null) return cachedRelayBin;
 
-  for (const [id, entry] of byId) {
-    childrenMap.set(id, []);
-  }
+  const names =
+    process.platform === 'win32'
+      ? ['progress-relay.cmd', 'progress-relay.exe', 'progress-relay']
+      : ['progress-relay'];
 
-  const roots = [];
-  for (const [id, entry] of byId) {
-    const parentId = entry.parentId;
-    if (parentId && byId.has(parentId)) {
-      childrenMap.get(parentId).push(id);
-    } else {
-      roots.push(id);
+  for (const dir of (process.env.PATH || '').split(path.delimiter).filter(Boolean)) {
+    for (const name of names) {
+      try {
+        fs.accessSync(path.join(dir, name), fs.constants.X_OK);
+        cachedRelayBin = 'progress-relay';
+        return cachedRelayBin;
+      } catch (e) {
+        // Keep looking.
+      }
     }
   }
 
-  // Sort children deterministically: most severe status first, then by updatedAt desc
-  for (const [id, childIds] of childrenMap) {
-    childIds.sort((a, b) => {
-      const ea = byId.get(a);
-      const eb = byId.get(b);
-      const s = statusOrder(ea.status, eb.status);
-      if (s !== 0) return s;
-      return (eb.updatedAt || 0) - (ea.updatedAt || 0);
-    });
-  }
-
-  // Sort roots similarly
-  roots.sort((a, b) => {
-    const ea = byId.get(a);
-    const eb = byId.get(b);
-    const s = statusOrder(ea.status, eb.status);
-    if (s !== 0) return s;
-    return (eb.updatedAt || 0) - (ea.updatedAt || 0);
-  });
-
-  return { byId, childrenMap, roots };
+  cachedRelayBin = `${fileQuote(process.execPath)} ${fileQuote(__filename)} relay`;
+  return cachedRelayBin;
 }
 
-/**
- * Recursively roll up a parent entry's status and progress from its children.
- * A parent with no explicit progress of its own derives it from children.
- */
-function rollUp(id, entries, childrenMap, cache = new Map()) {
-  if (cache.has(id)) return cache.get(id);
-  const entry = entries[id];
-  if (!entry) return null;
+function relayHint(id, parentId) {
+  const bin = relayBin();
+  const parent = parentId ? ` --parent ${shellQuote(parentId)}` : '';
+  const taskId = shellQuote(id);
 
-  const childIds = childrenMap.get(id) || [];
-  let result = { ...entry };
-
-  if (childIds.length > 0) {
-    const childResults = childIds.map((cid) => rollUp(cid, entries, childrenMap, cache));
-
-    // Parent status = most severe child status (unless parent has its own terminal status)
-    const childStatuses = childResults.map((r) => r.status);
-    if (childStatuses.includes('error')) {
-      result.status = 'error';
-    } else if (childStatuses.includes('running')) {
-      result.status = 'running';
-    } else if (childStatuses.includes('waiting')) {
-      result.status = 'waiting';
-    } else if (childStatuses.every((s) => s === 'done')) {
-      result.status = 'done';
-    }
-
-    // Parent progress = average of children that have a progress value
-    const childProgresses = childResults
-      .map((r) => r.progress)
-      .filter((p) => p != null);
-    if (childProgresses.length > 0 && entry.progress == null) {
-      result.progress =
-        childProgresses.reduce((a, b) => a + b, 0) / childProgresses.length;
-    }
-
-    // Use the most recent child updatedAt as the parent's updatedAt
-    const latestChild = childResults.reduce(
-      (latest, r) => (r.updatedAt > latest.updatedAt ? r : latest),
-      { updatedAt: 0 }
-    );
-    if (latestChild.updatedAt > (result.updatedAt || 0)) {
-      result.updatedAt = latestChild.updatedAt;
-    }
-
-    result.children = childResults;
-  }
-
-  cache.set(id, result);
-  return result;
+  return [
+    '',
+    'To stream live command output into this indicator without polling, use the out-of-band relay:',
+    `  ${bin} --id ${taskId}${parent} -- <cmd>`,
+    `  # or: <cmd> | ${bin} --id ${taskId}`,
+    'Do NOT poll, sleep, or re-call progress in a loop for elapsed time or percentages.',
+  ].join('\n');
 }
 
-/**
- * Get full tree with roll-ups applied.
- */
-function getTree(state) {
-  const entries = state.entries || {};
-  const { byId, childrenMap, roots } = buildTree(entries);
-
-  const tree = roots.map((id) => rollUp(id, entries, childrenMap));
-  return { tree, entries: byId, roots };
-}
-
-function upsertProgress(input) {
-  const state = readState();
-  const now = Date.now();
-  const entry = {
-    id: input.id,
-    status: input.status, // "running" | "done" | "error" | "waiting"
-    title: input.title,
-    detail: input.detail || null,
-    progress: input.progress || null, // 0-1
-    parentId: input.parentId || null, // optional tree link
-    updatedAt: now,
-    createdAt: state.entries[input.id]?.createdAt || now,
-  };
-  state.entries[input.id] = entry;
-
-  // Clean up old completed entries (older than 10 minutes)
-  const cutoff = now - 10 * 60 * 1000;
-  for (const [id, e] of Object.entries(state.entries)) {
-    if ((e.status === 'done' || e.status === 'error') && e.updatedAt < cutoff) {
-      delete state.entries[id];
-    }
-  }
-  writeState(state);
-  return entry;
-}
-
-function clearProgress(id) {
-  const state = readState();
-  delete state.entries[id];
-  writeState(state);
-}
-
-function getAllProgress() {
-  return readState();
-}
-
-// --- MCP Protocol Implementation (stdio-based) ---
+// --- MCP protocol ----------------------------------------------------------
 
 function send(obj) {
-  const json = JSON.stringify(obj);
-  process.stdout.write(json + '\n');
+  process.stdout.write(JSON.stringify(obj) + '\n');
 }
 
 function sendResponse(id, result) {
@@ -221,8 +138,141 @@ function sendError(id, code, message, data) {
   send({ jsonrpc: '2.0', id, error: { code, message, data } });
 }
 
-function sendNotification(method, params) {
-  send({ jsonrpc: '2.0', method, params });
+function toolOk(id, text) {
+  sendResponse(id, {
+    content: [{ type: 'text', text }],
+    isError: false,
+  });
+}
+
+function toolError(id, text) {
+  sendResponse(id, {
+    content: [{ type: 'text', text }],
+    isError: true,
+  });
+}
+
+function handleToolsList(id) {
+  sendResponse(id, {
+    tools: [
+      {
+        name: 'progress',
+        description: TOOL_DESCRIPTION,
+        inputSchema: {
+          type: 'object',
+          properties: {
+            id: {
+              type: 'string',
+              description:
+                'Stable task ID; re-using an ID updates the indicator in place.',
+            },
+            status: {
+              type: 'string',
+              enum: VALID_STATUSES,
+              description: 'Current lifecycle status of the task.',
+            },
+            title: {
+              type: 'string',
+              description: 'Short human-readable task label.',
+            },
+            detail: {
+              type: 'string',
+              description: 'Optional status detail or latest step context.',
+            },
+            progress: {
+              type: 'number',
+              minimum: 0,
+              maximum: 1,
+              description: 'Optional completion fraction (0.0 to 1.0).',
+            },
+            parentId: {
+              type: 'string',
+              description:
+                'Optional parent task ID to nest this task in a dependency tree.',
+            },
+          },
+          required: ['id', 'status', 'title'],
+          additionalProperties: false,
+        },
+        annotations: {
+          title: 'Progress',
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+      },
+    ],
+  });
+}
+
+function handleProgressCall(id, args) {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) {
+    toolError(id, 'Invalid arguments: expected an object.');
+    return;
+  }
+
+  const {
+    id: progressId,
+    status,
+    title,
+    detail,
+    progress,
+    parentId,
+  } = args;
+
+  if (!progressId || typeof progressId !== 'string') {
+    toolError(id, 'Missing required argument: id (string).');
+    return;
+  }
+  if (!status || !VALID_STATUSES.includes(status)) {
+    toolError(id, `Missing or invalid argument: status (${VALID_STATUSES.join('|')}).`);
+    return;
+  }
+  if (!title || typeof title !== 'string') {
+    toolError(id, 'Missing required argument: title (string).');
+    return;
+  }
+  if (detail !== undefined && detail !== null && typeof detail !== 'string') {
+    toolError(id, 'Invalid argument: detail must be a string.');
+    return;
+  }
+  if (parentId !== undefined && parentId !== null && typeof parentId !== 'string') {
+    toolError(id, 'Invalid argument: parentId must be a string.');
+    return;
+  }
+  if (
+    progress !== undefined &&
+    progress !== null &&
+    (typeof progress !== 'number' ||
+      !Number.isFinite(progress) ||
+      progress < 0 ||
+      progress > 1)
+  ) {
+    toolError(id, 'Invalid argument: progress must be a number between 0 and 1.');
+    return;
+  }
+
+  const entry = upsertProgress({
+    id: progressId,
+    status,
+    title,
+    detail: detail === undefined ? undefined : detail,
+    progress: progress === undefined ? undefined : progress,
+    parentId: parentId === '' ? null : parentId,
+  });
+
+  const parts = [`Recorded progress [${entry.id}] (${entry.status})`, entry.title];
+  if (entry.detail) parts.push(entry.detail);
+  if (entry.progress != null) parts.push(`${Math.round(entry.progress * 100)}%`);
+  if (entry.parentId) parts.push(`parent=${entry.parentId}`);
+
+  let text = parts.join(' - ');
+  if (entry.status === 'running') {
+    text += relayHint(entry.id, entry.parentId);
+  }
+
+  toolOk(id, text);
 }
 
 function handleRequest(req) {
@@ -240,62 +290,26 @@ function handleRequest(req) {
           },
           serverInfo: {
             name: 'progress-mcp-server',
-            version: '2.0.0',
+            version: SERVER_VERSION,
           },
+          instructions: SERVER_INSTRUCTIONS,
         });
         break;
       }
 
-      case 'initialized': {
-        // Notification, no response needed
+      case 'initialized':
+      case 'notifications/initialized': {
+        // Notification, no response needed.
+        break;
+      }
+
+      case 'ping': {
+        sendResponse(id, {});
         break;
       }
 
       case 'tools/list': {
-        sendResponse(id, {
-          tools: [
-            {
-              name: 'progress',
-              description:
-                'Signal long-running work without blocking. Fire-and-forget progress updates that appear in the OpenCode desktop GUI. Same id updates in place. Never requires a human reply. Optionally pass `parentId` to nest this task under a parent (bootvine-style dependency tree).',
-              inputSchema: {
-                type: 'object',
-                properties: {
-                  id: {
-                    type: 'string',
-                    description: 'Stable id to update or clear a progress entry in place',
-                  },
-                  status: {
-                    type: 'string',
-                    enum: ['running', 'done', 'error', 'waiting'],
-                    description: 'Current status of the work',
-                  },
-                  title: {
-                    type: 'string',
-                    description: 'Short title shown in the progress indicator',
-                  },
-                  detail: {
-                    type: 'string',
-                    description: 'Optional detail text (e.g., elapsed time, current step)',
-                  },
-                  progress: {
-                    type: 'number',
-                    minimum: 0,
-                    maximum: 1,
-                    description: 'Optional progress fraction (0-1)',
-                  },
-                  parentId: {
-                    type: 'string',
-                    description:
-                      'Optional id of a parent task this entry nests under, forming a tree (bootvine-style dependency tree)',
-                  },
-                },
-                required: ['id', 'status', 'title'],
-                additionalProperties: false,
-              },
-            },
-          ],
-        });
+        handleToolsList(id);
         break;
       }
 
@@ -305,75 +319,121 @@ function handleRequest(req) {
           sendError(id, -32601, `Unknown tool: ${name}`);
           break;
         }
-
-        if (!args || typeof args !== 'object') {
-          sendError(id, -32602, 'Invalid arguments: expected an object');
-          break;
-        }
-
-        const { id: progressId, status, title, detail, progress, parentId } = args;
-
-        if (!progressId || typeof progressId !== 'string') {
-          sendError(id, -32602, 'Missing required argument: id (string)');
-          break;
-        }
-        if (!status || !['running', 'done', 'error', 'waiting'].includes(status)) {
-          sendError(id, -32602, 'Missing or invalid argument: status (running|done|error|waiting)');
-          break;
-        }
-        if (!title || typeof title !== 'string') {
-          sendError(id, -32602, 'Missing required argument: title (string)');
-          break;
-        }
-        if (parentId !== undefined && parentId !== null && typeof parentId !== 'string') {
-          sendError(id, -32602, 'Invalid argument: parentId must be a string');
-          break;
-        }
-
-        ensureStateFile();
-        upsertProgress({ id: progressId, status, title, detail, progress, parentId });
-
-        sendResponse(id, {
-          content: [
-            {
-              type: 'text',
-              text: `Progress recorded: ${title} (${status})${detail ? ` - ${detail}` : ''}${progress !== undefined ? ` [${Math.round(progress * 100)}%]` : ''}${parentId ? ` ← ${parentId}` : ''}`,
-            },
-          ],
-        });
+        handleProgressCall(id, args);
         break;
       }
 
-      default:
-        sendError(id, -32601, `Unknown method: ${method}`);
+      case 'shutdown': {
+        sendResponse(id, null);
+        break;
+      }
+
+      case 'exit': {
+        process.exit(0);
+        break;
+      }
+
+      default: {
+        // Notifications have no id; never reply to them.
+        if (id !== undefined && id !== null) {
+          sendError(id, -32601, `Unknown method: ${method}`);
+        }
+        break;
+      }
     }
   } catch (err) {
-    sendError(id, -32603, 'Internal error', String(err.message));
+    if (id !== undefined && id !== null) {
+      sendError(id, -32603, 'Internal error', String(err && err.message ? err.message : err));
+    }
   }
 }
 
-// Read JSON-RPC messages from stdin line by line
-let buffer = '';
+function startMcpServer() {
+  ensureStateFile();
 
-process.stdin.on('data', (chunk) => {
-  buffer += chunk.toString();
-  let idx;
-  while ((idx = buffer.indexOf('\n')) !== -1) {
-    const line = buffer.slice(0, idx).trim();
-    buffer = buffer.slice(idx + 1);
-    if (!line) continue;
-    try {
-      const req = JSON.parse(line);
-      handleRequest(req);
-    } catch (e) {
-      // Ignore parse errors
+  let buffer = '';
+
+  process.stdin.on('data', (chunk) => {
+    buffer += chunk.toString();
+    let idx;
+    while ((idx = buffer.indexOf('\n')) !== -1) {
+      const line = buffer.slice(0, idx).trim();
+      buffer = buffer.slice(idx + 1);
+      if (!line) continue;
+      try {
+        handleRequest(JSON.parse(line));
+      } catch (e) {
+        // Ignore malformed JSON-RPC lines.
+      }
     }
+  });
+
+  process.stdin.on('end', () => {
+    // Let pending stdout writes drain naturally instead of truncating the
+    // final tool response during a client restart.
+    process.exitCode = 0;
+  });
+
+  // A closed stdout (client restart) should not crash the server.
+  process.stdout.on('error', (err) => {
+    if (err && err.code === 'EPIPE') process.exit(0);
+  });
+}
+
+// --- Entrypoint ------------------------------------------------------------
+
+function printHelp() {
+  process.stdout.write(
+    [
+      'progress-mcp-server ' + SERVER_VERSION,
+      '',
+      'MCP server and out-of-band relay for the `progress` tool.',
+      '',
+      'Usage:',
+      '  node index.js                         Start the MCP stdio server',
+      '  node index.js relay --id <id> [--] <cmd...>',
+      '                                        Stream command output to state',
+      '  node index.js emit --id <id> [--status ...]',
+      '                                        Emit one milestone',
+      '  node index.js --version               Print version',
+      '',
+      'Relay options: relay --help',
+      '',
+    ].join('\n')
+  );
+}
+
+function main() {
+  const argv = process.argv.slice(2);
+  const command = argv[0];
+  const invokedAs = path.basename(process.argv[1] || '').replace(/\.(js|cjs)$/i, '');
+
+  if (command === 'relay' || command === 'emit') {
+    require('./relay').main(argv.slice(1), command);
+    return;
   }
-});
 
-process.stdin.on('end', () => {
-  process.exit(0);
-});
+  if (!command && /relay/i.test(invokedAs)) {
+    require('./relay').main(argv, 'relay');
+    return;
+  }
 
-// Initialize state file on startup
-ensureStateFile();
+  if (!command && /emit/i.test(invokedAs)) {
+    require('./relay').main(argv, 'emit');
+    return;
+  }
+
+  if (command === '--help' || command === '-h' || command === 'help') {
+    printHelp();
+    return;
+  }
+
+  if (command === '--version' || command === '-v') {
+    process.stdout.write(SERVER_VERSION + '\n');
+    return;
+  }
+
+  startMcpServer();
+}
+
+main();

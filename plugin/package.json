@@ -1,7 +1,7 @@
 {
   "name": "opencode-progress-plugin",
-  "version": "1.0.0",
-  "description": "OpenCode plugin: desktop GUI for agent progress indicators (progress tool)",
+  "version": "1.1.0",
+  "description": "OpenCode plugin: desktop GUI for agent progress indicators (progress tool + out-of-band relay)",
   "main": "index.js",
   "type": "commonjs",
   "engines": {

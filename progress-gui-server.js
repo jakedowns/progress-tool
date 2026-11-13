@@ -106,7 +106,7 @@ const HTML = `<!DOCTYPE html>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-    background: transparent;
+    background: #ffffff;
     overflow: hidden;
   }
   #progress-container {
@@ -124,28 +124,25 @@ const HTML = `<!DOCTYPE html>
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 8px 12px;
-    padding-left: 12px;
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.92);
-    border: 1px solid rgba(0, 0, 0, 0.08);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
-    margin-bottom: 6px;
+    padding: 10px 14px;
+    border-radius: 10px;
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.08);
+    margin-bottom: 8px;
     font-size: 13px;
     pointer-events: auto;
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
     animation: slideIn 0.25s ease-out;
   }
   .progress-item.child {
-    background: transparent;
+    background: #f9fafb;
     box-shadow: none;
-    border: none;
-    padding-left: 28px;
-    opacity: 0.9;
+    border: 1px solid #e5e7eb;
+    padding-left: 32px;
+    margin-left: 8px;
   }
   @keyframes slideIn {
-    from { opacity: 0; transform: translateY(-8px); }
+    from { opacity: 0; transform: translateY(-10px); }
     to { opacity: 1; transform: translateY(0); }
   }
   .dot {
@@ -153,68 +150,65 @@ const HTML = `<!DOCTYPE html>
     height: 10px;
     border-radius: 50%;
     flex-shrink: 0;
+    border: 1px solid rgba(0,0,0,0.1);
   }
-  .dot.running { background: #3b82f6; animation: pulse 2s infinite ease-in-out; }
-  .dot.waiting { background: #f59e0b; animation: pulse 2s infinite ease-in-out; }
-  .dot.done { background: #10b981; }
-  .dot.error { background: #ef4444; }
+  .dot.running { background: #2563eb; animation: pulse 2s infinite ease-in-out; box-shadow: 0 0 8px rgba(37, 99, 235, 0.4); }
+  .dot.waiting { background: #d97706; animation: pulse 2s infinite ease-in-out; box-shadow: 0 0 8px rgba(217, 119, 6, 0.4); }
+  .dot.done { background: #059669; box-shadow: 0 0 8px rgba(5, 150, 105, 0.4); }
+  .dot.error { background: #dc2626; box-shadow: 0 0 8px rgba(220, 38, 38, 0.4); }
   @keyframes pulse {
     0%, 100% { opacity: 1; transform: scale(1); }
     50% { opacity: 0.6; transform: scale(1.15); }
   }
   .content { flex: 1; min-width: 0; }
   .title {
-    font-weight: 600;
+    font-weight: 700;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     color: #111827;
+    font-size: 13px;
   }
-  .title.child { font-weight: 500; opacity: 0.9; }
+  .title.child { font-weight: 600; color: #374151; font-size: 12.5px; }
   .detail {
     font-size: 11px;
-    opacity: 0.7;
+    opacity: 0.8;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     color: #6b7280;
-    margin-top: 2px;
+    margin-top: 3px;
   }
-  .detail.child { opacity: 0.6; }
-  .detail-elapsed {
-    font-size: 11px;
-    opacity: 0.5;
-    color: #6b7280;
-    margin-top: 2px;
-  }
+  .detail.child { opacity: 0.7; color: #6b7280; }
   .progress-pct {
     width: 44px;
     text-align: right;
     font-size: 11px;
-    font-weight: 700;
+    font-weight: 800;
     flex-shrink: 0;
   }
   .close-btn {
-    width: 20px;
-    height: 20px;
+    width: 22px;
+    height: 22px;
     border-radius: 50%;
-    border: none;
-    background: transparent;
-    color: #9ca3af;
+    border: 1px solid #e5e7eb;
+    background: #f3f4f6;
+    color: #6b7280;
     cursor: pointer;
     flex-shrink: 0;
     display: flex;
     align-items: center;
     justify-content: center;
   }
-  .close-btn:hover { background: #f3f4f6; color: #ef4444; }
-  .close-btn:before { content: "\\times"; font-size: 16px; line-height: 1; }
+  .close-btn:hover { background: #e5e7eb; color: #dc2626; border-color: #dc2626; }
+  .close-btn:before { content: "\\times"; font-size: 14px; line-height: 1; }
   .tree-line {
     font-family: monospace;
     font-size: 13px;
-    color: #6b7280;
+    color: #9ca3af;
     flex-shrink: 0;
     user-select: none;
+    margin-right: 4px;
   }
   .empty {
     position: fixed;
@@ -224,17 +218,36 @@ const HTML = `<!DOCTYPE html>
     font-size: 12px;
     color: #9ca3af;
     pointer-events: none;
+    background: #ffffff;
+    padding: 6px 10px;
+    border-radius: 6px;
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
   }
   @media (prefers-color-scheme: dark) {
+    body { background: #0f172a; }
     .progress-item {
-      background: rgba(17, 24, 39, 0.92);
-      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: #1f2937;
+      border: 1px solid #374151;
       color: #f9fafb;
     }
+    .progress-item.child {
+      background: #111827;
+      border: 1px solid #374151;
+    }
+    .dot { border: 1px solid rgba(255,255,255,0.2); }
     .title { color: #f9fafb; }
+    .title.child { color: #d1d5db; }
     .detail { color: #9ca3af; }
-    .close-btn { color: #6b7280; }
-    .close-btn:hover { background: rgba(255,255,255,0.1); }
+    .detail.child { color: #6b7280; }
+    .close-btn { background: #374151; border-color: #4b5563; color: #9ca3af; }
+    .close-btn:hover { background: #4b5563; border-color: #ef4444; color: #ef4444; }
+    .tree-line { color: #4b5563; }
+    .empty {
+      background: #1f2937;
+      border: 1px solid #374151;
+      color: #9ca3af;
+    }
   }
 </style>
 </head>
@@ -351,6 +364,16 @@ function render() {
   header.innerHTML = \`<div style="font-size:11px;opacity:0.7;color:#6b7280;">Active: \${activeCount} / \${totalCount}</div>\`;
   container.appendChild(header);
 
+  function elapsedLabel(node) {
+    const terminal = node.status === 'done' || node.status === 'error';
+    const base = terminal
+      ? node.updatedAt || node.startedAt || node.createdAt
+      : node.startedAt || node.createdAt || node.updatedAt;
+    if (!base) return '';
+    const secs = Math.max(0, Math.round((Date.now() - base) / 1000));
+    return terminal ? secs + 's ago' : secs + 's';
+  }
+
   function renderNode(node, depth, isLast, prefix) {
     const config = {
       running: { color: '#3b82f6', pulse: true },
@@ -360,9 +383,7 @@ function render() {
     }[node.status];
 
     const pct = node.progress != null ? Math.round(node.progress * 100) : null;
-    const elapsed = node.updatedAt
-      ? Math.max(0, Math.round((Date.now() - node.updatedAt) / 1000)) + 's ago'
-      : '';
+    const elapsed = elapsedLabel(node);
 
     const connector = isLast ? '└── ' : '├── ';
     const lineEl = document.createElement('div');
@@ -371,11 +392,6 @@ function render() {
 
     const item = document.createElement('div');
     item.className = 'progress-item' + (depth > 0 ? ' child' : '');
-    item.style.opacity = depth > 0 ? '0.9' : '1';
-    item.style.paddingLeft = depth > 0 ? (14 + depth * 16) + 'px' : '12px';
-    item.style.background = depth > 0 ? 'transparent' : 'rgba(255,255,255,0.92)';
-    item.style.boxShadow = depth === 0 ? '0 4px 12px rgba(0,0,0,0.12)' : 'none';
-    item.style.border = depth === 0 ? '1px solid rgba(0,0,0,0.08)' : 'none';
 
     const dot = document.createElement('div');
     dot.className = 'dot ' + node.status;
@@ -438,7 +454,7 @@ function escapeHtml(text) {
 }
 
 fetchState();
-setInterval(fetchState, 2000);
+setInterval(fetchState, 1000);
 window.addEventListener('focus', fetchState);
 </script>
 </body>
@@ -466,6 +482,19 @@ const server = http.createServer((req, res) => {
   if (url.pathname === '/api/progress') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(readState()));
+    return;
+  }
+
+  if (url.pathname === '/status-shim.js') {
+    try {
+      const shimPath = path.join(__dirname, 'plugin', 'status-shim.js');
+      const code = fs.readFileSync(shimPath, 'utf8');
+      res.writeHead(200, { 'Content-Type': 'application/javascript; charset=utf-8' });
+      res.end(code);
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'text/plain' });
+      res.end('status-shim.js not found: ' + String(e && e.message));
+    }
     return;
   }
 

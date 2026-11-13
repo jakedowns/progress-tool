@@ -1,11 +1,23 @@
 {
   "name": "progress-mcp-server",
-  "version": "1.0.0",
-  "description": "MCP server exposing the progress tool for OpenCode agents",
+  "version": "2.0.0",
+  "description": "MCP server and zero-token-burn out-of-band relay for agent progress reporting",
   "main": "index.js",
   "type": "commonjs",
   "bin": {
-    "progress-mcp-server": "index.js"
+    "progress-mcp-server": "index.js",
+    "progress-relay": "progress-relay.js",
+    "progress-emit": "progress-emit.js"
+  },
+  "files": [
+    "index.js",
+    "state-store.js",
+    "relay.js",
+    "progress-relay.js",
+    "progress-emit.js"
+  ],
+  "scripts": {
+    "test": "node --test test/smoke.test.js"
   },
   "engines": {
     "node": ">=18"

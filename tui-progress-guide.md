@@ -4,6 +4,24 @@ Text-based twin of the [Agent Progress Tool proposal](https://gist.github.com/ja
 
 When there's no desktop GUI or web UI, the agent still needs a way to say *"I'm not stuck, I'm just waiting on this long-running async thing"*. This guide shows how to render that as ASCII progress bars in a terminal, using the same `id`/`status`/`title`/`detail`/`progress` API shape.
 
+The same [zero-token-burn contract](./docs/out-of-band-relay-spec.md) applies: the agent reports milestones, and an out-of-band relay streams terminal output into the shared state file. The TUI polls the file; the **agent** does not poll the terminal.
+
+---
+
+## The zero-token-burn rule
+
+A text harness has exactly the same failure mode as a GUI harness: if the model is the only thing refreshing the display, it will `sleep`, read `stdout`, and call `progress` in a loop, burning tokens for the entire duration of the task.
+
+Split the work instead:
+
+| Plane | Owner | What it does |
+|-------|-------|--------------|
+| Control | Agent | Calls `progress` once per milestone (`running`, `waiting`, `done`, `error`) |
+| Data | `progress-relay` | Streams stdout/stderr into the state file at up to 4 writes/sec, at zero model token cost |
+| View | TUI | Polls the state file and redraws the tree |
+
+The agent **must not** call `progress` on a timer, after every output line, or solely to refresh elapsed time. If the relay is unavailable, the agent still reports start/end boundaries; the TUI derives elapsed time from `startedAt`.
+
 ---
 
 ## Common API Shape
@@ -26,6 +44,54 @@ Rules:
 - **Never requires a human reply**
 - **Text harness renders it** as an ASCII progress bar in the terminal
 - **Tree-like dependencies** — pass `parentId` to nest a task under a parent; the TUI renders it indented (bootvine-inspired)
+
+---
+
+## Data plane: the relay for text harnesses
+
+Any shell can use the relay. It writes to the same state file the TUI reads.
+
+### Wrap a command (recommended: captures exit status)
+
+```bash
+progress-relay --id sdl2-compile --title "compiling SDL2" -- make -j8
+```
+
+The relay:
+
+- tees stdout/stderr to the terminal (so the harness still sees the full output),
+- keeps the latest non-empty line as `detail`,
+- parses `45%` and `6/10` into `progress`,
+- marks the task `done` on exit `0`, or `error` with the exit code otherwise.
+
+### Pipe a command
+
+```bash
+make -j8 | progress-relay --id sdl2-compile
+```
+
+Pipe mode marks the task `done` when stdin closes. It cannot see the upstream exit code, so prefer wrap mode when failure detection matters.
+
+### One-shot milestones
+
+For scripts that already know when a milestone happens:
+
+```bash
+progress-emit --id db-migration --status running --title "waiting on database migration"
+./migrate.sh
+progress-emit --id db-migration --status done --progress 100%
+```
+
+### Fallback if the bin is not installed
+
+```bash
+node /path/to/mcp-server/index.js relay --id sdl2-compile -- make -j8
+node /path/to/mcp-server/index.js emit --id db-migration --status running
+```
+
+### TUI loop
+
+The TUI should read the state file on its own interval (for example, 1 second), apply tree roll-up, and redraw. It should not ask the agent for updates. A relay tick keeps `updatedAt` fresh; a completed task keeps its final state until the retention window expires.
 
 ---
 
@@ -149,7 +215,7 @@ def render_tree(nodes, prefix="", is_last=True):
 
 ## Example Tool Call JSON Payload
 
-For a batch of 6/10 tasks in flight, the agent emits `progress` tool calls like these:
+For a batch of 6/10 tasks in flight, the agent emits `progress` tool calls like these. These are milestone snapshots, not a polling loop; live percentages and log lines come from the relay.
 
 ### Task 1 — compiling SDL2 (60%)
 
@@ -232,7 +298,7 @@ agent:
 
 ## Persistence (optional)
 
-If your text harness wants to survive across turns without re-sending all entries, write state to a shared file (e.g. `~/.opencode-progress-state.json`) matching the GUI plugin's format:
+If your text harness wants to survive across turns without re-sending all entries, write state to a shared file (e.g. `~/.opencode-progress-state.json`) matching the GUI plugin's format. Include `startedAt` so the TUI can show true elapsed time even when no relay tick is writing `updatedAt` every second:
 
 ```json
 {
@@ -244,8 +310,9 @@ If your text harness wants to survive across turns without re-sending all entrie
       "detail": "compiling source",
       "progress": 0.60,
       "parentId": null,
-      "updatedAt": 1794559267388,
-      "createdAt": 1794559267388
+      "startedAt": 1794559267388,
+      "createdAt": 1794559267388,
+      "updatedAt": 1794559267388
     },
     "link-lib": {
       "id": "link-lib",
@@ -254,15 +321,16 @@ If your text harness wants to survive across turns without re-sending all entrie
       "detail": "ld -o libSDL2.a ...",
       "progress": 0.40,
       "parentId": "build",
-      "updatedAt": 1794559267388,
-      "createdAt": 1794559267388
+      "startedAt": 1794559267388,
+      "createdAt": 1794559267388,
+      "updatedAt": 1794559267388
     }
   },
   "version": 2
 }
 ```
 
-A TUI renderer can poll that file and redraw the tree on each tick.
+Writers should use an atomic temp-file + rename (and a lock for read-modify-write) so a relay tick and an agent milestone cannot corrupt the document. A TUI renderer can poll that file on its own interval and redraw the tree; the agent never polls the terminal. See [`docs/out-of-band-relay-spec.md`](./docs/out-of-band-relay-spec.md) for the full contract and conformance checklist.
 
 ---
 

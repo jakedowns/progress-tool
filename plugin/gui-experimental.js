@@ -90,12 +90,20 @@ function buildTree(entries) {
   return roots.map(buildNode).filter(Boolean);
 }
 
+function elapsedLabel(entry) {
+  const terminal = entry.status === 'done' || entry.status === 'error';
+  const base = terminal
+    ? entry.updatedAt || entry.startedAt || entry.createdAt
+    : entry.startedAt || entry.createdAt || entry.updatedAt;
+  if (!base) return '';
+  const secs = Math.max(0, Math.round((Date.now() - base) / 1000));
+  return terminal ? secs + 's ago' : secs + 's';
+}
+
 function ProgressIndicator({ entry, depth, isLast, prefix }) {
   const config = STATUS_CONFIG[entry.status] || STATUS_CONFIG.running;
   const pct = entry.progress != null ? Math.round(entry.progress * 100) : null;
-  const elapsed = entry.updatedAt
-    ? Math.round((Date.now() - entry.updatedAt) / 1000) + 's ago'
-    : '';
+  const elapsed = elapsedLabel(entry);
 
   // Tree-drawing characters (bootvine-inspired)
   const connector = isLast ? '└── ' : '├── ';
@@ -110,52 +118,48 @@ function ProgressIndicator({ entry, depth, isLast, prefix }) {
     flexShrink: 0,
   };
 
-  // Slightly dim child entries
-  const opacity = depth > 0 ? 0.85 : 1;
-
   const itemStyle = {
     display: 'flex',
     alignItems: 'center',
     gap: '8px',
-    padding: depth > 0 ? '6px 10px' : '8px 12px',
-    paddingLeft: depth > 0 ? 14 + depth * 16 : 12,
-    borderRadius: '8px',
-    background: depth > 0 ? 'transparent' : 'var(--v2-panel-bg, #ffffff)',
-    border: `1px solid ${config.color}30`,
+    padding: depth > 0 ? '8px 12px' : '10px 14px',
+    paddingLeft: depth > 0 ? 32 : 14,
+    borderRadius: '10px',
+    background: depth > 0 ? '#f9fafb' : '#ffffff',
+    border: '1px solid #e5e7eb',
     boxShadow:
-      depth === 0 ? '0 4px 12px rgba(0,0,0,0.1)' : 'none',
-    marginBottom: '6px',
+      depth === 0 ? '0 4px 16px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.08)' : 'none',
+    marginBottom: '8px',
     fontSize: '13px',
     pointerEvents: 'auto',
-    backdropFilter: depth === 0 ? 'blur(8px)' : 'none',
-    opacity,
+    opacity: depth > 0 ? 0.95 : 1,
   };
 
   const contentStyle = { flex: 1, minWidth: 0 };
 
   const titleStyle = {
-    fontWeight: depth === 0 ? 600 : 500,
+    fontWeight: depth === 0 ? 700 : 600,
     whiteSpace: 'nowrap',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
-    color: 'var(--v2-fg-fg-deep, #111)',
-    opacity: depth > 0 ? 0.9 : 1,
+    color: depth === 0 ? '#111827' : '#374151',
+    fontSize: depth === 0 ? '13px' : '12.5px',
   };
 
   const detailStyle = {
     fontSize: '11px',
-    opacity: depth > 0 ? 0.6 : 0.7,
+    opacity: depth > 0 ? 0.7 : 0.8,
     whiteSpace: 'nowrap',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
-    color: 'var(--v2-fg-fg-muted, #666)',
-    marginTop: '2px',
+    color: '#6b7280',
+    marginTop: '3px',
   };
 
   const detailElapsedStyle = {
     fontSize: '11px',
-    opacity: depth > 0 ? 0.4 : 0.5,
-    color: 'var(--v2-fg-fg-muted, #666)',
+    opacity: depth > 0 ? 0.5 : 0.6,
+    color: '#6b7280',
     marginTop: '2px',
   };
 
@@ -163,7 +167,7 @@ function ProgressIndicator({ entry, depth, isLast, prefix }) {
     width: '44px',
     textAlign: 'right',
     fontSize: '11px',
-    fontWeight: 600,
+    fontWeight: 800,
     color: config.color,
     flexShrink: 0,
   };
@@ -245,6 +249,21 @@ function setup(context) {
         @keyframes oc-slide-in {
           from { opacity: 0; transform: translateY(-8px); }
           to { opacity: 1; transform: translateY(0); }
+        }
+        @media (prefers-color-scheme: dark) {
+          .oc-progress-item {
+            background: #1f2937 !important;
+            border: 1px solid #374151 !important;
+            color: #f9fafb !important;
+          }
+          .oc-progress-item.child {
+            background: #111827 !important;
+            border: 1px solid #374151 !important;
+          }
+          .oc-progress-item .title { color: #f9fafb !important; }
+          .oc-progress-item .title.child { color: #d1d5db !important; }
+          .oc-progress-item .detail { color: #9ca3af !important; }
+          .oc-progress-item .detail.child { color: #6b7280 !important; }
         }
       `;
       document.head.appendChild(style);

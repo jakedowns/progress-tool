@@ -40,9 +40,18 @@ echo "=== Setup complete! ==="
 echo ""
 echo "The \`progress\` tool is now available to agents via MCP."
 echo ""
-echo "Next step - install the desktop GUI:"
+echo "Next step - make the out-of-band relay available (recommended):"
+echo "  cd \"$SCRIPT_DIR/mcp-server\" && npm link"
+echo "  # exposes: progress-relay, progress-emit"
+echo ""
+echo "Or use the MCP server binary directly:"
+echo "  node \"$MCP_SERVER\" relay --id build-1 -- <command>"
+echo ""
+echo "Then install the desktop GUI:"
 echo "  Option A (plugin): Publish plugin/ to npm, then: opencode plugin add opencode-progress-plugin"
 echo "  Option B (standalone): Run ./launch-gui.sh and open http://localhost:8765"
 echo ""
 echo "Example usage from an agent:"
-echo '  progress({ id: "build-1", status: "running", title: "Building", progress: 0.5 })'
+echo '  progress({ id: "build-1", status: "running", title: "Building" })'
+echo '  # then, instead of polling:'
+echo '  progress-relay --id build-1 --title "Building" -- npm run build'
