@@ -1,0 +1,13 @@
+{
+  "name": "progress-mcp-server",
+  "version": "1.0.0",
+  "description": "MCP server exposing the progress tool for OpenCode agents",
+  "main": "index.js",
+  "type": "commonjs",
+  "bin": {
+    "progress-mcp-server": "index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

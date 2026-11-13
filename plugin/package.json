@@ -1,0 +1,20 @@
+{
+  "name": "opencode-progress-plugin",
+  "version": "1.0.0",
+  "description": "OpenCode plugin: desktop GUI for agent progress indicators (progress tool)",
+  "main": "index.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "preact": "^10.0.0"
+  },
+  "opencode": {
+    "features": {
+      "gui": true,
+      "server": true,
+      "rpc": true
+    }
+  }
+}
