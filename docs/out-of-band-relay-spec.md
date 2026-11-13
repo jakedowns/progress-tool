@@ -235,9 +235,10 @@ Validation requirements:
 When `status === "running"`, the response MUST include an actionable relay hint. The hint MUST contain:
 
 1. The task `id`.
-2. A wrap form: `<relay> --id <id> [--parent <parentId>] -- <cmd>`.
-3. A pipe form: `<cmd> | <relay> --id <id>`.
+2. A wrap form: `<relay> --id <id> [--parent <parentId>] [--session <sessionId>] -- <cmd>`.
+3. A pipe form: `<cmd> | <relay> --id <id> [--session <sessionId>]`.
 4. An explicit instruction not to poll, sleep, or re-call progress for elapsed time or percentages.
+5. When a session scope is active, a reminder that sessions are isolated automatically so the agent keeps task IDs clean.
 
 Example:
 
@@ -264,6 +265,7 @@ The tool description MUST explain:
 - That polling is forbidden.
 - That long-running commands should use the relay.
 - How tree roll-up works.
+- That concurrent sessions are isolated automatically via `OPENCODE_SESSION_ID` / `PROGRESS_SESSION_ID` (or `sessionId`), so task IDs stay clean.
 
 See the drop-in definition in `README.md`.
 
@@ -317,6 +319,7 @@ node mcp-server/index.js emit --id build-1 --status running
 | `--detail` | no | Initial detail line |
 | `--progress` | no | `0..1`, `45%`, or `6/10` |
 | `--status` | no | Initial status, default `running` |
+| `--session` | no | Session scope; falls back to `PROGRESS_SESSION_ID`, then `OPENCODE_SESSION_ID` |
 | `--max-hz` | no | Max writes/sec, default `4`; `0` means unlimited |
 | `--quiet` / `--no-tee` | no | Do not echo wrapped output |
 | `--state-path` | no | State file override |
@@ -371,7 +374,7 @@ The relay SHOULD forward `SIGINT`, `SIGTERM`, and `SIGHUP` to the wrapped child.
 
 ### 6.8 Field preservation
 
-When starting, the relay MUST look up the existing entry and preserve `title`, `parentId`, `detail`, and `progress` unless the caller explicitly overrides them. This allows this sequence:
+When starting, the relay MUST look up the existing entry in the resolved session namespace and preserve `title`, `parentId`, `detail`, and `progress` unless the caller explicitly overrides them. This allows this sequence:
 
 ```text
 Agent:  progress({ id: "build-1", status: "running", title: "Build", parentId: "root" })
@@ -488,6 +491,9 @@ An implementation is conformant if it satisfies all of the following.
 - [ ] `progress: 0` survives a round trip.
 - [ ] Unknown fields are preserved or ignored without error.
 - [ ] Completed entries are eventually pruned.
+- [ ] Session-scoped entries use `<sessionId>:<id>` keys without collisions.
+- [ ] Parent roll-up does not cross session boundaries.
+- [ ] Unscoped writes keep flat `<id>` keys.
 
 ### Control plane
 
@@ -514,6 +520,7 @@ An implementation is conformant if it satisfies all of the following.
 
 - [ ] The default state path is `~/.opencode-progress-state.json`.
 - [ ] `PROGRESS_STATE_PATH` is honored.
+- [ ] `PROGRESS_SESSION_ID` / `OPENCODE_SESSION_ID` scope entries automatically, with an explicit `--session` / `sessionId` taking precedence.
 - [ ] A second harness can read and render the same file without importing the server.
 - [ ] The contract is documented without requiring a specific harness.
 
@@ -533,7 +540,7 @@ An implementation is conformant if it satisfies all of the following.
 
 Implementation versions:
 
-- MCP server / relay: `2.0.0`
+- MCP server / relay: `2.1.0`
 - OpenCode plugin: `1.1.0`
 
 ---
@@ -561,7 +568,7 @@ Implementation versions:
 ## 12. Versioning
 
 - `version: 2` is the current state document version.
-- Adding an optional field is backward compatible.
+- Adding an optional field (for example `sessionId`) is backward compatible.
 - Changing field meaning, removing fields, or changing roll-up semantics requires a version bump.
 - Readers MUST tolerate a newer `version` field and unknown fields.
 

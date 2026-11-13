@@ -83,7 +83,15 @@ function normalizeState(raw) {
   const entries = {};
   for (const [id, entry] of Object.entries(rawEntries)) {
     if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
-      entries[id] = { ...entry, id: typeof entry.id === 'string' ? entry.id : id };
+      const sessionId = typeof entry.sessionId === 'string' ? entry.sessionId : null;
+      const fallbackId =
+        sessionId && id.startsWith(`${sessionId}:`)
+          ? id.slice(sessionId.length + 1)
+          : id;
+      entries[id] = {
+        ...entry,
+        id: typeof entry.id === 'string' ? entry.id : fallbackId,
+      };
     }
   }
   return {
