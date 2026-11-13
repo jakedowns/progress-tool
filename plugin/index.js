@@ -5,6 +5,10 @@
  * Reads progress state shared with the progress-mcp-server and
  * makes it available to the GUI bundle via plugin storage.
  *
+ * Tree-like dependencies (bootvine-inspired):
+ *   Entries may carry a `parentId`, forming a dependency tree.
+ *   The server rolls up parent status/progress from children.
+ *
  * Install:
  *   opencode plugin add /path/to/opencode-progress-plugin
  */
@@ -22,7 +26,7 @@ function ensureStateFile() {
     fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
   } catch (e) {}
   if (!fs.existsSync(STATE_FILE)) {
-    fs.writeFileSync(STATE_FILE, JSON.stringify({ entries: {}, version: 1 }, null, 2));
+    fs.writeFileSync(STATE_FILE, JSON.stringify({ entries: {}, version: 2 }, null, 2));
   }
 }
 
@@ -30,7 +34,7 @@ function readState() {
   try {
     return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
   } catch (e) {
-    return { entries: {}, version: 1 };
+    return { entries: {}, version: 2 };
   }
 }
 
@@ -45,7 +49,7 @@ function setup(context) {
   // Shared storage between server-side plugin and GUI bundle
   const progressStore = apis.storage('progress-plugin', 'progress', {
     entries: {},
-    version: 1,
+    version: 2,
   });
 
   // Initial read
@@ -75,6 +79,8 @@ function setup(context) {
       for (const [id, entry] of Object.entries(entries)) {
         if (seen.has(id)) continue;
         seen.add(id);
+        // Only toast on root-level entries (no parentId) to avoid noise
+        if (entry.parentId) continue;
         if (entry.status === 'error') {
           apis.toast?.show?.({
             title: `Progress: ${entry.title}`,

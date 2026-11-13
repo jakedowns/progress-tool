@@ -5,6 +5,14 @@
  * panel in the top-right corner of the screen, showing active and
  * recently completed progress entries from agents.
  *
+ * Tree-like dependencies (bootvine-inspired):
+ *   Entries with a `parentId` are rendered nested under their parent,
+   forming a dependency tree:
+ *
+ *     ├── build [██████░░░░] 6/10 · compiling SDL2
+ *     │   └── link-lib [████░░░░░░] 4/10 · linking libSDL2.a
+ *     └── npm-install [██████████] 10/10 · done ✓
+ *
  * Exports a `setup(context)` function that returns a Preact component.
  * The component reads progress state from the plugin's storage (shared
  * with the progress-mcp-server) and re-renders when entries change.
@@ -32,12 +40,66 @@ function readProgressStateFromStorage(apis) {
   return {};
 }
 
-function ProgressIndicator(entry) {
+/**
+ * Build a dependency tree from flat entries.
+ * Returns root nodes (each with nested children).
+ */
+function buildTree(entries) {
+  const byId = new Map(Object.entries(entries));
+  const childrenMap = new Map();
+
+  for (const [id] of byId) {
+    childrenMap.set(id, []);
+  }
+
+  const roots = [];
+  for (const [id, entry] of byId) {
+    const parentId = entry.parentId;
+    if (parentId && byId.has(parentId)) {
+      childrenMap.get(parentId).push(id);
+    } else {
+      roots.push(id);
+    }
+  }
+
+  // Sort: most severe status first, then by updatedAt desc
+  const statusOrder = { error: 4, running: 3, waiting: 2, done: 1 };
+  const sortIds = (a, b) => {
+    const ea = byId.get(a);
+    const eb = byId.get(b);
+    const s = statusOrder[eb.status] - statusOrder[ea.status];
+    if (s !== 0) return s;
+    return (eb.updatedAt || 0) - (ea.updatedAt || 0);
+  };
+
+  for (const [id, childIds] of childrenMap) {
+    childIds.sort(sortIds);
+  }
+  roots.sort(sortIds);
+
+  function buildNode(id) {
+    const entry = byId.get(id);
+    if (!entry) return null;
+    const childIds = childrenMap.get(id) || [];
+    return {
+      ...entry,
+      children: childIds.map(buildNode).filter(Boolean),
+    };
+  }
+
+  return roots.map(buildNode).filter(Boolean);
+}
+
+function ProgressIndicator({ entry, depth, isLast, prefix }) {
   const config = STATUS_CONFIG[entry.status] || STATUS_CONFIG.running;
   const pct = entry.progress != null ? Math.round(entry.progress * 100) : null;
   const elapsed = entry.updatedAt
     ? Math.round((Date.now() - entry.updatedAt) / 1000) + 's ago'
     : '';
+
+  // Tree-drawing characters (bootvine-inspired)
+  const connector = isLast ? '└── ' : '├── ';
+  const indent = prefix + connector;
 
   const dotStyle = {
     width: '10px',
@@ -48,34 +110,41 @@ function ProgressIndicator(entry) {
     flexShrink: 0,
   };
 
+  // Slightly dim child entries
+  const opacity = depth > 0 ? 0.85 : 1;
+
   const itemStyle = {
     display: 'flex',
     alignItems: 'center',
     gap: '8px',
-    padding: '8px 12px',
+    padding: depth > 0 ? '6px 10px' : '8px 12px',
+    paddingLeft: depth > 0 ? 14 + depth * 16 : 12,
     borderRadius: '8px',
-    background: 'var(--v2-panel-bg, #ffffff)',
+    background: depth > 0 ? 'transparent' : 'var(--v2-panel-bg, #ffffff)',
     border: `1px solid ${config.color}30`,
-    boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-    marginBottom: '8px',
+    boxShadow:
+      depth === 0 ? '0 4px 12px rgba(0,0,0,0.1)' : 'none',
+    marginBottom: '6px',
     fontSize: '13px',
     pointerEvents: 'auto',
-    backdropFilter: 'blur(8px)',
+    backdropFilter: depth === 0 ? 'blur(8px)' : 'none',
+    opacity,
   };
 
   const contentStyle = { flex: 1, minWidth: 0 };
 
   const titleStyle = {
-    fontWeight: 600,
+    fontWeight: depth === 0 ? 600 : 500,
     whiteSpace: 'nowrap',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     color: 'var(--v2-fg-fg-deep, #111)',
+    opacity: depth > 0 ? 0.9 : 1,
   };
 
   const detailStyle = {
     fontSize: '11px',
-    opacity: 0.7,
+    opacity: depth > 0 ? 0.6 : 0.7,
     whiteSpace: 'nowrap',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
@@ -85,7 +154,7 @@ function ProgressIndicator(entry) {
 
   const detailElapsedStyle = {
     fontSize: '11px',
-    opacity: 0.5,
+    opacity: depth > 0 ? 0.4 : 0.5,
     color: 'var(--v2-fg-fg-muted, #666)',
     marginTop: '2px',
   };
@@ -115,7 +184,20 @@ function ProgressIndicator(entry) {
     children.push(h('div', { style: pctStyle }, `${pct}%`));
   }
 
-  return h('div', { class: 'oc-progress-item', style: itemStyle }, children);
+  const entryEl = h('div', { class: 'oc-progress-item', style: itemStyle }, children);
+
+  // Recursively render children with tree prefix
+  const childPrefix = prefix + (isLast ? '    ' : '│   ');
+  const childEls = (entry.children || []).map((child, i) =>
+    ProgressIndicator({
+      entry: child,
+      depth: depth + 1,
+      isLast: i === (entry.children || []).length - 1,
+      prefix: childPrefix,
+    })
+  );
+
+  return h('div', null, entryEl, ...childEls);
 }
 
 function setup(context) {
@@ -144,18 +226,9 @@ function setup(context) {
       };
     }, [apis]);
 
-    const items = Object.values(entries).sort(
-      (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)
-    );
+    const tree = buildTree(entries);
 
-    if (items.length === 0) return null;
-
-    const active = items.filter(
-      (e) => e.status === 'running' || e.status === 'waiting'
-    );
-    const completed = items.filter(
-      (e) => e.status === 'done' || e.status === 'error'
-    );
+    if (tree.length === 0) return null;
 
     // Inject pulse animation CSS once
     if (typeof document !== 'undefined' && !document.getElementById('oc-progress-styles')) {
@@ -177,10 +250,14 @@ function setup(context) {
       document.head.appendChild(style);
     }
 
-    const panels = [
-      ...active.map((entry) => ProgressIndicator(entry)),
-      ...completed.slice(0, 3).map((entry) => ProgressIndicator(entry)),
-    ];
+    const panels = tree.map((root, i) =>
+      ProgressIndicator({
+        entry: root,
+        depth: 0,
+        isLast: i === tree.length - 1,
+        prefix: '',
+      })
+    );
 
     return h(
       'div',
@@ -194,7 +271,7 @@ function setup(context) {
           flexDirection: 'column',
           gap: '8px',
           pointerEvents: 'none',
-          width: '320px',
+          width: '340px',
         },
       },
       panels
