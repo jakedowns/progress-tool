@@ -40,6 +40,36 @@ function resolveStatePath(explicit) {
 
 const DEFAULT_STATE_FILE = resolveStatePath();
 
+/**
+ * Resolve the session scope for an update.
+ *
+ * Priority: explicit input/flag -> PROGRESS_SESSION_ID -> OPENCODE_SESSION_ID
+ * -> null. Returning null preserves the original flat, single-session keying
+ * so existing state files and callers remain fully backwards compatible.
+ */
+function resolveSessionId(explicit) {
+  if (explicit !== undefined && explicit !== null && String(explicit).trim() !== '') {
+    return String(explicit);
+  }
+  const fromEnv =
+    process.env.PROGRESS_SESSION_ID || process.env.OPENCODE_SESSION_ID || null;
+  return fromEnv && String(fromEnv).trim() !== '' ? String(fromEnv) : null;
+}
+
+/**
+ * Internal storage key. Entries are keyed by `${sessionId}:${id}` when a
+ * session is active, while the public `entry.id` stays clean (`build-1`).
+ */
+function storageKey(id, sessionId) {
+  return sessionId ? `${sessionId}:${id}` : id;
+}
+
+function parentStorageKey(parentId, sessionId) {
+  if (!parentId || !sessionId) return parentId;
+  const prefix = `${sessionId}:`;
+  return parentId.startsWith(prefix) ? parentId : prefix + parentId;
+}
+
 function emptyState() {
   return { entries: {}, version: STATE_VERSION };
 }
@@ -223,9 +253,12 @@ function mutateState(mutator, stateFile = DEFAULT_STATE_FILE) {
 function upsertProgress(input, stateFile = DEFAULT_STATE_FILE) {
   if (!input || !input.id) throw new Error('upsertProgress requires an id');
 
+  const sessionId = resolveSessionId(input.sessionId);
+  const key = storageKey(input.id, sessionId);
+
   return mutateState((state) => {
     const now = Date.now();
-    const prev = state.entries[input.id] || null;
+    const prev = state.entries[key] || null;
     const status = input.status !== undefined ? input.status : prev?.status || 'running';
 
     const wasTerminal = prev?.status === 'done' || prev?.status === 'error';
@@ -234,6 +267,7 @@ function upsertProgress(input, stateFile = DEFAULT_STATE_FILE) {
     const entry = {
       ...(prev || {}),
       id: input.id,
+      ...(sessionId ? { sessionId } : {}),
       status,
       title: input.title !== undefined ? input.title : prev?.title || input.id,
       detail:
@@ -254,14 +288,16 @@ function upsertProgress(input, stateFile = DEFAULT_STATE_FILE) {
       updatedAt: now,
     };
 
-    state.entries[input.id] = entry;
+    state.entries[key] = entry;
     return entry;
   }, stateFile);
 }
 
-function clearProgress(id, stateFile = DEFAULT_STATE_FILE) {
+function clearProgress(id, stateFile = DEFAULT_STATE_FILE, sessionId) {
+  const resolvedSessionId = resolveSessionId(sessionId);
+  const key = storageKey(id, resolvedSessionId);
   return mutateState((state) => {
-    delete state.entries[id];
+    delete state.entries[key];
     return null;
   }, stateFile);
 }
@@ -300,9 +336,12 @@ function buildTree(entries) {
 
   const roots = [];
   for (const [id, entry] of byId) {
-    const parentId = entry.parentId;
-    if (parentId && byId.has(parentId)) {
-      childrenMap.get(parentId).push(id);
+    // `entry.parentId` stays clean for display, but sibling lookup happens in
+    // the same session namespace so two sessions cannot cross-contaminate
+    // parent roll-ups.
+    const parentKey = parentStorageKey(entry.parentId, entry.sessionId);
+    if (parentKey && byId.has(parentKey)) {
+      childrenMap.get(parentKey).push(id);
     } else {
       roots.push(id);
     }
@@ -387,6 +426,8 @@ module.exports = {
   STATE_VERSION,
   DEFAULT_STATE_FILE,
   resolveStatePath,
+  resolveSessionId,
+  storageKey,
   ensureStateFile,
   readState,
   atomicWrite,

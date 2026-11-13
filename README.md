@@ -4,7 +4,7 @@ A non-blocking twin of `question` so coding agents can signal long-running work 
 
 Implements the [Agent Progress Tool proposal](https://gist.github.com/jakedowns/ddc4eb4817184a074c82c61dc6e7228c) for OpenCode 2, and is written as a portable reference implementation that any model, agent, or harness can copy, adapt, or train on.
 
-**Versions:** MCP server `2.0.0` · OpenCode plugin `1.1.0`
+**Versions:** MCP server `2.1.0` · OpenCode plugin `1.1.0`
 
 ---
 
@@ -79,6 +79,7 @@ progress({
   detail?: "34s elapsed",    // optional detail text
   progress?: 0.65,           // optional 0-1 fraction
   parentId?: "build",        // optional: nest under a parent task (tree)
+  sessionId?: "ses_abc123",  // optional override; auto from env when omitted
 })
 ```
 
@@ -86,6 +87,7 @@ progress({
 - **Same `id` updates in place** — call again with the same id to refresh
 - **Never requires a human reply**
 - **Tree-like dependencies** — pass `parentId` to nest a task under a parent; parent status/progress rolls up from children (bootvine-inspired)
+- **Session isolation** — `sessionId` resolves from an explicit input, then `PROGRESS_SESSION_ID`, then `OPENCODE_SESSION_ID`. When present, entries are namespaced internally as `${sessionId}:${id}` so identical task IDs in concurrent sessions never collide. When absent, the original flat `id` keying is preserved for 100% backwards compatibility. Keep task IDs clean (`"build-1"`); do not manually prefix them.
 - Renders as floating indicators in the top-right of the desktop GUI
 
 ### Drop-in tool definition (harness-agnostic)
@@ -104,7 +106,11 @@ OWNERSHIP & ZERO-POLLING CONTRACT:
 
 TREE ROLLUP (BOOTVINE SEMANTICS):
 - Pass `parentId` to nest sub-tasks under a parent task.
-- Parent status and progress automatically roll up from children (any child "error" -> parent "error"; any child "running"/"waiting" -> parent "running"/"waiting"; parent progress = mean of child progress).`,
+- Parent status and progress automatically roll up from children (any child "error" -> parent "error"; any child "running"/"waiting" -> parent "running"/"waiting"; parent progress = mean of child progress).
+
+SESSION ISOLATION:
+- Concurrent sessions are isolated automatically via OPENCODE_SESSION_ID / PROGRESS_SESSION_ID (or an explicit `sessionId` override).
+- Keep using clean task IDs like `build-1`; do NOT manually prefix them with a session ID.`,
   inputSchema: {
     type: "object",
     properties: {
@@ -113,7 +119,8 @@ TREE ROLLUP (BOOTVINE SEMANTICS):
       title: { type: "string", description: "Short human-readable task label." },
       detail: { type: "string", description: "Optional status detail or latest step context." },
       progress: { type: "number", minimum: 0, maximum: 1, description: "Optional completion fraction (0.0 to 1.0)." },
-      parentId: { type: "string", description: "Optional parent task ID to nest this task in a dependency tree." }
+      parentId: { type: "string", description: "Optional parent task ID to nest this task in a dependency tree." },
+      sessionId: { type: "string", description: "Optional session ID override; automatically resolved from PROGRESS_SESSION_ID or OPENCODE_SESSION_ID when set by the harness." }
     },
     required: ["id", "status", "title"]
   }
@@ -157,6 +164,16 @@ progress-emit --id build-1 --status done --progress 1
 
 `progress-emit` is for scripts that already know when a milestone happens and do not have a continuous output stream.
 
+### Concurrent sessions
+
+The relay resolves its session scope automatically: an explicit `--session <id>` wins, followed by `PROGRESS_SESSION_ID`, then `OPENCODE_SESSION_ID`. When a session is active, the state store keys entries as `${sessionId}:${id}` and records `sessionId` on the entry, so two sessions can both use `--id build-1` without overwriting each other. `entry.id` and `entry.parentId` stay clean, and parent roll-ups only match siblings in the same session.
+
+```bash
+progress-relay --id build-1 --session ses_abc123 -- npm run build
+```
+
+With no session flag and no session environment variables, keys stay flat (`build-1`) exactly as in previous versions.
+
 ### Options
 
 | Option | Meaning |
@@ -167,6 +184,7 @@ progress-emit --id build-1 --status done --progress 1
 | `--detail <text>` | Initial detail line |
 | `--progress <value>` | `0..1`, `45%`, or `6/10` |
 | `--status <status>` | Initial status: `running`, `waiting`, `done`, `error` |
+| `--session <id>` | Session scope (or `PROGRESS_SESSION_ID` / `OPENCODE_SESSION_ID`); omit it to keep the legacy flat keying |
 | `--max-hz <n>` | Max state writes per second (default `4`; `0` = unlimited) |
 | `--quiet`, `--no-tee` | Do not echo command output back to the caller |
 | `--state-path <path>` | Override `~/.opencode-progress-state.json` |
@@ -206,8 +224,9 @@ A harness can adopt the paradigm without any custom plugin:
 1. Expose a fire-and-forget `progress` tool with the schema above.
 2. Return the relay hint (or an equivalent command) whenever `status` is `running`.
 3. Give the agent a normal shell that can run `progress-relay --id <id> -- <cmd>`.
-4. Have the view read `~/.opencode-progress-state.json` (or `PROGRESS_STATE_PATH`).
-5. Do not add a background polling loop in the model; let the OS process and the view do the waiting.
+4. Have the view read `~/.opencode-progress-state.json` (or `PROGRESS_STATE_PATH`). For a **shared global HUD** that shows several concurrent sessions, keep one state file and rely on `OPENCODE_SESSION_ID` / `PROGRESS_SESSION_ID` scoping; the view can group by `entry.sessionId` if desired.
+5. For **per-session isolation** (separate HUD, history, or credentials), give each session its own `PROGRESS_STATE_PATH` instead of sharing one file.
+6. Do not add a background polling loop in the model; let the OS process and the view do the waiting.
 
 If you prefer a native implementation, replace step 3 with a stdout watcher or background-job hook that honors the same state shape. The [spec](./docs/out-of-band-relay-spec.md) includes pseudocode and a conformance checklist, which double as an RLHF/reference trajectory: milestone call → relay attach → no polling → one terminal report.
 
@@ -223,9 +242,10 @@ To stream live command output into this indicator without polling, use the out-o
   progress-relay --id build-1 -- <cmd>
   # or: <cmd> | progress-relay --id build-1
 Do NOT poll, sleep, or re-call progress in a loop for elapsed time or percentages.
+Concurrent sessions are isolated automatically via OPENCODE_SESSION_ID / PROGRESS_SESSION_ID; keep task IDs clean (e.g. "build-1").
 ```
 
-If the bin is not on `$PATH`, the hint uses the exact `node /path/to/index.js relay ...` invocation instead. Either way, the model sees the correct command at the moment it is about to launch the shell command — before the polling loop starts.
+If an entry is scoped to a session, the hint also includes `--session <id>` so the relay attaches to the same namespace. If the bin is not on `$PATH`, the hint uses the exact `node /path/to/index.js relay ...` invocation instead. Either way, the model sees the correct command at the moment it is about to launch the shell command — before the polling loop starts.
 
 ---
 
@@ -251,15 +271,17 @@ Both the MCP server and the relay share [`mcp-server/state-store.js`](./mcp-serv
 - **Cross-process lock** — a `.lock` file serializes read-modify-write cycles, so concurrent child relays updating sibling `parentId` nodes do not lose updates or corrupt parent roll-ups.
 - **Stale-lock recovery** — a lock older than 15 seconds is broken rather than wedging the command.
 - **TTL cleanup** — completed entries older than 10 minutes are pruned (`PROGRESS_TTL_MS`).
-- **Path override** — `PROGRESS_STATE_PATH` for tests, multiple harnesses, or isolated sessions.
+- **Session scoping** — when `sessionId` is resolved, keys are `${sessionId}:${id}` and entries carry `sessionId`; parent lookups stay within that namespace. With no session, keys remain flat (`build`) for backwards compatibility.
+- **Path override** — `PROGRESS_STATE_PATH` for tests, multiple harnesses, or fully isolated sessions.
 
-State file shape:
+State file shape (session-scoped example):
 
 ```json
 {
   "entries": {
-    "build": {
+    "<sessionId>:build": {
       "id": "build",
+      "sessionId": "<sessionId>",
       "status": "running",
       "title": "building SDL2",
       "detail": "compiling source",
@@ -269,8 +291,9 @@ State file shape:
       "createdAt": 1794559267388,
       "updatedAt": 1794559267388
     },
-    "link-lib": {
+    "<sessionId>:link-lib": {
       "id": "link-lib",
+      "sessionId": "<sessionId>",
       "status": "running",
       "title": "linking libSDL2.a",
       "detail": "ld -o libSDL2.a ...",
@@ -284,6 +307,8 @@ State file shape:
   "version": 2
 }
 ```
+
+The object key is the internal composite key (`"<sessionId>:<id>"`), while `entry.id` and `entry.parentId` stay clean for display and relay commands. Entries written without a session keep the legacy flat key (`"build"`) and omit `sessionId`.
 
 `startedAt` lets a GUI show true elapsed time even when no relay tick is writing `updatedAt` every second.
 
@@ -487,7 +512,7 @@ cd mcp-server
 npm test
 ```
 
-The smoke suite covers one-shot emits, pipe mode, wrap mode with a failing exit code, field preservation when attaching a relay, the MCP handshake and relay hint, and 16 concurrent writers against one state file.
+The smoke suite covers one-shot emits, session resolution and isolation, pipe mode, wrap mode with a failing exit code, field preservation when attaching a relay, the MCP handshake and relay hint, 16 concurrent writers against one state file, and two concurrent sessions using identical task IDs (including parent roll-ups).
 
 ---
 

@@ -38,7 +38,7 @@ const {
   ensureStateFile,
 } = require('./state-store');
 
-const SERVER_VERSION = '2.0.0';
+const SERVER_VERSION = '2.1.0';
 const VALID_STATUSES = ['running', 'waiting', 'done', 'error'];
 
 const SERVER_INSTRUCTIONS = [
@@ -49,7 +49,9 @@ const SERVER_INSTRUCTIONS = [
   'percentages. For long-running shell commands, use the out-of-band relay',
   'printed in the tool response (for example `progress-relay --id <id> -- <cmd>`),',
   'which updates the GUI at zero token cost. Pass parentId to build a tree;',
-  'parent status and progress roll up from children.',
+  'parent status and progress roll up from children. Concurrent sessions are',
+  'isolated automatically via OPENCODE_SESSION_ID / PROGRESS_SESSION_ID, so',
+  'keep using clean task IDs like "build-1" instead of manually prefixing them.',
 ].join(' ');
 
 const TOOL_DESCRIPTION = [
@@ -63,6 +65,10 @@ const TOOL_DESCRIPTION = [
   'TREE ROLLUP (BOOTVINE SEMANTICS):',
   '- Pass `parentId` to nest sub-tasks under a parent task.',
   '- Parent status and progress automatically roll up from children (any child "error" -> parent "error"; any child "running"/"waiting" -> parent "running"/"waiting"; parent progress = mean of child progress).',
+  '',
+  'SESSION ISOLATION:',
+  '- Concurrent sessions are isolated automatically via OPENCODE_SESSION_ID / PROGRESS_SESSION_ID (or an explicit `sessionId` override).',
+  '- Keep using clean task IDs like `build-1`; do NOT manually prefix them with a session ID.',
 ].join('\n');
 
 // --- Shell / CLI helpers ---------------------------------------------------
@@ -110,17 +116,19 @@ function relayBin() {
   return cachedRelayBin;
 }
 
-function relayHint(id, parentId) {
+function relayHint(id, parentId, sessionId) {
   const bin = relayBin();
   const parent = parentId ? ` --parent ${shellQuote(parentId)}` : '';
+  const session = sessionId ? ` --session ${shellQuote(sessionId)}` : '';
   const taskId = shellQuote(id);
 
   return [
     '',
     'To stream live command output into this indicator without polling, use the out-of-band relay:',
-    `  ${bin} --id ${taskId}${parent} -- <cmd>`,
-    `  # or: <cmd> | ${bin} --id ${taskId}`,
+    `  ${bin} --id ${taskId}${parent}${session} -- <cmd>`,
+    `  # or: <cmd> | ${bin} --id ${taskId}${session}`,
     'Do NOT poll, sleep, or re-call progress in a loop for elapsed time or percentages.',
+    'Concurrent sessions are isolated automatically via OPENCODE_SESSION_ID / PROGRESS_SESSION_ID; keep task IDs clean (e.g. "build-1").',
   ].join('\n');
 }
 
@@ -190,6 +198,11 @@ function handleToolsList(id) {
               description:
                 'Optional parent task ID to nest this task in a dependency tree.',
             },
+            sessionId: {
+              type: 'string',
+              description:
+                'Optional session ID override; automatically resolved from PROGRESS_SESSION_ID or OPENCODE_SESSION_ID when set by the harness.',
+            },
           },
           required: ['id', 'status', 'title'],
           additionalProperties: false,
@@ -219,6 +232,7 @@ function handleProgressCall(id, args) {
     detail,
     progress,
     parentId,
+    sessionId,
   } = args;
 
   if (!progressId || typeof progressId !== 'string') {
@@ -241,6 +255,10 @@ function handleProgressCall(id, args) {
     toolError(id, 'Invalid argument: parentId must be a string.');
     return;
   }
+  if (sessionId !== undefined && sessionId !== null && typeof sessionId !== 'string') {
+    toolError(id, 'Invalid argument: sessionId must be a string.');
+    return;
+  }
   if (
     progress !== undefined &&
     progress !== null &&
@@ -255,6 +273,7 @@ function handleProgressCall(id, args) {
 
   const entry = upsertProgress({
     id: progressId,
+    sessionId,
     status,
     title,
     detail: detail === undefined ? undefined : detail,
@@ -269,7 +288,7 @@ function handleProgressCall(id, args) {
 
   let text = parts.join(' - ');
   if (entry.status === 'running') {
-    text += relayHint(entry.id, entry.parentId);
+    text += relayHint(entry.id, entry.parentId, entry.sessionId);
   }
 
   toolOk(id, text);

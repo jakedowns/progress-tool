@@ -12,14 +12,20 @@ const execFileAsync = promisify(execFile);
 
 const ROOT = path.join(__dirname, '..');
 const INDEX = path.join(ROOT, 'index.js');
+const { getTree } = require(path.join(ROOT, 'state-store'));
 
 function tempState() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'progress-smoke-'));
   return { dir, file: path.join(dir, 'state.json') };
 }
 
-function stateEnv(file) {
-  return { ...process.env, PROGRESS_STATE_PATH: file };
+function stateEnv(file, extra = {}) {
+  const env = { ...process.env, PROGRESS_STATE_PATH: file };
+  // Keep the suite deterministic even when it runs under OpenCode (which sets
+  // OPENCODE_SESSION_ID for the harness session itself).
+  delete env.PROGRESS_SESSION_ID;
+  delete env.OPENCODE_SESSION_ID;
+  return { ...env, ...extra };
 }
 
 function readState(file) {
@@ -29,7 +35,7 @@ function readState(file) {
 function run(args, options = {}) {
   return spawnSync(process.execPath, [INDEX, ...args], {
     encoding: 'utf8',
-    env: stateEnv(options.state),
+    env: stateEnv(options.state, options.env),
     input: options.input,
     timeout: 10000,
   });
@@ -50,6 +56,32 @@ test('emit writes one milestone without touching stdin', () => {
   assert.equal(entry.detail, 'hello');
   assert.equal(entry.progress, 0.25);
   assert.ok(entry.startedAt);
+});
+
+test('emit resolves session scope from explicit flag, then environment', () => {
+  const { file } = tempState();
+
+  run(['emit', '--id', 'scoped-explicit', '--status', 'running', '--title', 'Explicit'], {
+    state: file,
+    env: { OPENCODE_SESSION_ID: 'env-session' },
+  });
+  run(['emit', '--id', 'scoped-override', '--session', 'flag-session', '--status', 'running', '--title', 'Override'], {
+    state: file,
+    env: { OPENCODE_SESSION_ID: 'env-session' },
+  });
+  run(['emit', '--id', 'scoped-env', '--status', 'running', '--title', 'Env'], {
+    state: file,
+    env: { PROGRESS_SESSION_ID: 'progress-session', OPENCODE_SESSION_ID: 'env-session' },
+  });
+
+  const state = readState(file);
+  assert.equal(state.entries['env-session:scoped-explicit'].id, 'scoped-explicit');
+  assert.equal(state.entries['env-session:scoped-explicit'].sessionId, 'env-session');
+  assert.equal(state.entries['flag-session:scoped-override'].sessionId, 'flag-session');
+  assert.equal(
+    state.entries['progress-session:scoped-env'].sessionId,
+    'progress-session'
+  );
 });
 
 test('pipe mode tees output and marks done on EOF', () => {
@@ -193,13 +225,16 @@ test('MCP handshake exposes the zero-polling contract and relay hint', async () 
   assert.equal(responses.length, 3);
 
   const init = responses.find((r) => r.id === 1);
-  assert.equal(init.result.serverInfo.version, '2.0.0');
+  assert.equal(init.result.serverInfo.version, '2.1.0');
   assert.match(init.result.instructions, /Never poll, sleep/);
+  assert.match(init.result.instructions, /OPENCODE_SESSION_ID/);
 
   const list = responses.find((r) => r.id === 2);
   const tool = list.result.tools[0];
   assert.equal(tool.name, 'progress');
   assert.match(tool.description, /ZERO-POLLING/);
+  assert.match(tool.description, /OPENCODE_SESSION_ID/);
+  assert.equal(tool.inputSchema.properties.sessionId.type, 'string');
 
   const call = responses.find((r) => r.id === 3);
   assert.equal(call.result.isError, false);
@@ -229,4 +264,62 @@ test('concurrent writers keep the state file valid and complete', async () => {
   for (let i = 0; i < 16; i++) {
     assert.equal(state.entries[`concurrent-${i}`].title, `Task ${i}`);
   }
+});
+
+test('concurrent sessions using the same task IDs stay isolated', async () => {
+  const { file } = tempState();
+  const jobs = [
+    ['session-a', 'build-1', 'Build A', 'running', null],
+    ['session-a', 'test-1', 'Test A', 'done', 'build-1'],
+    ['session-b', 'build-1', 'Build B', 'running', null],
+    ['session-b', 'test-1', 'Test B', 'error', 'build-1'],
+  ].map(([session, id, title, status, parent]) =>
+    execFileAsync(
+      process.execPath,
+      [
+        INDEX,
+        'emit',
+        '--session',
+        session,
+        '--id',
+        id,
+        '--status',
+        status,
+        '--title',
+        title,
+        ...(parent ? ['--parent', parent] : []),
+      ],
+      { env: stateEnv(file) }
+    )
+  );
+
+  await Promise.all(jobs);
+
+  const state = readState(file);
+  assert.deepEqual(
+    Object.keys(state.entries).sort(),
+    ['session-a:build-1', 'session-a:test-1', 'session-b:build-1', 'session-b:test-1']
+  );
+
+  const buildA = state.entries['session-a:build-1'];
+  const buildB = state.entries['session-b:build-1'];
+  assert.equal(buildA.id, 'build-1');
+  assert.equal(buildA.sessionId, 'session-a');
+  assert.equal(buildA.title, 'Build A');
+  assert.equal(buildB.id, 'build-1');
+  assert.equal(buildB.sessionId, 'session-b');
+  assert.equal(buildB.title, 'Build B');
+
+  // Clean parent IDs are stored, while sibling lookup is session-scoped.
+  assert.equal(state.entries['session-a:test-1'].parentId, 'build-1');
+  assert.equal(state.entries['session-b:test-1'].parentId, 'build-1');
+
+  const { tree } = getTree(state);
+  const rootA = tree.find((entry) => entry.sessionId === 'session-a' && entry.id === 'build-1');
+  const rootB = tree.find((entry) => entry.sessionId === 'session-b' && entry.id === 'build-1');
+
+  assert.equal(rootA.status, 'done');
+  assert.deepEqual(rootA.children.map((child) => child.id), ['test-1']);
+  assert.equal(rootB.status, 'error');
+  assert.deepEqual(rootB.children.map((child) => child.id), ['test-1']);
 });

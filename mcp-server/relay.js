@@ -26,6 +26,8 @@ const { spawn } = require('child_process');
 const {
   readState,
   resolveStatePath,
+  resolveSessionId,
+  storageKey,
   upsertProgress,
 } = require('./state-store');
 
@@ -63,8 +65,13 @@ function printUsage(mode, stream) {
         '  --detail <text>      Detail line (e.g. current step)',
         '  --progress <value>   0..1, 45%, or 6/10',
         '  --parent <id>        Parent task id for tree nesting',
+        '  --session <id>       Session scope (or PROGRESS_SESSION_ID / OPENCODE_SESSION_ID)',
         '  --state-path <path>  Override ~/.opencode-progress-state.json',
         '  -h, --help           Show this help',
+        '',
+        'Concurrent sessions are isolated automatically via OPENCODE_SESSION_ID or',
+        'PROGRESS_SESSION_ID. Keep using clean task ids like "build-1"; do not',
+        'manually prefix them with the session id.',
         '',
         'Example:',
         '  progress-emit --id build-1 --status done --title "Build" --progress 1',
@@ -89,11 +96,16 @@ function printUsage(mode, stream) {
       '  --detail <text>      Initial detail line',
       '  --progress <value>   0..1, 45%, or 6/10',
       '  --status <status>    Initial status (default: running)',
+      '  --session <id>       Session scope (or PROGRESS_SESSION_ID / OPENCODE_SESSION_ID)',
       '  --max-hz <n>         Max state writes per second (default: 4, 0 = unlimited)',
       '  --quiet, --no-tee    Do not echo command output to this process stdout/stderr',
       '  --state-path <path>  Override ~/.opencode-progress-state.json',
       '  --once               Emit one update and exit (same as progress-emit)',
       '  -h, --help           Show this help',
+      '',
+      'Concurrent sessions are isolated automatically via OPENCODE_SESSION_ID or',
+      'PROGRESS_SESSION_ID. Keep using clean task ids like "build-1"; do not',
+      'manually prefix them with the session id.',
       '',
       'Examples:',
       '  progress-relay --id build-1 -- npm run build',
@@ -174,6 +186,7 @@ function parseArgs(argv) {
     id: process.env.PROGRESS_ID || null,
     title: process.env.PROGRESS_TITLE || null,
     parentId: process.env.PROGRESS_PARENT || null,
+    sessionId: resolveSessionId(),
     detail: null,
     progress: null,
     status: null,
@@ -203,6 +216,9 @@ function parseArgs(argv) {
         break;
       case '--title':
         opts.title = argv[++i];
+        break;
+      case '--session':
+        opts.sessionId = argv[++i];
         break;
       case '--detail':
         opts.detail = argv[++i];
@@ -256,6 +272,7 @@ function parseArgs(argv) {
   if (opts.title === '') opts.title = null;
   if (opts.detail === '') opts.detail = null;
   if (opts.command && opts.command.length === 0) opts.command = null;
+  opts.sessionId = resolveSessionId(opts.sessionId);
 
   return opts;
 }
@@ -267,7 +284,8 @@ function commandTitle(command) {
 
 function existingEntry(opts) {
   try {
-    return readState(opts.stateFile).entries[opts.id] || null;
+    const key = storageKey(opts.id, opts.sessionId);
+    return readState(opts.stateFile).entries[key] || null;
   } catch (e) {
     return null;
   }
@@ -285,6 +303,7 @@ function baseEntry(opts) {
 
   return {
     id: opts.id,
+    sessionId: opts.sessionId,
     status: opts.status || 'running',
     title:
       opts.title !== null ? opts.title : prev?.title || commandTitle(opts.command),
@@ -439,6 +458,7 @@ function runEmit(opts) {
   upsertProgress(
     {
       id: opts.id,
+      sessionId: opts.sessionId,
       status,
       title: opts.title !== null ? opts.title : prev?.title,
       detail,
