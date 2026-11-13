@@ -1,10 +1,10 @@
-# OpenCode Progress Tool
+# common progress tree mcp : opencode demo implementation (tui + desktop/web)
 
 A non-blocking twin of `question` so coding agents can signal long-running work without looking dead, plus a **zero-token-burn out-of-band relay** so the agent never has to poll `stdout` just to keep the UI alive. (Also described as low-token-burn or token-minimizing progress: token cost scales with milestones, not with task duration.)
 
 Implements the [Agent Progress Tool proposal](https://gist.github.com/jakedowns/ddc4eb4817184a074c82c61dc6e7228c) for OpenCode 2, and is written as a portable reference implementation that any model, agent, or harness can copy, adapt, or train on.
 
-**Versions:** MCP server `2.1.0` · OpenCode plugin `1.1.0`
+**Versions:** MCP server `2.1.0` · OpenCode plugin `2.0.0`
 
 ---
 
