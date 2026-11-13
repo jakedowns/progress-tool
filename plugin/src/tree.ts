@@ -89,14 +89,68 @@ export function flattenTree(nodes: readonly TreeNode[]): TreeNode[] {
   return out;
 }
 
+/** Depth-first flatten with each node's depth, for indented menus. */
+export function flattenTreeWithDepth(
+  nodes: readonly TreeNode[],
+  depth = 0
+): Array<{ node: TreeNode; depth: number }> {
+  const out: Array<{ node: TreeNode; depth: number }> = [];
+  for (const node of nodes) {
+    out.push({ node, depth });
+    out.push(...flattenTreeWithDepth(node.children, depth + 1));
+  }
+  return out;
+}
+
 export function countActive(nodes: readonly TreeNode[]): number {
   return flattenTree(nodes).filter((node) => node.status === "running" || node.status === "waiting").length;
 }
 
+export type BarStyle = "blocks" | "emoji";
+
+export interface BarOptions {
+  /** `blocks` (default) or `emoji` for the meme-style bar. */
+  style?: BarStyle;
+  /** Segments in the bar. Defaults to 10 for blocks and 6 for emoji. */
+  segments?: number;
+  /** Denominator shown in the fraction, e.g. 420. Defaults to 100. */
+  total?: number;
+}
+
+export interface BarParts {
+  bar: string;
+  done: number;
+  total: number;
+  fraction: string;
+  style: BarStyle;
+}
+
+function clampProgress(progress: number | null | undefined): number {
+  return progress == null ? 0 : Math.max(0, Math.min(1, progress));
+}
+
+/**
+ * Build a progress bar in either the ASCII block style or the emoji style:
+ *
+ *   blocks: [██████░░░░] 60%
+ *   emoji:  🟩⬛️⬛️⬛️⬛️⬛️(69/420)
+ */
+export function barParts(progress: number | null | undefined, options: BarOptions = {}): BarParts {
+  const style: BarStyle = options.style === "emoji" ? "emoji" : "blocks";
+  const segments = options.segments ?? (style === "emoji" ? 6 : 10);
+  const total = options.total ?? 100;
+  const value = clampProgress(progress);
+  const filled = Math.round(value * segments);
+  const bar =
+    style === "emoji"
+      ? "🟩".repeat(filled) + "⬛️".repeat(Math.max(0, segments - filled))
+      : "█".repeat(filled) + "░".repeat(Math.max(0, segments - filled));
+  const done = Math.round(value * total);
+  return { bar, done, total, fraction: `(${done}/${total})`, style };
+}
+
 export function renderBar(progress: number | null | undefined, width = 10): string {
-  const pct = progress == null ? 0 : Math.max(0, Math.min(1, progress));
-  const filled = Math.round(pct * width);
-  return "█".repeat(filled) + "░".repeat(width - filled);
+  return barParts(progress, { segments: width }).bar;
 }
 
 export function progressLabel(progress: number | null | undefined): string | null {

@@ -9,7 +9,7 @@
 import { For, Show, createSignal } from "solid-js";
 import { Plugin, usePlugin } from "@opencode/plugin/tui";
 import { readProgressState } from "./state.js";
-import { buildTree, countActive, progressLabel, renderBar } from "./tree.js";
+import { buildTree, barParts, countActive, progressLabel, type BarOptions } from "./tree.js";
 import type { ProgressStatus, ProgressState, TreeNode } from "./types.js";
 
 const [state, setState] = createSignal<ProgressState>(readProgressState());
@@ -42,18 +42,25 @@ function glyph(status: ProgressStatus): string {
 
 function ProgressNode(props: { node: TreeNode; depth: number }) {
   const ctx = usePlugin();
-  const pct = () => progressLabel(props.node.progress);
+  const options = (ctx.options ?? {}) as BarOptions;
   const indent = () => (props.depth === 0 ? "" : `${"  ".repeat(props.depth)}└─ `);
+
+  const label = () => {
+    const parts = barParts(props.node.progress, options);
+    if (parts.style === "emoji") {
+      const suffix =
+        props.node.status === "done" ? " ✓" : props.node.status === "error" ? " ✗" : "";
+      return `${props.node.title}: ${parts.bar}${parts.fraction}${suffix}`;
+    }
+    const pct = progressLabel(props.node.progress);
+    return `${glyph(props.node.status)} [${parts.bar}] ${props.node.title}${pct ? ` ${pct}` : ""}`;
+  };
 
   return (
     <>
       <box flexDirection="row">
         <text fg={ctx.theme.text.muted}>{indent()}</text>
-        <text fg={ctx.theme.text.base}>{`${glyph(props.node.status)} [${renderBar(props.node.progress)}]`}</text>
-        <text fg={ctx.theme.text.base}>{` ${props.node.title}`}</text>
-        <Show when={pct()}>
-          <text fg={ctx.theme.text.muted}>{` ${pct()}`}</text>
-        </Show>
+        <text fg={ctx.theme.text.base}>{label()}</text>
         <Show when={props.node.detail}>
           <text fg={ctx.theme.text.muted}>{` · ${props.node.detail}`}</text>
         </Show>

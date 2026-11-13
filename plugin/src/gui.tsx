@@ -9,13 +9,21 @@
 import { ComposerPill, Plugin } from "@opencode/plugin/gui";
 import { createSignal } from "solid-js";
 import { ProgressRpc } from "./rpc.js";
-import { buildTree, countActive, flattenTree, progressLabel } from "./tree.js";
+import { buildTree, barParts, countActive, flattenTreeWithDepth, progressLabel, type BarOptions } from "./tree.js";
 import type { ProgressEntry, TreeNode } from "./types.js";
 
 type GuiState = {
   entries: Record<string, ProgressEntry>;
   loaded: boolean;
+  error?: string;
 };
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`timeout after ${ms}ms`)), ms)),
+  ]);
+}
 
 function toneFor(status: TreeNode["status"]): "success" | "warning" | "danger" | undefined {
   if (status === "error") return "danger";
@@ -24,11 +32,19 @@ function toneFor(status: TreeNode["status"]): "success" | "warning" | "danger" |
   return undefined;
 }
 
-function rowFor(node: TreeNode) {
+function rowFor(node: TreeNode, depth: number, options: BarOptions) {
+  const parts = barParts(node.progress, options);
   const pct = progressLabel(node.progress);
+  const indent = depth > 0 ? "\u00A0\u00A0".repeat(depth) + "└─ " : "";
+  const suffix =
+    parts.style === "emoji"
+      ? `: ${parts.bar}${parts.fraction}`
+      : pct
+        ? ` · ${pct}`
+        : "";
   return {
     id: node.key,
-    label: pct ? `${node.title} · ${pct}` : node.title,
+    label: `${indent}${node.title}${suffix}`,
     detail: node.detail || undefined,
     tone: toneFor(node.status),
   };
@@ -37,40 +53,72 @@ function rowFor(node: TreeNode) {
 export default Plugin.define({
   setup(ctx) {
     const [state, setState] = createSignal<GuiState>({ entries: {}, loaded: false });
+    const options = (ctx.options ?? {}) as BarOptions;
     let alive = true;
 
     const refresh = async () => {
       try {
-        const result = await ctx.client.rpc(ProgressRpc).list({});
+        const result = await withTimeout(ctx.client.rpc(ProgressRpc).list({}), 4000);
         if (!alive) return;
         setState({
           entries: (result?.entries ?? {}) as Record<string, ProgressEntry>,
           loaded: true,
         });
-      } catch {
-        // The server may be restarting; the next tick retries.
+      } catch (error) {
+        if (!alive) return;
+        setState((prev) => ({ ...prev, loaded: true, error: String(error) }));
+        console.error("[opencode-progress] rpc list failed", String(error));
       }
     };
 
+    console.log("[opencode-progress] gui setup", ctx.app.version, ctx.app.platform);
     void refresh();
     const timer = setInterval(() => void refresh(), 1500);
 
     ctx.add(ComposerPill, () => ({
       id: "progress",
       show: () => {
-        const roots = buildTree(state().entries);
+        const current = state();
+        const empty = Object.keys(current.entries).length === 0;
+
+        if (current.error && empty) {
+          return {
+            label: "progress: error",
+            title: "Progress plugin error",
+            rows: [
+              {
+                id: "error",
+                label: current.error.slice(0, 160),
+                tone: "danger" as const,
+              },
+            ],
+          };
+        }
+
+        if (!current.loaded && empty) {
+          return { label: "progress: loading", title: "Progress plugin" };
+        }
+
+        const roots = buildTree(current.entries);
         if (roots.length === 0) return undefined;
 
         const active = countActive(roots);
         const top = roots[0];
         const pct = progressLabel(top.progress);
+        const parts = barParts(top.progress, options);
+        const label =
+          parts.style === "emoji"
+            ? `${top.title}: ${parts.bar}${parts.fraction}`
+            : active > 0
+              ? `${top.title}${pct ? ` ${pct}` : ""}`
+              : `${roots.length} tracked`;
 
         return {
-          label: active > 0
-            ? `${top.title}${pct ? ` ${pct}` : ""}`
-            : `${roots.length} tracked`,
+          label,
           title: active > 0 ? `${active} active task${active === 1 ? "" : "s"}` : "Agent progress",
-          rows: flattenTree(roots).slice(0, 6).map(rowFor),
+          rows: flattenTreeWithDepth(roots)
+            .slice(0, 8)
+            .map(({ node, depth }) => rowFor(node, depth, options)),
         };
       },
     }));
