@@ -1,20 +1,32 @@
 {
   "name": "opencode-progress-plugin",
-  "version": "1.1.0",
-  "description": "OpenCode plugin: desktop GUI for agent progress indicators (progress tool + out-of-band relay)",
-  "main": "index.js",
-  "type": "commonjs",
+  "version": "2.0.0",
+  "description": "OpenCode plugin: native progress indicators for the TUI and desktop GUI (progress tool + out-of-band relay)",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./tui": "./src/tui.tsx",
+    "./rpc": "./src/rpc.ts",
+    "./gui-experimental": "./dist/gui-experimental.cjs"
+  },
+  "files": [
+    "src",
+    "dist"
+  ],
+  "dependencies": {
+    "@opencode/plugin": "^2.3.0"
+  },
+  "devDependencies": {
+    "solid-js": "^1.9.0",
+    "vite": "^7.0.0",
+    "vite-plugin-solid": "^2.11.0"
+  },
+  "peerDependencies": {
+    "@opentui/core": ">=0.6.6",
+    "@opentui/solid": ">=0.6.6",
+    "solid-js": ">=1.9.0"
+  },
   "engines": {
     "node": ">=18"
-  },
-  "dependencies": {
-    "preact": "^10.0.0"
-  },
-  "opencode": {
-    "features": {
-      "gui": true,
-      "server": true,
-      "rpc": true
-    }
   }
 }
