@@ -471,6 +471,12 @@ The plugin at `plugin/` targets the OpenCode **V2** plugin API and exposes four 
    > have, so the web client does not mount `./gui-experimental`. Use the desktop app, the TUI,
    > or the standalone overlay in Option B. The plugin's RPC is reachable from a web session,
    > so a small browser shim can render the same data if needed.
+   >
+   > Upstream this is tracked in [anomalyco/opencode#60976](https://github.com/anomalyco/opencode/issues/60976)
+   > ("Load configured ./gui-experimental plugins in the web app"), with working PRs
+   > [#62608](https://github.com/anomalyco/opencode/pull/62608) and
+   > [#61950](https://github.com/anomalyco/opencode/pull/61950). Once one lands, the pill
+   > works in the web app with no plugin changes.
 
 #### Option B: Standalone desktop GUI (works immediately)
 
