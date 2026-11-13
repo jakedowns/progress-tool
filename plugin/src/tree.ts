@@ -117,6 +117,13 @@ export interface BarOptions {
   total?: number;
 }
 
+export interface VisibilityOptions {
+  /** How long a completed task stays visible before the view hides it. Defaults to 8000ms. */
+  successHoldMs?: number;
+  /** Show completed tasks at all. Defaults to true. */
+  showDone?: boolean;
+}
+
 export interface BarParts {
   bar: string;
   done: number;
@@ -127,6 +134,58 @@ export interface BarParts {
 
 function clampProgress(progress: number | null | undefined): number {
   return progress == null ? 0 : Math.max(0, Math.min(1, progress));
+}
+
+/** Copy host plugin options into a plain object; the host's proxy may not outlive setup. */
+export function normalizeBarOptions(raw: unknown): BarOptions {
+  const options = (raw ?? {}) as Record<string, unknown>;
+  return {
+    style: options.barStyle === "emoji" ? "emoji" : "blocks",
+    segments:
+      typeof options.barSegments === "number" && options.barSegments > 0
+        ? options.barSegments
+        : undefined,
+    total:
+      typeof options.barTotal === "number" && options.barTotal > 0
+        ? options.barTotal
+        : undefined,
+  };
+}
+
+/** Copy visibility options into a plain object. */
+export function normalizeVisibilityOptions(raw: unknown): VisibilityOptions {
+  const options = (raw ?? {}) as Record<string, unknown>;
+  return {
+    successHoldMs:
+      typeof options.successHoldMs === "number" && options.successHoldMs >= 0
+        ? options.successHoldMs
+        : undefined,
+    showDone: options.showDone !== false,
+  };
+}
+
+/**
+ * Drop completed entries once their success confirmation has been visible long
+ * enough. Running, waiting, and error entries always stay until dismissed or
+ * updated.
+ */
+export function visibleEntries(
+  entries: Record<string, ProgressEntry>,
+  now: number,
+  options: VisibilityOptions = {}
+): Record<string, ProgressEntry> {
+  const hold = options.successHoldMs ?? 8000;
+  const showDone = options.showDone !== false;
+  const visible: Record<string, ProgressEntry> = {};
+  for (const [key, entry] of Object.entries(entries)) {
+    if (!entry || typeof entry !== "object") continue;
+    if (entry.status === "done") {
+      if (!showDone) continue;
+      if (now - (entry.updatedAt ?? 0) >= hold) continue;
+    }
+    visible[key] = entry;
+  }
+  return visible;
 }
 
 /**

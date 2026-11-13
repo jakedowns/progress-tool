@@ -402,6 +402,46 @@ The plugin at `plugin/` targets the OpenCode **V2** plugin API and exposes four 
    `opencode plugin add` only accepts npm registry packages and Git specifiers, so a local
    checkout must be registered with the config entry above.
 
+   #### Progress bar styles
+
+   Both the TUI and GUI parts read these options:
+
+   ```json
+   {
+     "plugins": [
+       {
+         "package": "/absolute/path/to/progress-tool/plugin",
+         "options": {
+           "barStyle": "emoji",
+           "barSegments": 6,
+           "barTotal": 420
+         }
+       }
+     ]
+   }
+   ```
+
+   - `barStyle`: `"blocks"` (default) or `"emoji"`.
+   - `barSegments`: cells per bar (default 10 for blocks, 6 for emoji).
+   - `barTotal`: denominator for the `(done/total)` label (default 100).
+
+   With those options the TUI renders:
+
+   ```
+   skill issues: 🟩⬛️⬛️⬛️⬛️⬛️(69/420)
+   ```
+
+   Lifecycle options:
+
+   - `successHoldMs`: how long a `done` task stays visible after its last update
+     (default `8000`). Once it expires and nothing else is active, the pill/tree hides.
+   - `showDone`: set to `false` to drop completed tasks immediately.
+
+   Running and waiting tasks stay visible. Errors stay visible until dismissed or updated on
+   purpose, so a failure cannot silently scroll away. The desktop pill adds a **✕ Dismiss** row;
+   it hides the current snapshot and reappears on the next progress update. No extra agent hook
+   is needed: report `status: "done"` once and the view handles retention and hiding.
+
 3. Verify:
 
    ```bash

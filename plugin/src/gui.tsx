@@ -9,7 +9,17 @@
 import { ComposerPill, Plugin } from "@opencode/plugin/gui";
 import { createSignal } from "solid-js";
 import { ProgressRpc } from "./rpc.js";
-import { buildTree, barParts, countActive, flattenTreeWithDepth, progressLabel, type BarOptions } from "./tree.js";
+import {
+  buildTree,
+  barParts,
+  countActive,
+  flattenTreeWithDepth,
+  normalizeBarOptions,
+  normalizeVisibilityOptions,
+  progressLabel,
+  visibleEntries,
+  type BarOptions,
+} from "./tree.js";
 import type { ProgressEntry, TreeNode } from "./types.js";
 
 type GuiState = {
@@ -53,12 +63,19 @@ function rowFor(node: TreeNode, depth: number, options: BarOptions) {
 export default Plugin.define({
   setup(ctx) {
     const [state, setState] = createSignal<GuiState>({ entries: {}, loaded: false });
-    const options = (ctx.options ?? {}) as BarOptions;
+    const [dismissedAt, setDismissedAt] = createSignal(0);
+    const options = normalizeBarOptions(ctx.options);
+    const visibility = normalizeVisibilityOptions(ctx.options);
     let alive = true;
 
     const refresh = async () => {
       try {
-        const result = await withTimeout(ctx.client.rpc(ProgressRpc).list({}), 4000);
+        const session = ctx.sessions.current();
+        if (!session) {
+          setState((prev) => ({ ...prev, loaded: true }));
+          return;
+        }
+        const result = await withTimeout(session.server.client.rpc(ProgressRpc).list({}), 4000);
         if (!alive) return;
         setState({
           entries: (result?.entries ?? {}) as Record<string, ProgressEntry>,
@@ -72,6 +89,14 @@ export default Plugin.define({
     };
 
     console.log("[opencode-progress] gui setup", ctx.app.version, ctx.app.platform);
+    if (ctx.options?.notifyOnLoad === true) {
+      ctx.toast.show({
+        title: "Progress plugin loaded",
+        description: `${ctx.app.platform} ${ctx.app.version}`,
+        variant: "success",
+        duration: 2500,
+      });
+    }
     void refresh();
     const timer = setInterval(() => void refresh(), 1500);
 
@@ -99,7 +124,13 @@ export default Plugin.define({
           return { label: "progress: loading", title: "Progress plugin" };
         }
 
-        const roots = buildTree(current.entries);
+        const maxUpdatedAt = Object.values(current.entries).reduce(
+          (max, entry) => Math.max(max, entry?.updatedAt ?? 0),
+          0
+        );
+        if (!empty && dismissedAt() >= maxUpdatedAt) return undefined;
+
+        const roots = buildTree(visibleEntries(current.entries, Date.now(), visibility));
         if (roots.length === 0) return undefined;
 
         const active = countActive(roots);
@@ -116,9 +147,16 @@ export default Plugin.define({
         return {
           label,
           title: active > 0 ? `${active} active task${active === 1 ? "" : "s"}` : "Agent progress",
-          rows: flattenTreeWithDepth(roots)
-            .slice(0, 8)
-            .map(({ node, depth }) => rowFor(node, depth, options)),
+          rows: [
+            ...flattenTreeWithDepth(roots)
+              .slice(0, 7)
+              .map(({ node, depth }) => rowFor(node, depth, options)),
+            {
+              id: "dismiss",
+              label: "✕ Dismiss",
+              run: () => setDismissedAt(maxUpdatedAt),
+            },
+          ],
         };
       },
     }));

@@ -9,13 +9,25 @@
 import { For, Show, createSignal } from "solid-js";
 import { Plugin, usePlugin } from "@opencode/plugin/tui";
 import { readProgressState } from "./state.js";
-import { buildTree, barParts, countActive, progressLabel, type BarOptions } from "./tree.js";
+import {
+  buildTree,
+  barParts,
+  countActive,
+  normalizeBarOptions,
+  normalizeVisibilityOptions,
+  progressLabel,
+  visibleEntries,
+  type BarOptions,
+  type VisibilityOptions,
+} from "./tree.js";
 import type { ProgressStatus, ProgressState, TreeNode } from "./types.js";
 
 const [state, setState] = createSignal<ProgressState>(readProgressState());
 
 let pollers = 0;
 let timer: ReturnType<typeof setInterval> | undefined;
+let barOptions: BarOptions = {};
+let visibilityOptions: VisibilityOptions = {};
 
 function startPolling(): () => void {
   pollers += 1;
@@ -42,11 +54,10 @@ function glyph(status: ProgressStatus): string {
 
 function ProgressNode(props: { node: TreeNode; depth: number }) {
   const ctx = usePlugin();
-  const options = (ctx.options ?? {}) as BarOptions;
   const indent = () => (props.depth === 0 ? "" : `${"  ".repeat(props.depth)}└─ `);
 
   const label = () => {
-    const parts = barParts(props.node.progress, options);
+    const parts = barParts(props.node.progress, barOptions);
     if (parts.style === "emoji") {
       const suffix =
         props.node.status === "done" ? " ✓" : props.node.status === "error" ? " ✗" : "";
@@ -74,7 +85,8 @@ function ProgressNode(props: { node: TreeNode; depth: number }) {
 
 function ProgressTree() {
   const ctx = usePlugin();
-  const roots = () => buildTree(state().entries ?? {}).slice(0, 4);
+  const roots = () =>
+    buildTree(visibleEntries(state().entries ?? {}, Date.now(), visibilityOptions)).slice(0, 4);
 
   return (
     <Show when={roots().length > 0}>
@@ -89,7 +101,7 @@ function ProgressTree() {
 function FooterStatus() {
   const ctx = usePlugin();
   const summary = () => {
-    const roots = buildTree(state().entries ?? {});
+    const roots = buildTree(visibleEntries(state().entries ?? {}, Date.now(), visibilityOptions));
     if (roots.length === 0) return "";
     const active = countActive(roots);
     const top = roots[0];
@@ -107,6 +119,8 @@ function FooterStatus() {
 export default Plugin.define({
   id: "opencode-progress.tui",
   setup(context) {
+    barOptions = normalizeBarOptions(context.options);
+    visibilityOptions = normalizeVisibilityOptions(context.options);
     const stopPolling = startPolling();
     if (context.options?.notifyOnLoad === true) {
       context.ui.toast.show({ message: "Progress plugin loaded", variant: "success" });
