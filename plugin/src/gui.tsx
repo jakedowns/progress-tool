@@ -41,7 +41,7 @@ export default Plugin.define({
 
     const refresh = async () => {
       try {
-        const result = await ctx.client.rpc(ProgressRpc).list();
+        const result = await ctx.client.rpc(ProgressRpc).list({});
         if (!alive) return;
         setState({
           entries: (result?.entries ?? {}) as Record<string, ProgressEntry>,
@@ -55,23 +55,25 @@ export default Plugin.define({
     void refresh();
     const timer = setInterval(() => void refresh(), 1500);
 
-    ctx.add(ComposerPill, () => {
-      const roots = buildTree(state().entries);
-      if (roots.length === 0) return undefined;
+    ctx.add(ComposerPill, () => ({
+      id: "progress",
+      show: () => {
+        const roots = buildTree(state().entries);
+        if (roots.length === 0) return undefined;
 
-      const active = countActive(roots);
-      const top = roots[0];
-      const pct = progressLabel(top.progress);
+        const active = countActive(roots);
+        const top = roots[0];
+        const pct = progressLabel(top.progress);
 
-      return {
-        id: "progress",
-        label: active > 0
-          ? `${top.title}${pct ? ` ${pct}` : ""}`
-          : `${roots.length} tracked`,
-        title: active > 0 ? `${active} active task${active === 1 ? "" : "s"}` : "Agent progress",
-        rows: flattenTree(roots).slice(0, 6).map(rowFor),
-      };
-    });
+        return {
+          label: active > 0
+            ? `${top.title}${pct ? ` ${pct}` : ""}`
+            : `${roots.length} tracked`,
+          title: active > 0 ? `${active} active task${active === 1 ? "" : "s"}` : "Agent progress",
+          rows: flattenTree(roots).slice(0, 6).map(rowFor),
+        };
+      },
+    }));
 
     return () => {
       alive = false;

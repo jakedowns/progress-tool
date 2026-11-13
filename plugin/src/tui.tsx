@@ -101,12 +101,15 @@ export default Plugin.define({
   id: "opencode-progress.tui",
   setup(context) {
     const stopPolling = startPolling();
+    if (context.options?.notifyOnLoad === true) {
+      context.ui.toast.show({ message: "Progress plugin loaded", variant: "success" });
+    }
     const unregisterTree = context.ui.slot({
       append: "session.composer.top",
       render: () => <ProgressTree />,
     });
     const unregisterFooter = context.ui.slot({
-      append: "prompt.footer.status",
+      append: "home.footer.status",
       render: () => <FooterStatus />,
     });
 

@@ -11,6 +11,9 @@ export const ProgressRpc = Rpc.define({
   id: "opencode-progress",
   methods: {
     list: {
+      input: {
+        // Empty schema: accept `list()` from older bundles and `list({})`.
+      },
       output: {
         type: "object",
         properties: {

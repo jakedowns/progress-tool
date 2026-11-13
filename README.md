@@ -366,31 +366,56 @@ For npm installs, the `bin` entries are installed automatically.
 
 ### Step 3: Choose a desktop GUI
 
-#### Option A: OpenCode plugin (integrated into the desktop app)
+#### Option A: OpenCode plugin (TUI + desktop/web GUI)
 
-The plugin code is complete at `plugin/`. However, `opencode plugin add` currently only accepts npm registry packages or Git specifiers, not local paths. To install:
+The plugin at `plugin/` targets the OpenCode **V2** plugin API and exposes four parts:
+`server`, `tui`, `rpc`, and `gui-experimental`.
 
-1. Publish to npm: `npm publish` (from `plugin/` directory), then:
+1. Build the desktop/web GUI bundle (only needed after editing `plugin/src/gui.tsx`):
+
    ```bash
-   opencode plugin add opencode-progress-plugin
+   cd plugin
+   npm install
+   npm run build
    ```
 
-2. Or use a Git URL:
-   ```bash
-   opencode plugin add github:your-username/opencode-progress-plugin
-   ```
+   `dist/gui-experimental.cjs` is committed, so a fresh checkout already has a bundle.
 
-3. Or manually add to your OpenCode config (the `plugins` section in `opencode.json`):
+2. Register the plugin. Desktop and browsers only read the **global** config, so add it to
+   `~/.config/opencode/opencode.json`:
+
    ```json
    {
-     "plugins": {
-       "opencode-progress-plugin": {
-         "type": "local",
-         "path": "./plugin"
-       }
-     }
+     "$schema": "https://opencode.ai/config.json",
+     "plugins": ["/absolute/path/to/progress-tool/plugin"]
    }
    ```
+
+   For the terminal UI, also add it to `~/.config/opencode/cli.json`:
+
+   ```json
+   {
+     "plugins": ["/absolute/path/to/progress-tool/plugin"]
+   }
+   ```
+
+   `opencode plugin add` only accepts npm registry packages and Git specifiers, so a local
+   checkout must be registered with the config entry above.
+
+3. Verify:
+
+   ```bash
+   opencode plugin list
+   opencode api get /api/plugin
+   ```
+
+   Both should list `opencode-progress` with features `server`, `tui`, `rpc`, and `gui`.
+
+4. Desktop/web: **Settings → Extensions → Plugins → Reload** (or open a new window).
+   A progress pill appears in the composer; its menu lists the dependency tree.
+
+   TUI: the composer footer shows `N active · <title> <percent>` and the tree renders above
+   the composer.
 
 #### Option B: Standalone desktop GUI (works immediately)
 
@@ -536,9 +561,13 @@ If you linked the relay: `cd mcp-server && npm unlink -g progress-mcp-server`.
 - `mcp-server/progress-emit.js` — `progress-emit` bin shim
 - `mcp-server/test/smoke.test.js` — relay/MCP/concurrency smoke tests
 - `mcp-server/package.json` — MCP server manifest
-- `plugin/index.js` — OpenCode plugin server-side code
-- `plugin/gui-experimental.js` — OpenCode plugin GUI bundle (renders nested tree)
-- `plugin/package.json` — OpenCode plugin manifest
+- `plugin/src/index.ts` — OpenCode server part (RPC + state watcher)
+- `plugin/src/tui.tsx` — OpenCode TUI part (composer footer + tree)
+- `plugin/src/gui.tsx` — OpenCode desktop/web GUI part (composer pill)
+- `plugin/src/rpc.ts` — shared RPC contract (`list`, `updated`)
+- `plugin/dist/gui-experimental.cjs` — prebuilt desktop/web GUI bundle (commit this)
+- `plugin/package.json` — OpenCode plugin manifest (V2 `exports`)
+- `plugin/index.js`, `plugin/gui-experimental.js` — legacy V1 plugin code (not loaded)
 - `progress-gui-server.js` — Standalone desktop GUI HTTP server (renders nested tree)
 - `launch-gui.sh` — Launch script for standalone GUI
 - `setup.sh` — Setup script (installs MCP server)

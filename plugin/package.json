@@ -13,6 +13,10 @@
     "src",
     "dist"
   ],
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch"
+  },
   "dependencies": {
     "@opencode/plugin": "^2.3.0"
   },
