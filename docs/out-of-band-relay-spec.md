@@ -118,8 +118,9 @@ Implementations MUST support an override:
 ```json
 {
   "entries": {
-    "<id>": {
+    "<storage-key>": {
       "id": "string",
+      "sessionId": "string (optional; present when scoped)",
       "status": "running | waiting | done | error",
       "title": "string",
       "detail": "string | null",
@@ -134,8 +135,10 @@ Implementations MUST support an override:
 }
 ```
 
+`<storage-key>` is `<id>` for legacy unscoped entries, or `<sessionId>:<id>` when a session is active. `entry.id` and `entry.parentId` remain clean task IDs even when the storage key is composite.
+
 Required per entry: `id`, `status`, `title`, `updatedAt`.
-Optional per entry: `detail`, `progress`, `parentId`, `startedAt`, `createdAt`.
+Optional per entry: `sessionId`, `detail`, `progress`, `parentId`, `startedAt`, `createdAt`.
 
 Readers MUST ignore unknown fields and MUST tolerate missing optional fields.
 
@@ -180,6 +183,18 @@ Completed entries (`done` or `error`) SHOULD be pruned after a retention period 
 
 Two relays updating sibling children of the same parent MUST both survive. A parent's rolled-up status/progress is derived at read time from the children, so the store MUST NOT persist a stale parent roll-up that overwrites a sibling update.
 
+### 4.8 Session scoping
+
+Implementations MAY support multiple concurrent sessions sharing one state file. When a session scope is active:
+
+- Resolve the session ID in this priority order: explicit `sessionId` / `--session` -> `PROGRESS_SESSION_ID` -> `OPENCODE_SESSION_ID` -> `null`.
+- Store entries under the composite key `<sessionId>:<id>` and record `sessionId` on the entry.
+- Keep `entry.id` clean (`build-1`). The relay SHOULD also keep `entry.parentId` clean and apply the session namespace only when resolving parent/child relationships for roll-up.
+- Parent roll-up MUST only match a parent within the same session. Identical task IDs in two sessions MUST NOT collide or cross-contaminate status/progress.
+- When no session resolves, implementations MUST preserve flat `<id>` keys for backwards compatibility.
+
+A shared global view can group entries by `sessionId`; harnesses that need complete isolation MAY use a separate `PROGRESS_STATE_PATH` per session instead.
+
 ---
 
 ## 5. Control-plane contract (progress tool)
@@ -193,7 +208,8 @@ progress({
   title: string,              // required
   detail?: string,
   progress?: number,          // 0..1
-  parentId?: string
+  parentId?: string,
+  sessionId?: string          // optional override; auto from env when omitted
 })
 ```
 
@@ -203,8 +219,9 @@ Validation requirements:
 - `status` MUST be one of the four values.
 - `title` MUST be a non-empty string.
 - `progress`, when present, MUST be a finite number in `[0, 1]`.
-- `detail` and `parentId`, when present, MUST be strings.
+- `detail`, `parentId`, and `sessionId`, when present, MUST be strings.
 - Empty `parentId` SHOULD be treated as `null`.
+- `sessionId` resolution MUST follow §4.8: explicit value, then `PROGRESS_SESSION_ID`, then `OPENCODE_SESSION_ID`, then unscoped.
 
 ### 5.2 Behavior
 
