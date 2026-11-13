@@ -86,9 +86,9 @@ progress({
 - **Fire-and-forget** — does not pause the agent
 - **Same `id` updates in place** — call again with the same id to refresh
 - **Never requires a human reply**
-- **Tree-like dependencies** — pass `parentId` to nest a task under a parent; parent status/progress rolls up from children (bootvine-inspired)
+- **Tree-like dependencies** — pass `parentId` to nest a task under a parent; parent status rolls up from children, and parent progress is the mean of child progress when the parent has no explicit progress (bootvine-inspired)
 - **Session isolation** — `sessionId` resolves from an explicit input, then `PROGRESS_SESSION_ID`, then `OPENCODE_SESSION_ID`. When present, entries are namespaced internally as `${sessionId}:${id}` so identical task IDs in concurrent sessions never collide. When absent, the original flat `id` keying is preserved for 100% backwards compatibility. Keep task IDs clean (`"build-1"`); do not manually prefix them.
-- Renders as floating indicators in the top-right of the desktop GUI
+- Renders in the TUI above the composer and as a composer pill in desktop/web; the optional standalone GUI uses a floating top-right overlay
 
 ### Drop-in tool definition (harness-agnostic)
 
@@ -106,7 +106,7 @@ OWNERSHIP & ZERO-POLLING CONTRACT:
 
 TREE ROLLUP (BOOTVINE SEMANTICS):
 - Pass `parentId` to nest sub-tasks under a parent task.
-- Parent status and progress automatically roll up from children (any child "error" -> parent "error"; any child "running"/"waiting" -> parent "running"/"waiting"; parent progress = mean of child progress).
+- Parent status and progress automatically roll up from children (any child "error" -> parent "error"; any child "running"/"waiting" -> parent "running"/"waiting"; parent progress = mean of child progress when the parent has no explicit progress).
 
 SESSION ISOLATION:
 - Concurrent sessions are isolated automatically via OPENCODE_SESSION_ID / PROGRESS_SESSION_ID (or an explicit `sessionId` override).
@@ -251,7 +251,7 @@ If an entry is scoped to a session, the hint also includes `--session <id>` so t
 
 ## Tree-like dependencies (bootvine-inspired)
 
-Both the MCP server and the GUI support nested tasks via `parentId`. A parent's status and progress are derived from its children:
+Both the MCP server and the views support nested tasks via `parentId`. A parent's status is derived from its children, and its progress is the mean of its children when it has no explicit progress:
 
 ```
 ├── build [██████░░░░] 6/10 · compiling SDL2
@@ -259,7 +259,7 @@ Both the MCP server and the GUI support nested tasks via `parentId`. A parent's 
 └── npm-install [██████████] 10/10 · done ✓
 ```
 
-If any child errors, the parent shows `error`. If any child is still running/waiting, the parent shows `running`/`waiting`. Parent progress is the average of child progress values. The relay can attach to a child with `--parent`, so a long build can stream into `build-1` while the agent only reports milestone transitions.
+If any child errors, the parent shows `error`. If any child is still running/waiting, the parent shows `running`/`waiting`. Parent progress is the average of child progress values when the parent has no explicit progress; otherwise the parent's own value wins. The relay can attach to a child with `--parent`, so a long build can stream into `build-1` while the agent only reports milestone transitions.
 
 ---
 
@@ -270,7 +270,7 @@ Both the MCP server and the relay share [`mcp-server/state-store.js`](./mcp-serv
 - **Atomic writes** — write to a temp file in the same directory, `fsync`, then `rename`. Readers never see partial JSON.
 - **Cross-process lock** — a `.lock` file serializes read-modify-write cycles, so concurrent child relays updating sibling `parentId` nodes do not lose updates or corrupt parent roll-ups.
 - **Stale-lock recovery** — a lock older than 15 seconds is broken rather than wedging the command.
-- **TTL cleanup** — completed entries older than 10 minutes are pruned (`PROGRESS_TTL_MS`).
+- **TTL cleanup** — completed entries older than 10 minutes are pruned on the next state write (`PROGRESS_TTL_MS`).
 - **Session scoping** — when `sessionId` is resolved, keys are `${sessionId}:${id}` and entries carry `sessionId`; parent lookups stay within that namespace. With no session, keys remain flat (`build`) for backwards compatibility.
 - **Path override** — `PROGRESS_STATE_PATH` for tests, multiple harnesses, or fully isolated sessions.
 
@@ -326,7 +326,7 @@ The full normative spec, including conformance tests and harness integration not
 | `progress-relay` bin shim | `mcp-server/progress-relay.js` | ✅ |
 | `progress-emit` bin shim | `mcp-server/progress-emit.js` | ✅ |
 | Smoke tests (relay + MCP + concurrency) | `mcp-server/test/smoke.test.js` | ✅ |
-| OpenCode plugin (desktop GUI) | `plugin/` | ✅ |
+| OpenCode plugin (server + TUI + desktop/web GUI) | `plugin/` | ✅ |
 | Standalone desktop GUI server | `progress-gui-server.js` | ✅ |
 | Setup script | `setup.sh` | ✅ |
 | Launch script | `launch-gui.sh` | ✅ |
@@ -343,9 +343,8 @@ The full normative spec, including conformance tests and harness integration not
 opencode mcp add progress-server -- ./mcp-server/index.js
 ```
 
-Then restart OpenCode: `opencode service restart`
-
-Verify: `opencode mcp list` should show `progress-server` as **connected**.
+Verify: `opencode mcp list` should show `progress-server` as **connected**. OpenCode reloads
+config automatically; only restart the service if the server does not reconnect.
 
 ### Step 2: Make the relay available (optional but recommended)
 
@@ -364,7 +363,7 @@ node /path/to/mcp-server/index.js relay --id build-1 -- <cmd>
 
 For npm installs, the `bin` entries are installed automatically.
 
-### Step 3: Choose a desktop GUI
+### Step 3: Install the view (TUI + desktop/web GUI)
 
 #### Option A: OpenCode plugin (TUI + desktop/web GUI)
 
@@ -387,7 +386,9 @@ The plugin at `plugin/` targets the OpenCode **V2** plugin API and exposes four 
    ```json
    {
      "$schema": "https://opencode.ai/config.json",
-     "plugins": ["/absolute/path/to/progress-tool/plugin"]
+     "plugins": [
+       { "package": "/absolute/path/to/progress-tool/plugin" }
+     ]
    }
    ```
 
@@ -395,7 +396,9 @@ The plugin at `plugin/` targets the OpenCode **V2** plugin API and exposes four 
 
    ```json
    {
-     "plugins": ["/absolute/path/to/progress-tool/plugin"]
+     "plugins": [
+       { "package": "/absolute/path/to/progress-tool/plugin" }
+     ]
    }
    ```
 
@@ -431,6 +434,9 @@ The plugin at `plugin/` targets the OpenCode **V2** plugin API and exposes four 
    skill issues: 🟩⬛️⬛️⬛️⬛️⬛️(69/420)
    ```
 
+   The plugin never seeds demo tasks; `skill issues` is just an example task title. For demos,
+   point `PROGRESS_STATE_PATH` at a throwaway file so demo entries never touch the real state.
+
    Lifecycle options:
 
    - `successHoldMs`: how long a `done` task stays visible after its last update
@@ -438,9 +444,10 @@ The plugin at `plugin/` targets the OpenCode **V2** plugin API and exposes four 
    - `showDone`: set to `false` to drop completed tasks immediately.
 
    Running and waiting tasks stay visible. Errors stay visible until dismissed or updated on
-   purpose, so a failure cannot silently scroll away. The desktop pill adds a **✕ Dismiss** row;
-   it hides the current snapshot and reappears on the next progress update. No extra agent hook
-   is needed: report `status: "done"` once and the view handles retention and hiding.
+   purpose, so a failure cannot silently scroll away. In the desktop pill, each root row has a
+   **✕** icon that dismisses that tree, and **✕ Dismiss all** hides every current report. A
+   dismissed tree reappears on its next progress update. No extra agent hook is needed: report
+   `status: "done"` once and the view handles retention and hiding.
 
 3. Verify:
 
@@ -579,14 +586,23 @@ npm test
 
 The smoke suite covers one-shot emits, session resolution and isolation, pipe mode, wrap mode with a failing exit code, field preservation when attaching a relay, the MCP handshake and relay hint, 16 concurrent writers against one state file, and two concurrent sessions using identical task IDs (including parent roll-ups).
 
+For manual demos, keep the real state clean by pointing the server, relay, and view at a throwaway file:
+
+```bash
+PROGRESS_STATE_PATH=/tmp/progress-demo.json ...
+```
+
 ---
 
 ## Uninstalling
 
 ```bash
 opencode mcp remove progress-server
-# or edit your config to remove the server entry
 ```
+
+Then remove the plugin entry from `~/.config/opencode/opencode.json` and, if you added it,
+from `~/.config/opencode/cli.json`. For a published package, `opencode plugin remove <package>`
+also works.
 
 If you linked the relay: `cd mcp-server && npm unlink -g progress-mcp-server`.
 

@@ -72,7 +72,31 @@ export function buildTree(entries: Record<string, ProgressEntry>): TreeNode[] {
     const children = (childrenByKey.get(key) ?? [])
       .filter((child) => !seen.has(child))
       .map(node);
-    return { ...entry, key, children };
+
+    // Roll up parent status/progress from children (bootvine-inspired).
+    let status = entry.status;
+    let progress = entry.progress;
+    let updatedAt = entry.updatedAt;
+
+    if (children.length > 0) {
+      const statuses = children.map((child) => child.status);
+      if (statuses.includes("error")) status = "error";
+      else if (statuses.includes("running")) status = "running";
+      else if (statuses.includes("waiting")) status = "waiting";
+      else if (statuses.every((child) => child === "done")) status = "done";
+
+      const childProgresses = children
+        .map((child) => child.progress)
+        .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+      if (progress == null && childProgresses.length > 0) {
+        progress = childProgresses.reduce((a, b) => a + b, 0) / childProgresses.length;
+      }
+
+      const latestChild = children.reduce((latest, child) => Math.max(latest, child.updatedAt ?? 0), 0);
+      if (latestChild > (updatedAt ?? 0)) updatedAt = latestChild;
+    }
+
+    return { ...entry, key, children, status, progress, updatedAt };
   };
 
   return roots.map(node);

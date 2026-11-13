@@ -64,6 +64,7 @@ export default Plugin.define({
   setup(ctx) {
     const [state, setState] = createSignal<GuiState>({ entries: {}, loaded: false });
     const [dismissedAt, setDismissedAt] = createSignal(0);
+    const [dismissedRoots, setDismissedRoots] = createSignal<Record<string, number>>({});
     const options = normalizeBarOptions(ctx.options);
     const visibility = normalizeVisibilityOptions(ctx.options);
     let alive = true;
@@ -131,10 +132,14 @@ export default Plugin.define({
         if (!empty && dismissedAt() >= maxUpdatedAt) return undefined;
 
         const roots = buildTree(visibleEntries(current.entries, Date.now(), visibility));
-        if (roots.length === 0) return undefined;
+        const dismissed = dismissedRoots();
+        const visibleRoots = roots.filter(
+          (root) => (dismissed[root.key] ?? 0) < (root.updatedAt ?? 0)
+        );
+        if (visibleRoots.length === 0) return undefined;
 
-        const active = countActive(roots);
-        const top = roots[0];
+        const active = countActive(visibleRoots);
+        const top = visibleRoots[0];
         const pct = progressLabel(top.progress);
         const parts = barParts(top.progress, options);
         const label =
@@ -142,18 +147,31 @@ export default Plugin.define({
             ? `${top.title}: ${parts.bar}${parts.fraction}`
             : active > 0
               ? `${top.title}${pct ? ` ${pct}` : ""}`
-              : `${roots.length} tracked`;
+              : `${visibleRoots.length} tracked`;
 
         return {
           label,
           title: active > 0 ? `${active} active task${active === 1 ? "" : "s"}` : "Agent progress",
           rows: [
-            ...flattenTreeWithDepth(roots)
+            ...flattenTreeWithDepth(visibleRoots)
               .slice(0, 7)
-              .map(({ node, depth }) => rowFor(node, depth, options)),
+              .map(({ node, depth }) => {
+                const row = rowFor(node, depth, options);
+                if (depth !== 0) return row;
+                return {
+                  ...row,
+                  icon: "circle-x" as const,
+                  detail: row.detail ?? "dismiss",
+                  run: () =>
+                    setDismissedRoots((prev) => ({
+                      ...prev,
+                      [node.key]: node.updatedAt ?? 0,
+                    })),
+                };
+              }),
             {
               id: "dismiss",
-              label: "✕ Dismiss",
+              label: "✕ Dismiss all",
               run: () => setDismissedAt(maxUpdatedAt),
             },
           ],
