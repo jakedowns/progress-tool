@@ -1,0 +1,12 @@
+{
+  "mcp": {
+    "servers": {
+      "progress-server": {
+        "type": "local",
+        "command": [
+          "/media/share/progress-tool/mcp-server/index.js"
+        ]
+      }
+    }
+  }
+}
