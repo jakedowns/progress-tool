@@ -17,6 +17,7 @@ import {
   normalizeBarOptions,
   normalizeVisibilityOptions,
   progressLabel,
+  scopeEntries,
   visibleEntries,
   type BarOptions,
 } from "./tree.js";
@@ -103,9 +104,10 @@ export default Plugin.define({
 
     ctx.add(ComposerPill, () => ({
       id: "progress",
-      show: () => {
+      show: (input) => {
         const current = state();
-        const empty = Object.keys(current.entries).length === 0;
+        const scoped = scopeEntries(current.entries, input.session.id, visibility);
+        const empty = Object.keys(scoped).length === 0;
 
         if (current.error && empty) {
           return {
@@ -125,13 +127,13 @@ export default Plugin.define({
           return { label: "progress: loading", title: "Progress plugin" };
         }
 
-        const maxUpdatedAt = Object.values(current.entries).reduce(
+        const maxUpdatedAt = Object.values(scoped).reduce(
           (max, entry) => Math.max(max, entry?.updatedAt ?? 0),
           0
         );
         if (!empty && dismissedAt() >= maxUpdatedAt) return undefined;
 
-        const roots = buildTree(visibleEntries(current.entries, Date.now(), visibility));
+        const roots = buildTree(visibleEntries(scoped, Date.now(), visibility));
         const dismissed = dismissedRoots();
         const visibleRoots = roots.filter(
           (root) => (dismissed[root.key] ?? 0) < (root.updatedAt ?? 0)

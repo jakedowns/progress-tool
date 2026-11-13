@@ -442,6 +442,8 @@ The plugin at `plugin/` targets the OpenCode **V2** plugin API and exposes four 
    - `successHoldMs`: how long a `done` task stays visible after its last update
      (default `8000`). Once it expires and nothing else is active, the pill/tree hides.
    - `showDone`: set to `false` to drop completed tasks immediately.
+   - `scope`: `"session"` (default) shows only the current chat's tasks; `"all"` shows every
+     session sharing the state file.
 
    Running and waiting tasks stay visible. Errors stay visible until dismissed or updated on
    purpose, so a failure cannot silently scroll away. In the desktop pill, each root row has a
@@ -463,6 +465,12 @@ The plugin at `plugin/` targets the OpenCode **V2** plugin API and exposes four 
 
    TUI: the composer footer shows `N active · <title> <percent>` and the tree renders above
    the composer.
+
+   > **Web tabs:** the native composer pill currently loads only in the desktop app. A plain
+   > browser tab receives GUI plugin bundles through the Electron bridge, which it does not
+   > have, so the web client does not mount `./gui-experimental`. Use the desktop app, the TUI,
+   > or the standalone overlay in Option B. The plugin's RPC is reachable from a web session,
+   > so a small browser shim can render the same data if needed.
 
 #### Option B: Standalone desktop GUI (works immediately)
 

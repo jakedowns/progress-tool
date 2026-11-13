@@ -16,6 +16,7 @@ import {
   normalizeBarOptions,
   normalizeVisibilityOptions,
   progressLabel,
+  scopeEntries,
   visibleEntries,
   type BarOptions,
   type VisibilityOptions,
@@ -83,10 +84,16 @@ function ProgressNode(props: { node: TreeNode; depth: number }) {
   );
 }
 
-function ProgressTree() {
+function ProgressTree(props: { sessionID: string }) {
   const ctx = usePlugin();
   const roots = () =>
-    buildTree(visibleEntries(state().entries ?? {}, Date.now(), visibilityOptions)).slice(0, 4);
+    buildTree(
+      visibleEntries(
+        scopeEntries(state().entries ?? {}, props.sessionID, visibilityOptions),
+        Date.now(),
+        visibilityOptions
+      )
+    ).slice(0, 4);
 
   return (
     <Show when={roots().length > 0}>
@@ -101,12 +108,9 @@ function ProgressTree() {
 function FooterStatus() {
   const ctx = usePlugin();
   const summary = () => {
-    const roots = buildTree(visibleEntries(state().entries ?? {}, Date.now(), visibilityOptions));
-    if (roots.length === 0) return "";
+    const roots = buildTree(state().entries ?? {});
     const active = countActive(roots);
-    const top = roots[0];
-    const pct = progressLabel(top.progress);
-    return `${active} active · ${top.title}${pct ? ` ${pct}` : ""}`;
+    return active > 0 ? `${active} active task${active === 1 ? "" : "s"}` : "";
   };
 
   return (
@@ -127,7 +131,7 @@ export default Plugin.define({
     }
     const unregisterTree = context.ui.slot({
       append: "session.composer.top",
-      render: () => <ProgressTree />,
+      render: ({ sessionID }) => <ProgressTree sessionID={sessionID} />,
     });
     const unregisterFooter = context.ui.slot({
       append: "home.footer.status",

@@ -338,7 +338,16 @@ function handleRequest(req) {
           sendError(id, -32601, `Unknown tool: ${name}`);
           break;
         }
-        handleProgressCall(id, args);
+        const callArgs = { ...(args && typeof args === 'object' ? args : {}) };
+        const metaSession = params?._meta?.['ai.opencode/sessionID'];
+        if (
+          callArgs.sessionId === undefined &&
+          typeof metaSession === 'string' &&
+          metaSession
+        ) {
+          callArgs.sessionId = metaSession;
+        }
+        handleProgressCall(id, callArgs);
         break;
       }
 

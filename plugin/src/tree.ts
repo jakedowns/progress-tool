@@ -146,6 +146,8 @@ export interface VisibilityOptions {
   successHoldMs?: number;
   /** Show completed tasks at all. Defaults to true. */
   showDone?: boolean;
+  /** Show only the current session's tasks (default) or every session. */
+  scope?: "session" | "all";
 }
 
 export interface BarParts {
@@ -185,7 +187,28 @@ export function normalizeVisibilityOptions(raw: unknown): VisibilityOptions {
         ? options.successHoldMs
         : undefined,
     showDone: options.showDone !== false,
+    scope: options.scope === "all" ? "all" : "session",
   };
+}
+
+/**
+ * Keep entries belonging to one session. Entries without a session are hidden
+ * by default, so a global/legacy report cannot leak into every chat.
+ */
+export function scopeEntries(
+  entries: Record<string, ProgressEntry>,
+  sessionID: string | undefined,
+  options: VisibilityOptions = {}
+): Record<string, ProgressEntry> {
+  if (options.scope === "all") return entries;
+  if (!sessionID) return {};
+  const prefix = `${sessionID}:`;
+  const scoped: Record<string, ProgressEntry> = {};
+  for (const [key, entry] of Object.entries(entries)) {
+    if (!entry || typeof entry !== "object") continue;
+    if (entry.sessionId === sessionID || key.startsWith(prefix)) scoped[key] = entry;
+  }
+  return scoped;
 }
 
 /**
