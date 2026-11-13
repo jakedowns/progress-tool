@@ -1,5 +1,7 @@
 node_modules/
-dist/
 build/
 *.tgz
 .DS_Store
+
+# The desktop GUI bundle is loaded at runtime, so dist/ is committed.
+dist/*.map
