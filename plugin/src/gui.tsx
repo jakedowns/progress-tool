@@ -15,6 +15,7 @@ import {
   countActive,
   flattenTreeWithDepth,
   normalizeBarOptions,
+  normalizeRefreshMs,
   normalizeVisibilityOptions,
   progressLabel,
   scopeEntries,
@@ -68,6 +69,7 @@ export default Plugin.define({
     const [dismissedRoots, setDismissedRoots] = createSignal<Record<string, number>>({});
     const options = normalizeBarOptions(ctx.options);
     const visibility = normalizeVisibilityOptions(ctx.options);
+    const refreshMs = normalizeRefreshMs(ctx.options);
     let alive = true;
 
     const refresh = async () => {
@@ -100,7 +102,7 @@ export default Plugin.define({
       });
     }
     void refresh();
-    const timer = setInterval(() => void refresh(), 1500);
+    const timer = setInterval(() => void refresh(), refreshMs);
 
     ctx.add(ComposerPill, () => ({
       id: "progress",

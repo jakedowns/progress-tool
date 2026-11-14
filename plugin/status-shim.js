@@ -152,7 +152,7 @@
     var getEntries = options.getEntries || function () {
       return {};
     };
-    var intervalMs = options.intervalMs || 1500;
+    var intervalMs = options.intervalMs || options.refreshMs || 1000;
     var selectors = options.anchorSelectors || DEFAULT_ANCHORS;
     var shimByAnchor = new Map();
     var timer = null;
@@ -269,6 +269,10 @@
     if (!window.__ocProgressStatusShim) {
       var entriesRef = { current: {} };
       var url = window.OC_PROGRESS_URL || 'http://localhost:8765/api/progress';
+      var intervalMs =
+        typeof window.OC_PROGRESS_REFRESH_MS === 'number' && window.OC_PROGRESS_REFRESH_MS >= 100
+          ? window.OC_PROGRESS_REFRESH_MS
+          : 1000;
 
       function poll() {
         try {
@@ -284,7 +288,7 @@
       }
 
       poll();
-      setInterval(poll, 1500);
+      setInterval(poll, intervalMs);
 
       window.__ocProgressStatusShim = createStatusShim({
         getEntries: function () {

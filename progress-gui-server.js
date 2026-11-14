@@ -96,6 +96,13 @@ function readState() {
   }
 }
 
+// How often the browser view re-fetches state (ms). Configurable via env;
+// floored at 100ms so a typo cannot hot-loop the poller.
+const GUI_REFRESH_MS = Math.max(
+  100,
+  Number(process.env.PROGRESS_GUI_REFRESH_MS) || 1000
+);
+
 const HTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -257,6 +264,7 @@ const HTML = `<!DOCTYPE html>
 
 <script>
 const STATE_URL = '/api/progress';
+window.OC_PROGRESS_REFRESH_MS = ${GUI_REFRESH_MS};
 const container = document.getElementById('progress-container');
 const emptyDiv = document.getElementById('empty');
 const closedIds = new Set();
@@ -454,7 +462,7 @@ function escapeHtml(text) {
 }
 
 fetchState();
-setInterval(fetchState, 1000);
+setInterval(fetchState, ${GUI_REFRESH_MS});
 window.addEventListener('focus', fetchState);
 </script>
 </body>

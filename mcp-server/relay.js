@@ -31,7 +31,10 @@ const {
   upsertProgress,
 } = require('./state-store');
 
-const DEFAULT_MAX_HZ = 4;
+const DEFAULT_MAX_HZ = (() => {
+  const raw = Number.parseFloat(process.env.PROGRESS_RELAY_MAX_HZ || '');
+  return Number.isFinite(raw) && raw >= 0 ? raw : 4;
+})();
 const MAX_DETAIL_LENGTH = 240;
 const MAX_LINE_BUFFER = 64 * 1024;
 const STATUSES = ['running', 'waiting', 'done', 'error'];

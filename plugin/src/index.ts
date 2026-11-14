@@ -8,6 +8,7 @@
 import { Plugin } from "@opencode/plugin";
 import { ProgressRpc } from "./rpc.js";
 import { readProgressState } from "./state.js";
+import { normalizeRefreshMs } from "./tree.js";
 
 export default Plugin.define({
   id: "opencode-progress",
@@ -21,12 +22,14 @@ export default Plugin.define({
       },
     });
 
+    const refreshMs = normalizeRefreshMs(ctx.options);
+
     const timer = setInterval(() => {
       const next = JSON.stringify(readProgressState().entries ?? {});
       if (next === signature) return;
       signature = next;
       void registration.events.emit("updated", { updatedAt: Date.now() }).catch(() => {});
-    }, 1000);
+    }, refreshMs);
 
     console.log("[opencode-progress] server part loaded");
 

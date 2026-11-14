@@ -178,6 +178,17 @@ export function normalizeBarOptions(raw: unknown): BarOptions {
   };
 }
 
+/**
+ * Resolve the view refresh interval (ms) from plugin options.
+ * Defaults to 1000ms; floored at 100ms so a typo cannot hot-loop the poller.
+ */
+export function normalizeRefreshMs(raw: unknown, fallback = 1000): number {
+  const options = (raw ?? {}) as Record<string, unknown>;
+  const value = options.refreshMs ?? options.intervalMs;
+  if (typeof value === "number" && Number.isFinite(value) && value >= 100) return value;
+  return fallback;
+}
+
 /** Copy visibility options into a plain object. */
 export function normalizeVisibilityOptions(raw: unknown): VisibilityOptions {
   const options = (raw ?? {}) as Record<string, unknown>;

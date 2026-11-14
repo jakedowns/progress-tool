@@ -351,7 +351,7 @@ Rationale: a relay that silently consumes output breaks agents that rely on read
 
 ### 6.5 Throttling
 
-The relay MUST throttle state writes. The default is 4 writes per second. The throttle applies to telemetry updates; the final status transition MUST be written immediately.
+The relay MUST throttle state writes. The default is 4 writes per second (overridable with `--max-hz <n>` or the `PROGRESS_RELAY_MAX_HZ` environment variable). The throttle applies to telemetry updates; the final status transition MUST be written immediately.
 
 Throttling exists because a fast build can emit thousands of lines per second, and rewriting the state file that often is wasteful and increases lock contention.
 

@@ -206,6 +206,11 @@ function ProgressIndicator({ entry, depth, isLast, prefix }) {
 
 function setup(context) {
   const apis = (context && context.apis) || {};
+  const rawOptions = (context && context.options) || {};
+  const refreshMs =
+    typeof rawOptions.refreshMs === 'number' && rawOptions.refreshMs >= 100
+      ? rawOptions.refreshMs
+      : 1000;
 
   return function ProgressPanel() {
     const [entries, setEntries] = useState({});
@@ -223,7 +228,7 @@ function setup(context) {
       }
 
       refresh();
-      const interval = setInterval(refresh, 2000);
+      const interval = setInterval(refresh, refreshMs);
       return () => {
         mounted = false;
         clearInterval(interval);

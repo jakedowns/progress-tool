@@ -14,6 +14,7 @@ import {
   barParts,
   countActive,
   normalizeBarOptions,
+  normalizeRefreshMs,
   normalizeVisibilityOptions,
   progressLabel,
   scopeEntries,
@@ -30,11 +31,11 @@ let timer: ReturnType<typeof setInterval> | undefined;
 let barOptions: BarOptions = {};
 let visibilityOptions: VisibilityOptions = {};
 
-function startPolling(): () => void {
+function startPolling(refreshMs: number): () => void {
   pollers += 1;
   setState(readProgressState());
   if (!timer) {
-    timer = setInterval(() => setState(readProgressState()), 1000);
+    timer = setInterval(() => setState(readProgressState()), refreshMs);
   }
   return () => {
     pollers -= 1;
@@ -125,7 +126,7 @@ export default Plugin.define({
   setup(context) {
     barOptions = normalizeBarOptions(context.options);
     visibilityOptions = normalizeVisibilityOptions(context.options);
-    const stopPolling = startPolling();
+    const stopPolling = startPolling(normalizeRefreshMs(context.options));
     if (context.options?.notifyOnLoad === true) {
       context.ui.toast.show({ message: "Progress plugin loaded", variant: "success" });
     }

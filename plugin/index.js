@@ -53,6 +53,11 @@ function readState() {
  */
 function setup(context) {
   const { apis } = context;
+  const rawOptions = (context && context.options) || {};
+  const refreshMs =
+    typeof rawOptions.refreshMs === 'number' && rawOptions.refreshMs >= 100
+      ? rawOptions.refreshMs
+      : 1000;
 
   // Shared storage between server-side plugin and GUI bundle
   const progressStore = apis.storage('progress-plugin', 'progress', {
@@ -76,7 +81,7 @@ function setup(context) {
   }
 
   pollProgress();
-  timer = setInterval(pollProgress, 1000);
+  timer = setInterval(pollProgress, refreshMs);
 
   // Also show toast notifications for new progress entries
   const seen = new Set();
@@ -110,7 +115,7 @@ function setup(context) {
     } catch (e) {}
   }
 
-  const toastTimer = setInterval(checkToasts, 2000);
+  const toastTimer = setInterval(checkToasts, refreshMs * 2);
 
   return {
     dispose() {

@@ -45,7 +45,8 @@ summary right after the native text. That is what `plugin/status-shim.js` does.
 
 That one line auto-installs a shim that:
 
-- polls `http://localhost:8765/api/progress` every 1.5 s,
+- polls `http://localhost:8765/api/progress` every 1 s by default
+  (`window.OC_PROGRESS_REFRESH_MS`, or the `intervalMs`/`refreshMs` plugin option),
 - finds the active "Working"/"Thinking" shimmer (+ sidebar working row),
 - appends a compact summary such as:
 

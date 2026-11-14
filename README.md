@@ -444,6 +444,10 @@ The plugin at `plugin/` targets the OpenCode **V2** plugin API and exposes four 
    - `showDone`: set to `false` to drop completed tasks immediately.
    - `scope`: `"session"` (default) shows only the current chat's tasks; `"all"` shows every
      session sharing the state file.
+   - `refreshMs`: how often the views re-read progress state in milliseconds
+     (default `1000`, minimum `100`). Applies to the TUI poller, desktop GUI
+     refresh loop, and the plugin's server-side state watcher. The standalone
+     GUI server has the same knob via `PROGRESS_GUI_REFRESH_MS`.
 
    Running and waiting tasks stay visible. Errors stay visible until dismissed or updated on
    purpose, so a failure cannot silently scroll away. In the desktop pill, each root row has a
