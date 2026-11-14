@@ -223,6 +223,24 @@ Validation requirements:
 - Empty `parentId` SHOULD be treated as `null`.
 - `sessionId` resolution MUST follow §4.8: explicit value, then `PROGRESS_SESSION_ID`, then `OPENCODE_SESSION_ID`, then unscoped.
 
+### 5.1.1 Multi-line text
+
+`title` and `detail` MAY contain line breaks. Implementations SHOULD normalize all
+of these forms to plain `\n` on write and on read:
+
+- real newlines (`\n`, `\r\n`, `\r`),
+- escaped newlines that survived an extra JSON encode (`\\n`, `\\r\\n`),
+- escaped unicode line separators (`\\u000a`, `\\u000d`), and
+- HTML-style breaks (`<br>`, `<br/>`, `<br />`, case-insensitive).
+
+Rendering requirements:
+
+- Viewers MUST NOT render escaped newline sequences as literal `\n` text.
+- Long text MUST wrap or scroll rather than force a single unbounded line.
+- The TUI view SHOULD word-wrap title and detail to the terminal width.
+- GUI views SHOULD wrap titles and constrain long details to a scrollable region.
+- Hover/tooltip text, when available, SHOULD expose the full unmodified title and detail.
+
 ### 5.2 Behavior
 
 - The call MUST return immediately. It MUST NOT wait for human input.

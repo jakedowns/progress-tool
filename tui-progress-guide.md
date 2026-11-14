@@ -44,6 +44,34 @@ Rules:
 - **Never requires a human reply**
 - **Text harness renders it** as an ASCII progress bar in the terminal
 - **Tree-like dependencies** — pass `parentId` to nest a task under a parent; the TUI renders it indented (bootvine-inspired)
+- **Multi-line titles/details** — `title` and `detail` accept real newlines, escaped `\n` / `\r\n`, extra-escaped `\\n`, or `<br>` / `<br/>` tags. The MCP server normalizes them to plain newlines before storing. A text renderer should word-wrap long lines instead of drawing one unbounded line; the reference TUI puts `detail` on its own indented line and wraps titles and details to the terminal width.
+
+---
+
+## Line breaks and long text
+
+Agents often produce a short headline plus a paragraph of context. Ask for a
+few lines rather than one wall of text, and normalize all of these forms to a
+real newline before rendering:
+
+| Input form | Example |
+|------------|---------|
+| Real newline | `"line one\nline two"` |
+| Escaped newline | `"line one\\nline two"` (what an extra JSON encode may produce) |
+| HTML break | `"line one<br>line two"` |
+| Unicode escape | `"line one\\u000aline two"` |
+
+Text renderers should:
+
+- replace CRLF / bare CR with `\n`,
+- collapse three or more consecutive newlines to one blank line,
+- trim trailing whitespace on each line,
+- word-wrap long lines to the available width, and
+- keep `detail` visually subordinate to `title` (for example, a separate indented line).
+
+The reference TUI does not marquee or ellipsize: it wraps text and lets the
+composer area grow. The GUI views wrap titles and use a scrollable detail
+region so an unusually long update cannot push the rest of the UI off screen.
 
 ---
 

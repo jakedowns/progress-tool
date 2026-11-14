@@ -87,8 +87,9 @@ progress({
 - **Same `id` updates in place** — call again with the same id to refresh
 - **Never requires a human reply**
 - **Tree-like dependencies** — pass `parentId` to nest a task under a parent; parent status rolls up from children, and parent progress is the mean of child progress when the parent has no explicit progress (bootvine-inspired)
+- **Multi-line titles/details** — `title` and `detail` accept real newlines, escaped `\n` / `\r\n`, extra-escaped `\\n`, or `<br>` / `<br/>` tags. Writers normalize these to plain newlines; viewers wrap long lines and scroll long details. Prefer a short title line plus a few detail lines over one huge single-line string.
 - **Session isolation** — `sessionId` resolves from an explicit input, then `PROGRESS_SESSION_ID`, then `OPENCODE_SESSION_ID`. When present, entries are namespaced internally as `${sessionId}:${id}` so identical task IDs in concurrent sessions never collide. When absent, the original flat `id` keying is preserved for 100% backwards compatibility. Keep task IDs clean (`"build-1"`); do not manually prefix them.
-- Renders in the TUI above the composer and as a composer pill in desktop/web; the optional standalone GUI uses a floating top-right overlay
+- Renders in the TUI above the composer and as a composer pill in desktop/web; the optional standalone GUI uses a floating top-right overlay. The TUI word-wraps, desktop/web wrap titles and scroll long details, and both expose the full text on hover where the host supports it.
 
 ### Drop-in tool definition (harness-agnostic)
 
@@ -110,14 +111,19 @@ TREE ROLLUP (BOOTVINE SEMANTICS):
 
 SESSION ISOLATION:
 - Concurrent sessions are isolated automatically via OPENCODE_SESSION_ID / PROGRESS_SESSION_ID (or an explicit `sessionId` override).
-- Keep using clean task IDs like `build-1`; do NOT manually prefix them with a session ID.`,
+- Keep using clean task IDs like `build-1`; do NOT manually prefix them with a session ID.
+
+LINE BREAKS & LONG TEXT:
+- `title` and `detail` support multi-line text. Use real newlines, escaped `\n` / `\r\n` (or an extra-escaped `\\n`), or `<br>` / `<br/>` tags.
+- Keep `title` to a short headline and put verbose context in `detail` across a few lines instead of one huge single-line string.
+- Viewers normalize these forms, wrap long lines, and scroll long details. Do not rely on the viewer to split a wall of text for you.`,
   inputSchema: {
     type: "object",
     properties: {
       id: { type: "string", description: "Stable task ID; re-using an ID updates the indicator in place." },
       status: { type: "string", enum: ["running", "waiting", "done", "error"] },
-      title: { type: "string", description: "Short human-readable task label." },
-      detail: { type: "string", description: "Optional status detail or latest step context." },
+      title: { type: "string", description: "Short human-readable task label. Supports line breaks via real newlines, escaped \\n / \\r\\n, or <br> tags." },
+      detail: { type: "string", description: "Optional status detail, latest step, or multi-line context. Supports line breaks via real newlines, escaped \\n / \\r\\n, or <br> tags; viewers wrap and scroll long text." },
       progress: { type: "number", minimum: 0, maximum: 1, description: "Optional completion fraction (0.0 to 1.0)." },
       parentId: { type: "string", description: "Optional parent task ID to nest this task in a dependency tree." },
       sessionId: { type: "string", description: "Optional session ID override; automatically resolved from PROGRESS_SESSION_ID or OPENCODE_SESSION_ID when set by the harness." }
@@ -514,6 +520,30 @@ progress-relay --id build-1 --title "Running npm build" -- npm run build
 ```
 
 The relay streams percentages and the latest log line into the same indicator, and marks the task `done` or `error` from the real exit code.
+
+### Multi-line titles and details
+
+Verbose agent updates are easier to read with intentional line breaks. Send real
+newlines, escaped `\n` / `\r\n`, an extra-escaped `\\n`, or `<br>` tags:
+
+```js
+progress({
+  id: "fbo-regression",
+  status: "running",
+  title: "Fixing FBO=0 regression (black boot)",
+  detail: [
+    "glGenFramebuffers returns 0 on the game GL thread since the knob batch.",
+    "Reverted composite shader to working text; added glGetError logging around FBO creation.",
+    "Suspect: my error-logging edit didn't land in the last build (log missing) - verifying build chain next."
+  ].join("\n"),
+  progress: 0.5
+})
+```
+
+The MCP server normalizes all supported forms to plain newlines. The TUI
+word-wraps long lines; the desktop/web views wrap titles and keep long details
+inside a scrollable region, with the full text available on hover. The relay's
+latest-output line is intentionally one line, since it mirrors terminal output.
 
 ### Nesting a sub-task under a parent
 

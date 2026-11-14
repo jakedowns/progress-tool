@@ -27,6 +27,31 @@
   var BAR_WIDTH = 10;
   var STATUS_ORDER = { error: 4, running: 3, waiting: 2, done: 1 };
 
+  function normalizeProgressText(value) {
+    if (value == null) return '';
+    var text = String(value)
+      .replace(/\r\n?/g, '\n')
+      .replace(/\\u000[ad]/gi, '\n')
+      .replace(/\\r\\n|\\n|\\r/gi, '\n')
+      .replace(/<br\s*\/?>/gi, '\n');
+    return text
+      .split('\n')
+      .map(function (line) {
+        return line.replace(/[ \t]+$/g, '');
+      })
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  /** The shim is a single-line status, so flatten any intentional line breaks. */
+  function oneLine(value) {
+    return normalizeProgressText(value)
+      .replace(/\s*\n+\s*/g, ' ')
+      .replace(/[ \t]+/g, ' ')
+      .trim();
+  }
+
   function bar(pct) {
     var n = Math.max(0, Math.min(1, pct == null ? 0 : pct));
     var filled = Math.round(n * BAR_WIDTH);
@@ -106,9 +131,9 @@
   }
 
   function label(n) {
-    var t = n.title || n.id;
+    var t = oneLine(n.title || n.id);
     if (n._activeChild) {
-      t += ' → ' + (n._activeChild.title || n._activeChild.id);
+      t += ' → ' + oneLine(n._activeChild.title || n._activeChild.id);
     }
     return t;
   }

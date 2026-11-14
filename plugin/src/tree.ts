@@ -14,6 +14,36 @@ const STATUS_ORDER: Record<string, number> = {
   done: 1,
 };
 
+/**
+ * Normalize title/detail text from the state file for display.
+ *
+ * The MCP server stores plain newlines, but older entries and hand-written
+ * state files may still contain an escaped `\\n`, an extra-escaped `\\\\n`,
+ * an escaped unicode newline, or HTML `<br>` tags. Accept every form and
+ * return plain `\n` so the TUI and GUI render identical line breaks.
+ */
+export function normalizeProgressText(value: string | null | undefined): string {
+  if (value == null) return "";
+  let text = String(value);
+  text = text.replace(/\r\n?/g, "\n");
+  text = text.replace(/\\u000[ad]/gi, "\n");
+  text = text.replace(/\\r\\n|\\n|\\r/gi, "\n");
+  text = text.replace(/<br\s*\/?>/gi, "\n");
+  text = text
+    .split("\n")
+    .map((line) => line.replace(/[ \t]+$/g, ""))
+    .join("\n");
+  return text.replace(/\n{3,}/g, "\n\n").trim();
+}
+
+/** Collapse normalized text to one line for compact host rows and status lines. */
+export function oneLineText(value: string | null | undefined): string {
+  return normalizeProgressText(value)
+    .replace(/\s*\n+\s*/g, " ")
+    .replace(/[ \t]+/g, " ")
+    .trim();
+}
+
 export function entriesOf(state: ProgressState | undefined | null): Record<string, ProgressEntry> {
   const entries = state?.entries;
   return entries && typeof entries === "object" ? entries : {};
@@ -31,7 +61,12 @@ export function buildTree(entries: Record<string, ProgressEntry>): TreeNode[] {
 
   for (const [key, entry] of Object.entries(entries)) {
     if (!entry || typeof entry !== "object") continue;
-    byKey.set(key, entry);
+    byKey.set(key, {
+      ...entry,
+      title: normalizeProgressText(entry.title),
+      detail:
+        entry.detail == null ? entry.detail : normalizeProgressText(entry.detail),
+    });
     if (entry.id && !keyById.has(entry.id)) keyById.set(entry.id, key);
   }
 

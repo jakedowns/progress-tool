@@ -46,6 +46,28 @@ function readState() {
   }
 }
 
+function normalizeProgressText(value) {
+  if (value == null) return '';
+  let text = String(value);
+  text = text.replace(/\r\n?/g, '\n');
+  text = text.replace(/\\u000[ad]/gi, '\n');
+  text = text.replace(/\\r\\n|\\n|\\r/gi, '\n');
+  text = text.replace(/<br\s*\/?>/gi, '\n');
+  return text
+    .split('\n')
+    .map((line) => line.replace(/[ \t]+$/g, ''))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function oneLineText(value) {
+  return normalizeProgressText(value)
+    .replace(/\s*\n+\s*/g, ' ')
+    .replace(/[ \t]+/g, ' ')
+    .trim();
+}
+
 /**
  * Plugin setup function called by OpenCode host.
  * @param {object} context - Plugin context provided by OpenCode
@@ -96,16 +118,16 @@ function setup(context) {
         if (entry.parentId) continue;
         if (entry.status === 'error') {
           apis.toast?.show?.({
-            title: `Progress: ${entry.title}`,
-            description: entry.detail || '',
+            title: `Progress: ${oneLineText(entry.title)}`,
+            description: entry.detail ? normalizeProgressText(entry.detail) : '',
             variant: 'error',
             persistent: false,
             duration: 5000,
           });
         } else if (entry.status === 'done') {
           apis.toast?.show?.({
-            title: `Progress: ${entry.title}`,
-            description: entry.detail || 'Completed',
+            title: `Progress: ${oneLineText(entry.title)}`,
+            description: entry.detail ? normalizeProgressText(entry.detail) : 'Completed',
             variant: 'success',
             persistent: false,
             duration: 3000,

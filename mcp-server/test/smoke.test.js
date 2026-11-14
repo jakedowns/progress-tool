@@ -58,6 +58,29 @@ test('emit writes one milestone without touching stdin', () => {
   assert.ok(entry.startedAt);
 });
 
+test('emit normalizes escaped newlines and HTML breaks in title/detail', () => {
+  const { file } = tempState();
+  const result = run(
+    [
+      'emit',
+      '--id',
+      'lines-1',
+      '--status',
+      'running',
+      '--title',
+      'Line one\\nLine two',
+      '--detail',
+      'alpha\\nbeta<br>gamma\\r\\ndelta\\u000aepsilon',
+    ],
+    { state: file }
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  const entry = readState(file).entries['lines-1'];
+  assert.equal(entry.title, 'Line one\nLine two');
+  assert.equal(entry.detail, 'alpha\nbeta\ngamma\ndelta\nepsilon');
+});
+
 test('emit resolves session scope from explicit flag, then environment', () => {
   const { file } = tempState();
 
@@ -228,13 +251,16 @@ test('MCP handshake exposes the zero-polling contract and relay hint', async () 
   assert.equal(init.result.serverInfo.version, '2.1.0');
   assert.match(init.result.instructions, /Never poll, sleep/);
   assert.match(init.result.instructions, /OPENCODE_SESSION_ID/);
+  assert.match(init.result.instructions, /line breaks/i);
 
   const list = responses.find((r) => r.id === 2);
   const tool = list.result.tools[0];
   assert.equal(tool.name, 'progress');
   assert.match(tool.description, /ZERO-POLLING/);
   assert.match(tool.description, /OPENCODE_SESSION_ID/);
+  assert.match(tool.description, /LINE BREAKS & LONG TEXT/);
   assert.equal(tool.inputSchema.properties.sessionId.type, 'string');
+  assert.match(tool.inputSchema.properties.detail.description, /line breaks/i);
 
   const call = responses.find((r) => r.id === 3);
   assert.equal(call.result.isError, false);
@@ -245,6 +271,70 @@ test('MCP handshake exposes the zero-polling contract and relay hint', async () 
   const entry = readState(file).entries['mcp-1'];
   assert.equal(entry.status, 'running');
   assert.equal(entry.progress, 0.1);
+});
+
+test('MCP preserves verbose multi-line details instead of flattening them', async () => {
+  const { file } = tempState();
+  const detail = [
+    'glGenFramebuffers returns 0 on the game GL thread since the knob batch.',
+    'Reverted composite shader to working text; added glGetError logging around FBO creation.',
+    "Suspect: my error-logging edit didn't land in the last build (log missing) - verifying build chain next.",
+  ].join('\n');
+
+  const child = spawn(process.execPath, [INDEX], {
+    env: stateEnv(file),
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', (chunk) => (stdout += chunk));
+  child.stderr.on('data', (chunk) => (stderr += chunk));
+
+  const requests = [
+    { jsonrpc: '2.0', id: 1, method: 'initialize', params: {} },
+    {
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'tools/call',
+      params: {
+        name: 'progress',
+        arguments: {
+          id: 'fbo-regression',
+          status: 'running',
+          title: 'Fixing FBO=0 regression (black boot)',
+          detail,
+          progress: 0.5,
+        },
+      },
+    },
+  ];
+
+  for (const request of requests) {
+    child.stdin.write(JSON.stringify(request) + '\n');
+  }
+  child.stdin.end();
+
+  await new Promise((resolve, reject) => {
+    child.on('error', reject);
+    child.on('close', resolve);
+  });
+
+  const responses = stdout
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+
+  assert.equal(stderr, '');
+  const call = responses.find((r) => r.id === 2);
+  assert.equal(call.result.isError, false);
+  assert.match(call.result.content[0].text, /glGenFramebuffers/);
+  assert.match(call.result.content[0].text, /verifying build chain next/);
+
+  const entry = readState(file).entries['fbo-regression'];
+  assert.equal(entry.title, 'Fixing FBO=0 regression (black boot)');
+  assert.equal(entry.detail, detail);
+  assert.equal(entry.progress, 0.5);
 });
 
 test('concurrent writers keep the state file valid and complete', async () => {

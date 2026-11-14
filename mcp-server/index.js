@@ -52,6 +52,11 @@ const SERVER_INSTRUCTIONS = [
   'parent status and progress roll up from children. Concurrent sessions are',
   'isolated automatically via OPENCODE_SESSION_ID / PROGRESS_SESSION_ID, so',
   'keep using clean task IDs like "build-1" instead of manually prefixing them.',
+  'Formatting: title and detail may contain line breaks written as real newlines,',
+  'as escaped "\\n" / "\\r\\n" (or extra-escaped "\\\\n"), or as "<br>" / "<br/>".',
+  'Use line breaks to keep verbose status readable: a short title line plus a',
+  'few detail lines. Viewers wrap long lines and scroll long details; do not use',
+  'one huge single-line description.',
 ].join(' ');
 
 const TOOL_DESCRIPTION = [
@@ -69,6 +74,11 @@ const TOOL_DESCRIPTION = [
   'SESSION ISOLATION:',
   '- Concurrent sessions are isolated automatically via OPENCODE_SESSION_ID / PROGRESS_SESSION_ID (or an explicit `sessionId` override).',
   '- Keep using clean task IDs like `build-1`; do NOT manually prefix them with a session ID.',
+  '',
+  'LINE BREAKS & LONG TEXT:',
+  '- `title` and `detail` support multi-line text. Use real newlines, escaped `\\n` / `\\r\\n` (or an extra-escaped `\\\\n`), or `<br>` / `<br/>` tags.',
+  '- Keep `title` to a short headline and put verbose context in `detail` across a few lines instead of one huge single-line string.',
+  '- Viewers normalize these forms, wrap long lines, and scroll long details. Do not rely on the viewer to split a wall of text for you.',
 ].join('\n');
 
 // --- Shell / CLI helpers ---------------------------------------------------
@@ -181,11 +191,13 @@ function handleToolsList(id) {
             },
             title: {
               type: 'string',
-              description: 'Short human-readable task label.',
+              description:
+                'Short human-readable task label. Supports line breaks via real newlines, escaped \\n / \\r\\n, or <br> tags.',
             },
             detail: {
               type: 'string',
-              description: 'Optional status detail or latest step context.',
+              description:
+                'Optional status detail, latest step, or multi-line context. Supports line breaks via real newlines, escaped \\n / \\r\\n, or <br> tags; viewers wrap and scroll long text.',
             },
             progress: {
               type: 'number',

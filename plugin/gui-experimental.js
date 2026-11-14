@@ -29,6 +29,31 @@ const STATUS_CONFIG = {
   waiting: { color: '#f59e0b', label: 'Waiting', pulse: true },
 };
 
+function normalizeProgressText(value) {
+  if (value == null) return value;
+  let text = String(value);
+  text = text.replace(/\r\n?/g, '\n');
+  text = text.replace(/\\u000[ad]/gi, '\n');
+  text = text.replace(/\\r\\n|\\n|\\r/gi, '\n');
+  text = text.replace(/<br\s*\/?>/gi, '\n');
+  text = text
+    .split('\n')
+    .map((line) => line.replace(/[ \t]+$/g, ''))
+    .join('\n');
+  return text.replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/** Build Preact children with real <br> elements; never uses innerHTML. */
+function multilineNodes(value) {
+  const lines = normalizeProgressText(value == null ? '' : value).split('\n');
+  const out = [];
+  lines.forEach((line, index) => {
+    if (index > 0) out.push(h('br', { key: `br-${index}` }));
+    out.push(line);
+  });
+  return out;
+}
+
 function readProgressStateFromStorage(apis) {
   try {
     const store = apis.storage?.('progress-plugin', 'progress');
@@ -139,21 +164,32 @@ function ProgressIndicator({ entry, depth, isLast, prefix }) {
 
   const titleStyle = {
     fontWeight: depth === 0 ? 700 : 600,
-    whiteSpace: 'nowrap',
+    whiteSpace: 'normal',
+    overflowWrap: 'anywhere',
+    wordBreak: 'break-word',
+    display: '-webkit-box',
+    WebkitLineClamp: 3,
+    WebkitBoxOrient: 'vertical',
     overflow: 'hidden',
-    textOverflow: 'ellipsis',
     color: depth === 0 ? '#111827' : '#374151',
     fontSize: depth === 0 ? '13px' : '12.5px',
+    cursor: 'help',
   };
 
   const detailStyle = {
     fontSize: '11px',
     opacity: depth > 0 ? 0.7 : 0.8,
-    whiteSpace: 'nowrap',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
+    whiteSpace: 'normal',
+    overflowWrap: 'anywhere',
+    wordBreak: 'break-word',
     color: '#6b7280',
     marginTop: '3px',
+    maxHeight: '7.2em',
+    overflowX: 'hidden',
+    overflowY: 'auto',
+    overscrollBehavior: 'contain',
+    scrollbarWidth: 'thin',
+    cursor: 'help',
   };
 
   const detailElapsedStyle = {
@@ -175,9 +211,21 @@ function ProgressIndicator({ entry, depth, isLast, prefix }) {
   const children = [
     h('div', { class: 'oc-progress-dot', style: dotStyle }),
     h('div', { style: contentStyle }, [
-      h('div', { style: titleStyle }, entry.title),
+      h(
+        'div',
+        { class: 'title' + (depth > 0 ? ' child' : ''), style: titleStyle, title: entry.title },
+        multilineNodes(entry.title)
+      ),
       entry.detail
-        ? h('div', { style: detailStyle }, `${entry.detail} (${elapsed})`)
+        ? h(
+            'div',
+            {
+              class: 'detail' + (depth > 0 ? ' child' : ''),
+              style: detailStyle,
+              title: normalizeProgressText(entry.detail),
+            },
+            multilineNodes(`${normalizeProgressText(entry.detail)} (${elapsed})`)
+          )
         : elapsed
         ? h('div', { style: detailElapsedStyle }, elapsed)
         : null,

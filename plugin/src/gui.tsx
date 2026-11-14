@@ -7,7 +7,7 @@
  */
 
 import { ComposerPill, Plugin } from "@opencode/plugin/gui";
-import { createSignal } from "solid-js";
+import { For, Index, Show, createSignal } from "solid-js";
 import { ProgressRpc } from "./rpc.js";
 import {
   buildTree,
@@ -15,8 +15,10 @@ import {
   countActive,
   flattenTreeWithDepth,
   normalizeBarOptions,
+  normalizeProgressText,
   normalizeRefreshMs,
   normalizeVisibilityOptions,
+  oneLineText,
   progressLabel,
   scopeEntries,
   visibleEntries,
@@ -44,6 +46,128 @@ function toneFor(status: TreeNode["status"]): "success" | "warning" | "danger" |
   return undefined;
 }
 
+function dotColor(status: TreeNode["status"]): string {
+  if (status === "error") return "#ef4444";
+  if (status === "done") return "#10b981";
+  if (status === "waiting") return "#f59e0b";
+  return "#3b82f6";
+}
+
+/** Render normalized text with real <br> elements, never innerHTML. */
+function Multiline(props: { text: string }) {
+  return (
+    <Index each={normalizeProgressText(props.text).split("\n")}>
+      {(line, index) => (
+        <>
+          {index > 0 ? <br /> : null}
+          {line()}
+        </>
+      )}
+    </Index>
+  );
+}
+
+function MenuRow(props: {
+  node: TreeNode;
+  depth: number;
+  options: BarOptions;
+  onDismiss?: () => void;
+}) {
+  const pct = () => progressLabel(props.node.progress);
+  const parts = () => barParts(props.node.progress, props.options);
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        "align-items": "flex-start",
+        gap: "8px",
+        "padding-left": `${props.depth * 14}px`,
+        "padding-top": "5px",
+        "padding-bottom": "5px",
+      }}
+    >
+      <div
+        style={{
+          width: "8px",
+          height: "8px",
+          "border-radius": "50%",
+          "margin-top": "6px",
+          flex: "0 0 auto",
+          background: dotColor(props.node.status),
+        }}
+      />
+      <div style={{ flex: "1 1 auto", "min-width": "0" }}>
+        <div
+          style={{
+            "font-weight": props.depth === 0 ? "650" : "500",
+            "white-space": "normal",
+            "overflow-wrap": "anywhere",
+            "word-break": "break-word",
+          }}
+          title={props.node.title}
+        >
+          <Multiline text={props.node.title} />
+        </div>
+        <Show when={props.node.detail}>
+          <div
+            style={{
+              "margin-top": "2px",
+              "font-size": "12px",
+              opacity: "0.72",
+              "white-space": "normal",
+              "overflow-wrap": "anywhere",
+              "word-break": "break-word",
+            }}
+            title={props.node.detail ?? ""}
+          >
+            <Multiline text={props.node.detail ?? ""} />
+          </div>
+        </Show>
+        <div
+          style={{
+            "margin-top": "4px",
+            display: "flex",
+            gap: "8px",
+            "align-items": "center",
+            "font-size": "11px",
+            opacity: "0.58",
+          }}
+        >
+          <span style={{ "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace" }}>
+            {parts().bar}
+          </span>
+          <Show when={pct()}>
+            <span>{pct()}</span>
+          </Show>
+        </div>
+      </div>
+      <Show when={props.onDismiss}>
+        <button
+          type="button"
+          title="Dismiss"
+          aria-label="Dismiss"
+          onClick={() => props.onDismiss?.()}
+          style={{
+            flex: "0 0 auto",
+            border: "1px solid rgba(127,127,127,0.35)",
+            background: "transparent",
+            color: "inherit",
+            opacity: "0.65",
+            "border-radius": "50%",
+            width: "22px",
+            height: "22px",
+            cursor: "pointer",
+            "line-height": "1",
+          }}
+        >
+          ×
+        </button>
+      </Show>
+    </div>
+  );
+}
+
 function rowFor(node: TreeNode, depth: number, options: BarOptions) {
   const parts = barParts(node.progress, options);
   const pct = progressLabel(node.progress);
@@ -56,8 +180,8 @@ function rowFor(node: TreeNode, depth: number, options: BarOptions) {
         : "";
   return {
     id: node.key,
-    label: `${indent}${node.title}${suffix}`,
-    detail: node.detail || undefined,
+    label: `${indent}${oneLineText(node.title)}${suffix}`,
+    detail: node.detail ? oneLineText(node.detail) : undefined,
     tone: toneFor(node.status),
   };
 }
@@ -104,6 +228,81 @@ export default Plugin.define({
     void refresh();
     const timer = setInterval(() => void refresh(), refreshMs);
 
+    const ProgressMenu = (props: { sessionID: string }) => {
+      const scoped = () => scopeEntries(state().entries, props.sessionID, visibility);
+      const maxUpdatedAt = () =>
+        Object.values(scoped()).reduce((max, entry) => Math.max(max, entry?.updatedAt ?? 0), 0);
+      const visibleRoots = () => {
+        const roots = buildTree(visibleEntries(scoped(), Date.now(), visibility));
+        const dismissed = dismissedRoots();
+        return roots.filter(
+          (root) => (dismissed[root.key] ?? 0) < (root.updatedAt ?? 0)
+        );
+      };
+      const rows = () => flattenTreeWithDepth(visibleRoots());
+
+      return (
+        <div
+          style={{
+            display: "flex",
+            "flex-direction": "column",
+            gap: "2px",
+            "max-height": "min(60vh, 520px)",
+            "overflow-y": "auto",
+            "overflow-x": "hidden",
+            "min-width": "320px",
+            "max-width": "520px",
+            "padding-right": "4px",
+          }}
+        >
+          <Show
+            when={rows().length > 0}
+            fallback={
+              <div style={{ opacity: "0.6", "font-size": "13px", padding: "8px" }}>
+                No active progress
+              </div>
+            }
+          >
+            <For each={rows()}>
+              {({ node, depth }) => (
+                <MenuRow
+                  node={node}
+                  depth={depth}
+                  options={options}
+                  onDismiss={
+                    depth === 0
+                      ? () =>
+                          setDismissedRoots((prev) => ({
+                            ...prev,
+                            [node.key]: node.updatedAt ?? 0,
+                          }))
+                      : undefined
+                  }
+                />
+              )}
+            </For>
+            <button
+              type="button"
+              onClick={() => setDismissedAt(maxUpdatedAt())}
+              style={{
+                "margin-top": "6px",
+                border: "none",
+                background: "transparent",
+                color: "inherit",
+                opacity: "0.65",
+                cursor: "pointer",
+                "text-align": "left",
+                padding: "6px 8px",
+                "font-size": "12px",
+              }}
+            >
+              ✕ Dismiss all
+            </button>
+          </Show>
+        </div>
+      );
+    };
+
     ctx.add(ComposerPill, () => ({
       id: "progress",
       show: (input) => {
@@ -146,11 +345,12 @@ export default Plugin.define({
         const top = visibleRoots[0];
         const pct = progressLabel(top.progress);
         const parts = barParts(top.progress, options);
+        const topTitle = oneLineText(top.title);
         const label =
           parts.style === "emoji"
-            ? `${top.title}: ${parts.bar}${parts.fraction}`
+            ? `${topTitle}: ${parts.bar}${parts.fraction}`
             : active > 0
-              ? `${top.title}${pct ? ` ${pct}` : ""}`
+              ? `${topTitle}${pct ? ` ${pct}` : ""}`
               : `${visibleRoots.length} tracked`;
 
         return {
@@ -181,6 +381,7 @@ export default Plugin.define({
           ],
         };
       },
+      menu: (input) => <ProgressMenu sessionID={input.session.id} />,
     }));
 
     return () => {

@@ -11,7 +11,9 @@ export interface ProgressEntry {
   id: string;
   sessionId?: string;
   status: ProgressStatus;
+  /** Task label; may contain `\n` line breaks. */
   title: string;
+  /** Optional detail; may contain `\n` line breaks. */
   detail?: string | null;
   /** 0..1 fraction, or null when unknown. */
   progress?: number | null;

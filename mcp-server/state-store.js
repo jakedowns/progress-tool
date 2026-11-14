@@ -27,6 +27,35 @@ const LOCK_RETRY_MS = 10;
 const LOCK_TIMEOUT_MS = 5000;
 const LOCK_STALE_MS = 15000;
 
+/**
+ * Normalize optional title/detail text for every writer and reader.
+ *
+ * Agents express line breaks in several ways depending on how a harness
+ * serializes tool arguments. Accept all of the common ones:
+ *
+ *   - real newlines (`\n`, `\r\n`, `\r`)
+ *   - escaped newlines (`\\n`, `\\r\\n`) that survived an extra JSON encode
+ *   - HTML-style breaks (`<br>`, `<br/>`, `<br />`)
+ *   - escaped unicode line separators (`\\u000a`, `\\u000d`)
+ *
+ * The stored value always uses plain `\n`, so every view can render it
+ * consistently without guessing which escape the caller used.
+ */
+function normalizeProgressText(value) {
+  if (value == null) return value;
+  let text = String(value);
+  text = text.replace(/\r\n?/g, '\n');
+  text = text.replace(/\\u000[ad]/gi, '\n');
+  text = text.replace(/\\r\\n|\\n|\\r/gi, '\n');
+  text = text.replace(/<br\s*\/?>/gi, '\n');
+  text = text
+    .split('\n')
+    .map((line) => line.replace(/[ \t]+$/g, ''))
+    .join('\n');
+  text = text.replace(/\n{3,}/g, '\n\n').trim();
+  return text;
+}
+
 function resolveStatePath(explicit) {
   return (
     explicit ||
@@ -91,6 +120,12 @@ function normalizeState(raw) {
       entries[id] = {
         ...entry,
         id: typeof entry.id === 'string' ? entry.id : fallbackId,
+        ...(typeof entry.title === 'string'
+          ? { title: normalizeProgressText(entry.title) }
+          : {}),
+        ...(typeof entry.detail === 'string'
+          ? { detail: normalizeProgressText(entry.detail) }
+          : {}),
       };
     }
   }
@@ -277,13 +312,15 @@ function upsertProgress(input, stateFile = DEFAULT_STATE_FILE) {
       id: input.id,
       ...(sessionId ? { sessionId } : {}),
       status,
-      title: input.title !== undefined ? input.title : prev?.title || input.id,
+      title: normalizeProgressText(
+        input.title !== undefined ? input.title : prev?.title || input.id
+      ),
       detail:
         input.detail !== undefined
-          ? input.detail
+          ? normalizeProgressText(input.detail)
           : isRestart
           ? null
-          : prev?.detail ?? null,
+          : normalizeProgressText(prev?.detail ?? null),
       progress:
         input.progress !== undefined
           ? input.progress
@@ -436,6 +473,7 @@ module.exports = {
   resolveStatePath,
   resolveSessionId,
   storageKey,
+  normalizeProgressText,
   ensureStateFile,
   readState,
   atomicWrite,

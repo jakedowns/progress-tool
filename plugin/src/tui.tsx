@@ -56,7 +56,8 @@ function glyph(status: ProgressStatus): string {
 
 function ProgressNode(props: { node: TreeNode; depth: number }) {
   const ctx = usePlugin();
-  const indent = () => (props.depth === 0 ? "" : `${"  ".repeat(props.depth)}└─ `);
+  const indent = () => (props.depth === 0 ? "" : "└─ ");
+  const detailIndent = () => "  · ";
 
   const label = () => {
     const parts = barParts(props.node.progress, barOptions);
@@ -70,18 +71,20 @@ function ProgressNode(props: { node: TreeNode; depth: number }) {
   };
 
   return (
-    <>
-      <box flexDirection="row">
-        <text fg={ctx.theme.text.muted}>{indent()}</text>
-        <text fg={ctx.theme.text.base}>{label()}</text>
-        <Show when={props.node.detail}>
-          <text fg={ctx.theme.text.muted}>{` · ${props.node.detail}`}</text>
-        </Show>
-      </box>
+    <box flexDirection="column" paddingLeft={props.depth === 0 ? 0 : 2}>
+      <text fg={ctx.theme.text.base} wrapMode="word">
+        <span fg={ctx.theme.text.muted}>{indent()}</span>
+        {label()}
+      </text>
+      <Show when={props.node.detail}>
+        <text fg={ctx.theme.text.muted} wrapMode="word">
+          {`${detailIndent()}${props.node.detail}`}
+        </text>
+      </Show>
       <For each={props.node.children}>
         {(child) => <ProgressNode node={child} depth={props.depth + 1} />}
       </For>
-    </>
+    </box>
   );
 }
 

@@ -27,6 +27,26 @@ const STATE_FILE = process.env.PROGRESS_STATE_PATH ||
 
 const STATUS_ORDER = { error: 4, running: 3, waiting: 2, done: 1 };
 
+/**
+ * Normalize title/detail text from the state file (newlines, escaped \n,
+ * extra-escaped \\n, or <br> tags) so older and hand-written entries render
+ * the same as fresh MCP writes. Its source is also embedded in the browser
+ * script below, so keep it self-contained.
+ */
+function normalizeProgressText(value) {
+  if (value == null) return value;
+  let text = String(value);
+  text = text.replace(/\r\n?/g, '\n');
+  text = text.replace(/\\u000[ad]/gi, '\n');
+  text = text.replace(/\\r\\n|\\n|\\r/gi, '\n');
+  text = text.replace(/<br\s*\/?>/gi, '\n');
+  text = text
+    .split('\n')
+    .map((line) => line.replace(/[ \t]+$/g, ''))
+    .join('\n');
+  return text.replace(/\n{3,}/g, '\n\n').trim();
+}
+
 function buildTree(entries) {
   const byId = new Map(Object.entries(entries || {}));
   const childrenMap = new Map();
@@ -170,21 +190,37 @@ const HTML = `<!DOCTYPE html>
   .content { flex: 1; min-width: 0; }
   .title {
     font-weight: 700;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
     color: #111827;
     font-size: 13px;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    cursor: help;
   }
   .title.child { font-weight: 600; color: #374151; font-size: 12.5px; }
   .detail {
     font-size: 11px;
     opacity: 0.8;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
     color: #6b7280;
     margin-top: 3px;
+    max-height: 7.2em;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    cursor: help;
+  }
+  .detail::-webkit-scrollbar { width: 5px; }
+  .detail::-webkit-scrollbar-thumb {
+    background: rgba(107, 114, 128, 0.45);
+    border-radius: 999px;
   }
   .detail.child { opacity: 0.7; color: #6b7280; }
   .progress-pct {
@@ -271,6 +307,8 @@ const closedIds = new Set();
 
 let state = {};
 
+${normalizeProgressText.toString()}
+
 async function fetchState() {
   try {
     const res = await fetch(STATE_URL);
@@ -330,6 +368,14 @@ function rollUpTree(tree) {
     return node;
   }
   return tree.map(roll);
+}
+
+function renderMultiline(el, text) {
+  const lines = String(text == null ? '' : text).split('\\n');
+  lines.forEach((line, index) => {
+    if (index > 0) el.appendChild(document.createElement('br'));
+    el.appendChild(document.createTextNode(line));
+  });
 }
 
 function render() {
@@ -410,15 +456,18 @@ function render() {
 
     const title = document.createElement('div');
     title.className = 'title' + (depth > 0 ? ' child' : '');
-    title.textContent = node.title;
+    const titleText = normalizeProgressText(node.title || node.id);
+    title.title = titleText;
+    renderMultiline(title, titleText);
 
     const detail = document.createElement('div');
     const detailText = node.detail
-      ? node.detail + (elapsed ? ' (' + elapsed + ')' : '')
+      ? normalizeProgressText(node.detail) + (elapsed ? ' (' + elapsed + ')' : '')
       : elapsed;
     if (detailText) {
       detail.className = 'detail' + (depth > 0 ? ' child' : '');
-      detail.textContent = detailText;
+      detail.title = detailText;
+      renderMultiline(detail, detailText);
       content.appendChild(title);
       content.appendChild(detail);
     } else {
