@@ -4,7 +4,20 @@ A non-blocking twin of `question` so coding agents can signal long-running work 
 
 Implements the [Agent Progress Tool proposal](https://gist.github.com/jakedowns/ddc4eb4817184a074c82c61dc6e7228c) for OpenCode 2, and is written as a portable reference implementation that any model, agent, or harness can copy, adapt, or train on.
 
-**Versions:** MCP server `2.1.0` · OpenCode plugin `2.0.0`
+**Versions:** MCP server `2.1.0` · OpenCode plugin `2.1.0`
+
+> [!IMPORTANT]
+> **No `AGENTS.md` edits required.** The bundled OpenCode plugin injects the progress & relay rules directly into every session's system instructions, and the MCP `progress` tool response reinforces them at the exact moment an agent starts a task — so agents know to wrap long-running commands with `progress-relay` *before* their first build, not after. Progress reporting works without any prompt engineering.
+>
+> For other harnesses, add the model-facing prompt snippet from [`docs/out-of-band-relay-spec.md` §7.4](docs/out-of-band-relay-spec.md) to your system prompt or agent rules file.
+>
+> If you manage your own `AGENTS.md`, the canonical rule text lives in [`plugin/src/instructions.ts`](plugin/src/instructions.ts) — copy it from there so your rules stay in sync with the injected ones.
+>
+> To disable the injection per project (for example, if you maintain your own `AGENTS.md` rules):
+>
+> ```jsonc
+> { "plugins": [{ "package": "/path/to/progress-tool/plugin", "options": { "injectInstructions": false } }] }
+> ```
 
 ---
 
