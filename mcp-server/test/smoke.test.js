@@ -369,6 +369,47 @@ test('osc-demo script pipes structured OSC 9;4 progress through the relay end-to
   assert.match(entry.detail, /packaging/);
 });
 
+test('tree-demo script builds a nested tree that rolls up to done', () => {
+  const { file } = tempState();
+  const demo = path.join(ROOT, '..', 'demo', 'tree-demo.sh');
+
+  const result = spawnSync('bash', [demo], {
+    encoding: 'utf8',
+    env: stateEnv(file),
+    timeout: 30000,
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  const state = readState(file).entries;
+  assert.equal(state['tree-demo'].status, 'done');
+  assert.equal(state['tree-demo'].progress, 1);
+  for (const child of ['build', 'test-unit', 'test-e2e']) {
+    assert.equal(state[child].parentId, 'tree-demo', child);
+  }
+  assert.equal(state['compile'].parentId, 'build');
+  assert.equal(state['link'].parentId, 'build');
+});
+
+test('tree-demo failure mode rolls an error up to the parent', () => {
+  const { file } = tempState();
+  const demo = path.join(ROOT, '..', 'demo', 'tree-demo.sh');
+
+  const result = spawnSync('bash', [demo], {
+    encoding: 'utf8',
+    env: stateEnv(file, { PROGRESS_TREE_DEMO_FAIL: '1' }),
+    timeout: 30000,
+  });
+
+  assert.equal(result.status, 1, result.stderr);
+  const state = readState(file).entries;
+  assert.equal(state['test-e2e'].status, 'error');
+  assert.match(state['test-e2e'].detail, /payment regression/);
+  assert.equal(state['tree-demo'].status, 'error');
+  // Siblings are unaffected by the failing child.
+  assert.equal(state['test-unit'].status, 'done');
+  assert.equal(state['build'].status, 'done');
+});
+
 test('MCP handshake exposes the zero-polling contract and relay hint', async () => {
   const { file } = tempState();
   const child = spawn(process.execPath, [INDEX], {

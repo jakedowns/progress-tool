@@ -19,7 +19,7 @@ Implements the [Agent Progress Tool proposal](https://gist.github.com/jakedowns/
 > { "plugins": [{ "package": "/path/to/progress-tool/plugin", "options": { "injectInstructions": false } }] }
 > ```
 >
-> Want to see it live? Ask your agent to **"demo OSC 9;4 support"** (a `.opencode/skills/osc-demo` skill ships with this repo), or run it yourself: `bash demo/osc-demo.sh` — a fake build streams native `OSC 9;4` progress sequences through `progress-relay`, ending done at 100% with zero agent tokens.
+> Want to see it live? Ask your agent to **"demo OSC 9;4 support"** (`.opencode/skills/osc-demo`) or **"demo the task tree"** (`.opencode/skills/tree-demo`) — both ship with this repo — or run them yourself: `bash demo/osc-demo.sh` streams native `OSC 9;4` progress sequences through `progress-relay`, and `bash demo/tree-demo.sh` builds a nested parent/child task tree that rolls up live (`PROGRESS_TREE_DEMO_FAIL=1` shows error roll-up).
 
 ---
 
