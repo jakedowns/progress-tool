@@ -4,7 +4,7 @@ A non-blocking twin of `question` so coding agents can signal long-running work 
 
 Implements the [Agent Progress Tool proposal](https://gist.github.com/jakedowns/ddc4eb4817184a074c82c61dc6e7228c) for OpenCode 2, and is written as a portable reference implementation that any model, agent, or harness can copy, adapt, or train on.
 
-**Versions:** MCP server `2.1.0` · OpenCode plugin `2.1.0`
+**Versions:** MCP server `2.2.0` · OpenCode plugin `2.1.0`
 
 > [!IMPORTANT]
 > **No `AGENTS.md` edits required.** The bundled OpenCode plugin injects the progress & relay rules directly into every session's system instructions, and the MCP `progress` tool response reinforces them at the exact moment an agent starts a task — so agents know to wrap long-running commands with `progress-relay` *before* their first build, not after. Progress reporting works without any prompt engineering.
@@ -18,6 +18,8 @@ Implements the [Agent Progress Tool proposal](https://gist.github.com/jakedowns/
 > ```jsonc
 > { "plugins": [{ "package": "/path/to/progress-tool/plugin", "options": { "injectInstructions": false } }] }
 > ```
+>
+> Want to see it live? Ask your agent to **"demo OSC 9;4 support"** (a `.opencode/skills/osc-demo` skill ships with this repo), or run it yourself: `bash demo/osc-demo.sh` — a fake build streams native `OSC 9;4` progress sequences through `progress-relay`, ending done at 100% with zero agent tokens.
 
 ---
 
@@ -41,7 +43,7 @@ Progress has two kinds of updates, and they should not travel through the same p
 | Plane | Owner | Frequency | Cost |
 |-------|-------|-----------|------|
 | **Control plane** | The agent, via the MCP `progress` tool | Once per milestone / lifecycle transition | O(milestones) tokens |
-| **Data plane** | An OS-level relay process, via `progress-relay` | Up to 4 writes/sec, driven by `stdout`/`stderr` | **Zero** model tokens |
+| **Data plane** | An OS-level relay process, via `progress-relay` | Up to 4 writes/sec, driven by `stdout`/`stderr` and native `OSC 9;4` progress sequences | **Zero** model tokens |
 
 Both planes converge on the same state file. The agent owns *meaning* (task topology, status transitions). The OS process owns *telemetry* (latest log line, percentage, elapsed time). The GUI just reads state.
 

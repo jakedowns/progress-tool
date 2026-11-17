@@ -39,6 +39,19 @@ const MAX_DETAIL_LENGTH = 240;
 const MAX_LINE_BUFFER = 64 * 1024;
 const STATUSES = ['running', 'waiting', 'done', 'error'];
 
+// OSC 9;4 "progress report" sequence (ConEmu / Windows Terminal convention),
+// emitted natively by Gradle's rich console, mise, PowerShell 7.4+, and other
+// build tools. Grammar:
+//   ESC ] 9 ; 4 ; <state> [ ; <progress 0-100> ] ( BEL | ESC \ )
+// States: 0 clear, 1 normal, 2 error, 3 indeterminate, 4 paused/warning.
+const OSC94_RE = /\x1b\]9;4;([0-4])(?:;(\d{1,3}))?(?:\x07|\x1b\\)/g;
+// A plausible *incomplete* OSC 9;4 sequence at the end of a chunk. Only tails
+// that could still become one of our sequences are held back across chunks;
+// everything else passes through untouched so foreign escape sequences keep
+// their existing behavior (stripped per line by cleanLine).
+const OSC94_PARTIAL_RE = /\x1b\]9;4;?[0-9;]*$/;
+const OSC94_MAX_PARTIAL = 64;
+
 const ANSI_RE =
   // CSI sequences, OSC sequences, and common single-character escapes.
   /\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\)|[@-_])/g;
@@ -105,6 +118,10 @@ function printUsage(mode, stream) {
       '  --state-path <path>  Override ~/.opencode-progress-state.json',
       '  --once               Emit one update and exit (same as progress-emit)',
       '  -h, --help           Show this help',
+      '',
+      'Structured input: OSC 9;4 terminal progress sequences (ConEmu / Windows',
+      'Terminal; emitted by Gradle rich console, mise, PowerShell 7.4+, ...) are',
+      'parsed before text heuristics, and their state maps to running/waiting/error.',
       '',
       'Concurrent sessions are isolated automatically via OPENCODE_SESSION_ID or',
       'PROGRESS_SESSION_ID. Keep using clean task ids like "build-1"; do not',
@@ -182,6 +199,68 @@ function parseProgressLine(line) {
   }
 
   return null;
+}
+
+/**
+ * Structured progress source: extract OSC 9;4 sequences from raw chunks
+ * BEFORE line splitting and ANSI stripping.
+ *
+ * Why chunk level: OSC 9;4 sequences usually arrive without a trailing
+ * newline, often several per redraw, and can be split across read chunk
+ * boundaries. A line-oriented parser would miss them or leak partial escape
+ * bytes into `detail`.
+ *
+ * The filter calls `onOsc({ state, progress })` for every complete sequence
+ * (progress is 0..1 or null when absent) and forwards all remaining text to
+ * `onText(text, meta)`, where `meta.hasOsc94` tells the line handler that
+ * structured progress was present in this chunk (so text heuristics like
+ * "45%" must not compete with it).
+ */
+function makeOsc94Filter(onOsc, onText) {
+  let carry = '';
+
+  function push(chunk, meta) {
+    carry += chunk;
+    OSC94_RE.lastIndex = 0;
+
+    let match;
+    let lastEnd = 0;
+    let consumed = 0;
+
+    while ((match = OSC94_RE.exec(carry)) !== null) {
+      const state = Number.parseInt(match[1], 10);
+      const progress =
+        match[2] !== undefined
+          ? Math.max(0, Math.min(1, Number.parseInt(match[2], 10) / 100))
+          : null;
+      onText(carry.slice(lastEnd, match.index), meta);
+      onOsc({ state, progress });
+      meta.hasOsc94 = true;
+      lastEnd = OSC94_RE.lastIndex;
+      consumed = lastEnd;
+    }
+
+    // Hold back only a plausible incomplete OSC 9;4 sequence so a sequence
+    // split across chunks still parses once its terminator arrives.
+    let tail = carry.slice(consumed);
+    const partial = OSC94_PARTIAL_RE.exec(tail);
+    if (partial && partial[0].length <= OSC94_MAX_PARTIAL) {
+      tail = tail.slice(0, tail.length - partial[0].length);
+      carry = partial[0];
+    } else {
+      carry = '';
+    }
+    if (tail) onText(tail, meta);
+  }
+
+  push.flush = function flush(meta) {
+    if (!carry) return;
+    const text = carry;
+    carry = '';
+    onText(text, meta);
+  };
+
+  return push;
 }
 
 function parseArgs(argv) {
@@ -331,6 +410,7 @@ function createReporter(opts) {
   let dirty = false;
   let finished = false;
   let warned = false;
+  let oscSeen = false;
 
   function warn(err) {
     if (warned) return;
@@ -373,8 +453,45 @@ function createReporter(opts) {
     if (!line) return;
 
     entry.detail = truncate(line);
-    const parsed = parseProgressLine(line);
-    if (parsed != null) entry.progress = parsed;
+    // Structured OSC 9;4 progress wins over text guessing ("45%", "6/10"):
+    // once a stream has reported structured progress it will keep doing so,
+    // and mixing both sources makes the bar jump backwards. The sticky flag
+    // also covers lines held in the splitter's carry buffer across chunks,
+    // where per-chunk attribution is unreliable.
+    if (!oscSeen) {
+      const parsed = parseProgressLine(line);
+      if (parsed != null) entry.progress = parsed;
+    }
+    dirty = true;
+    write(false);
+  }
+
+  /**
+   * Apply an OSC 9;4 progress report. These writes are PROVISIONAL:
+   * they never produce `done`, and the real exit mapping in finish() is
+   * authoritative and always overwrites them when the command ends.
+   */
+  function setOsc94({ state, progress }) {
+    oscSeen = true;
+    switch (state) {
+      case 0: // clear indicator
+        entry.progress = null;
+        break;
+      case 1: // normal progress
+        if (progress != null) entry.progress = progress;
+        break;
+      case 2: // error state (provisional; exit code wins at termination)
+        entry.status = 'error';
+        if (progress != null) entry.progress = progress;
+        break;
+      case 3: // indeterminate / busy
+        entry.progress = null;
+        break;
+      case 4: // paused / warning
+        entry.status = 'waiting';
+        if (progress != null) entry.progress = progress;
+        break;
+    }
     dirty = true;
     write(false);
   }
@@ -405,6 +522,7 @@ function createReporter(opts) {
       write(true);
     },
     setLine,
+    setOsc94,
     finish,
     get detail() {
       return entry.detail;
@@ -506,6 +624,16 @@ function runWrappedCommand(opts, reporter) {
   const removeSignals = installSignalForwarding(() => child, reporter);
   const splitOut = makeLineSplitter((line) => reporter.setLine(line));
   const splitErr = makeLineSplitter((line) => reporter.setLine(line));
+  // Structured OSC 9;4 progress is extracted from raw chunks before line
+  // splitting so multi-sequence redraws and chunk-split sequences parse.
+  const oscOut = makeOsc94Filter(
+    (event) => reporter.setOsc94(event),
+    (text) => splitOut(text)
+  );
+  const oscErr = makeOsc94Filter(
+    (event) => reporter.setOsc94(event),
+    (text) => splitErr(text)
+  );
 
   function settle(fn) {
     if (settled) return;
@@ -532,12 +660,12 @@ function runWrappedCommand(opts, reporter) {
 
   child.stdout.on('data', (chunk) => {
     if (opts.tee) safeWrite(process.stdout, chunk);
-    splitOut(chunk);
+    oscOut(chunk, { hasOsc94: false });
   });
 
   child.stderr.on('data', (chunk) => {
     if (opts.tee) safeWrite(process.stderr, chunk);
-    splitErr(chunk);
+    oscErr(chunk, { hasOsc94: false });
   });
 
   child.on('error', (err) => {
@@ -549,6 +677,8 @@ function runWrappedCommand(opts, reporter) {
 
   child.on('close', (code, signal) => {
     settle(() => {
+      oscOut.flush({ hasOsc94: false });
+      oscErr.flush({ hasOsc94: false });
       splitOut.flush();
       splitErr.flush();
 
@@ -576,12 +706,16 @@ function runWrappedCommand(opts, reporter) {
 function runPipedInput(opts, reporter) {
   const removeSignals = installSignalForwarding(() => null, reporter);
   const split = makeLineSplitter((line) => reporter.setLine(line));
+  const osc = makeOsc94Filter(
+    (event) => reporter.setOsc94(event),
+    (text) => split(text)
+  );
 
   process.stdin.setEncoding('utf8');
 
   process.stdin.on('data', (chunk) => {
     if (opts.tee) safeWrite(process.stdout, chunk);
-    split(chunk);
+    osc(chunk, { hasOsc94: false });
   });
 
   process.stdin.on('error', (err) => {
@@ -592,6 +726,7 @@ function runPipedInput(opts, reporter) {
 
   process.stdin.on('end', () => {
     removeSignals();
+    osc.flush({ hasOsc94: false });
     split.flush();
     reporter.finish('done', reporter.detail || 'stdin closed');
     process.exitCode = 0;
@@ -679,5 +814,18 @@ module.exports = {
   parseArgs,
   parseProgressValue,
   parseProgressLine,
+  parseOsc94Progress: (raw) => {
+    OSC94_RE.lastIndex = 0;
+    const match = OSC94_RE.exec(String(raw));
+    if (!match) return null;
+    return {
+      state: Number.parseInt(match[1], 10),
+      progress:
+        match[2] !== undefined
+          ? Math.max(0, Math.min(1, Number.parseInt(match[2], 10) / 100))
+          : null,
+    };
+  },
+  makeOsc94Filter,
   cleanLine,
 };

@@ -38,7 +38,7 @@ const {
   ensureStateFile,
 } = require('./state-store');
 
-const SERVER_VERSION = '2.1.0';
+const SERVER_VERSION = '2.2.0';
 const VALID_STATUSES = ['running', 'waiting', 'done', 'error'];
 
 const SERVER_INSTRUCTIONS = [
@@ -48,7 +48,9 @@ const SERVER_INSTRUCTIONS = [
   'Never poll, sleep, or loop on terminal output to refresh elapsed time or',
   'percentages. For long-running shell commands, use the out-of-band relay',
   'printed in the tool response (for example `progress-relay --id <id> -- <cmd>`),',
-  'which updates the GUI at zero token cost. Pass parentId to build a tree;',
+  'which updates the GUI at zero token cost. The relay parses OSC 9;4 terminal',
+  'progress sequences natively before text heuristics like "45%". Pass parentId',
+  'to build a tree;',
   'parent status and progress roll up from children. Concurrent sessions are',
   'isolated automatically via OPENCODE_SESSION_ID / PROGRESS_SESSION_ID, so',
   'keep using clean task IDs like "build-1" instead of manually prefixing them.',
@@ -65,7 +67,7 @@ const TOOL_DESCRIPTION = [
   'OWNERSHIP & ZERO-POLLING CONTRACT:',
   '- You own TASK MILESTONES and TREE STRUCTURE: call this tool once when starting a phase (status: "running"), when creating child sub-tasks (parentId), and when a phase finishes (status: "done" | "error").',
   '- NEVER poll, sleep, or loop on terminal output just to refresh progress percentages or elapsed time.',
-  '- For long-running shell commands, delegate live stdout/progress streaming to the out-of-band CLI relay (the exact command is returned in this tool\'s response, e.g. `progress-relay --id <id> -- <cmd>`) so the OS process updates the GUI directly without burning tokens.',
+  '- For long-running shell commands, delegate live stdout/progress streaming to the out-of-band CLI relay (the exact command is returned in this tool\'s response, e.g. `progress-relay --id <id> -- <cmd>`) so the OS process updates the GUI directly without burning tokens. The relay parses OSC 9;4 terminal progress sequences (ConEmu / Windows Terminal convention) before text heuristics; OSC status writes are provisional and the command\'s real exit code always decides done/error.',
   '',
   'TREE ROLLUP (BOOTVINE SEMANTICS):',
   '- Pass `parentId` to nest sub-tasks under a parent task.',
@@ -138,6 +140,8 @@ function relayHint(id, parentId, sessionId) {
     `  ${bin} --id ${taskId}${parent}${session} -- <cmd>`,
     `  # or: <cmd> | ${bin} --id ${taskId}${session}`,
     'Do NOT poll, sleep, or re-call progress in a loop for elapsed time or percentages.',
+    'The relay parses OSC 9;4 terminal progress sequences (Gradle rich console, mise, PowerShell 7.4+, ...) before text heuristics like "45%".',
+    'If a tool suppresses progress output when stdout is not a TTY, enable its rich/verbose progress flag so the relay can see it.',
     'Concurrent sessions are isolated automatically via OPENCODE_SESSION_ID / PROGRESS_SESSION_ID; keep task IDs clean (e.g. "build-1").',
   ].join('\n');
 }

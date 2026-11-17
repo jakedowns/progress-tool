@@ -197,6 +197,178 @@ test('reusing a completed id starts a fresh lifecycle', () => {
   assert.ok(second.startedAt >= first.startedAt);
 });
 
+// --- OSC 9;4 structured progress ---
+
+const { makeOsc94Filter, parseOsc94Progress } = require(INDEX.replace(/index\.js$/, 'relay.js'));
+
+test('parseOsc94Progress handles BEL, ST, missing progress, and clamps', () => {
+  assert.deepEqual(parseOsc94Progress('\x1b]9;4;1;42\x07'), { state: 1, progress: 0.42 });
+  assert.deepEqual(parseOsc94Progress('\x1b]9;4;1;42\x1b\\'), { state: 1, progress: 0.42 });
+  assert.deepEqual(parseOsc94Progress('\x1b]9;4;3\x07'), { state: 3, progress: null });
+  assert.deepEqual(parseOsc94Progress('\x1b]9;4;1;150\x07'), { state: 1, progress: 1 });
+  assert.deepEqual(parseOsc94Progress('\x1b]9;4;2;75\x1b\\'), { state: 2, progress: 0.75 });
+  assert.equal(parseOsc94Progress('plain text'), null);
+});
+
+test('osc94 filter parses split sequences, multiple per chunk (last wins), and never leaks escape bytes', () => {
+  const oscs = [];
+  const texts = [];
+  const filter = makeOsc94Filter(
+    (event) => oscs.push(event),
+    (text, meta) => texts.push({ text, meta })
+  );
+
+  // A sequence split across two chunks.
+  filter('\x1b]9;4;1;4', { hasOsc94: false });
+  filter('2\x07 remainder\n', { hasOsc94: false });
+
+  // Two sequences in one chunk: both fire, last one wins.
+  filter('\x1b]9;4;1;10\x07\x1b]9;4;1;20\x07', { hasOsc94: false });
+
+  assert.equal(oscs.length, 3);
+  assert.deepEqual(oscs[0], { state: 1, progress: 0.42 });
+  assert.deepEqual(oscs[2], { state: 1, progress: 0.2 });
+  assert.ok(texts.every((t) => !/\x1b/.test(t.text)), 'no escape bytes reach text');
+  assert.ok(texts.some((t) => t.text.includes('remainder')));
+  assert.ok(texts.every((t) => t.meta.hasOsc94 === true));
+});
+
+test('wrap mode: OSC 9;4 BEL sets structured progress, escapes stay out of detail', () => {
+  const { file } = tempState();
+  const result = run(
+    ['relay', '--id', 'osc-bel', '--quiet', '--', 'bash', '-c', "printf 'step\\n\\e]9;4;1;42\\a'; exit 3"],
+    { state: file }
+  );
+
+  assert.equal(result.status, 3);
+  const entry = readState(file).entries['osc-bel'];
+  assert.equal(entry.status, 'error');
+  assert.equal(entry.progress, 0.42);
+  assert.match(entry.detail, /step/);
+  assert.doesNotMatch(entry.detail, /\x1b/);
+});
+
+test('wrap mode: OSC 9;4 with ST terminator parses the same way', () => {
+  const { file } = tempState();
+  const result = run(
+    ['relay', '--id', 'osc-st', '--quiet', '--', 'bash', '-c', "printf '\\e]9;4;1;64\\e\\\\'; echoboom; exit 2"],
+    { state: file }
+  );
+
+  assert.equal(result.status, 2);
+  const entry = readState(file).entries['osc-st'];
+  assert.equal(entry.progress, 0.64);
+  assert.doesNotMatch(entry.detail, /\x1b/);
+});
+
+test('OSC 9;4 takes precedence over text heuristics on the same chunk', () => {
+  const { file } = tempState();
+  const result = run(
+    ['relay', '--id', 'osc-precedence', '--quiet', '--', 'bash', '-c', "printf '50%%\\e]9;4;1;80\\a'; exit 3"],
+    { state: file }
+  );
+
+  assert.equal(result.status, 3);
+  const entry = readState(file).entries['osc-precedence'];
+  // The text "50%" must not compete with the structured 80 in the same chunk.
+  assert.equal(entry.progress, 0.8);
+});
+
+test('OSC state 2 is provisional: a later exit 0 still reports done', () => {
+  const { file } = tempState();
+  const result = run(
+    ['relay', '--id', 'osc-err-ok', '--quiet', '--', 'bash', '-c', "printf '\\e]9;4;2;50\\a'; exit 0"],
+    { state: file }
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  const entry = readState(file).entries['osc-err-ok'];
+  assert.equal(entry.status, 'done');
+  assert.equal(entry.progress, 1);
+});
+
+test('OSC state 3 (indeterminate) clears a previously parsed percentage', () => {
+  const { file } = tempState();
+  const result = run(
+    [
+      'relay',
+      '--id',
+      'osc-indeterminate',
+      '--quiet',
+      '--',
+      'bash',
+      '-c',
+      "printf '\\e]9;4;1;42\\a\\e]9;4;3\\a'; exit 3",
+    ],
+    { state: file }
+  );
+
+  assert.equal(result.status, 3);
+  const entry = readState(file).entries['osc-indeterminate'];
+  assert.equal(entry.progress, null);
+});
+
+test('OSC state 0 clears progress; exit mapping still wins at termination', () => {
+  const { file } = tempState();
+  const result = run(
+    ['relay', '--id', 'osc-clear', '--quiet', '--', 'bash', '-c', "printf '\\e]9;4;1;30\\a\\e]9;4;0\\a'; exit 3"],
+    { state: file }
+  );
+
+  assert.equal(result.status, 3);
+  const entry = readState(file).entries['osc-clear'];
+  assert.equal(entry.progress, null);
+});
+
+test('OSC state 4 (paused) marks waiting mid-run; exit 0 still reports done', async () => {
+  const { file } = tempState();
+  const child = spawn(
+    process.execPath,
+    [INDEX, 'relay', '--id', 'osc-wait', '--quiet', '--max-hz', '0', '--', 'bash', '-c', "printf '\\e]9;4;4;30\\a'; sleep 3; exit 0"],
+    { env: stateEnv(file), stdio: ['ignore', 'pipe', 'pipe'] }
+  );
+
+  // Wait (bounded) for the relay to boot and the OSC state to land, instead
+  // of racing a fixed delay against node + bash startup on loaded machines.
+  const deadline = Date.now() + 5000;
+  let mid = null;
+  for (;;) {
+    try {
+      mid = readState(file).entries['osc-wait'];
+    } catch (e) {
+      mid = null; // state file not written yet
+    }
+    if (mid && mid.status === 'waiting') break;
+    if (Date.now() > deadline) throw new Error(`timed out waiting for waiting state: ${JSON.stringify(mid)}`);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.equal(mid.status, 'waiting');
+  assert.equal(mid.progress, 0.3);
+
+  await new Promise((resolve) => child.on('close', resolve));
+  const final = readState(file).entries['osc-wait'];
+  assert.equal(final.status, 'done');
+  assert.equal(final.progress, 1);
+});
+
+test('osc-demo script pipes structured OSC 9;4 progress through the relay end-to-end', () => {
+  const { file } = tempState();
+  const demo = path.join(ROOT, '..', 'demo', 'osc-demo.sh');
+
+  const result = spawnSync('bash', [demo], {
+    encoding: 'utf8',
+    env: stateEnv(file),
+    timeout: 30000,
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  const entry = readState(file).entries['osc-demo'];
+  assert.equal(entry.status, 'done');
+  assert.equal(entry.progress, 1);
+  assert.equal(entry.title, 'OSC 9;4 demo build');
+  assert.match(entry.detail, /packaging/);
+});
+
 test('MCP handshake exposes the zero-polling contract and relay hint', async () => {
   const { file } = tempState();
   const child = spawn(process.execPath, [INDEX], {
@@ -248,7 +420,7 @@ test('MCP handshake exposes the zero-polling contract and relay hint', async () 
   assert.equal(responses.length, 3);
 
   const init = responses.find((r) => r.id === 1);
-  assert.equal(init.result.serverInfo.version, '2.1.0');
+  assert.equal(init.result.serverInfo.version, '2.2.0');
   assert.match(init.result.instructions, /Never poll, sleep/);
   assert.match(init.result.instructions, /OPENCODE_SESSION_ID/);
   assert.match(init.result.instructions, /line breaks/i);

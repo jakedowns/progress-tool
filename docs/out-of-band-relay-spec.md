@@ -79,6 +79,7 @@ The relay owns:
 
 - Latest non-empty output line (`detail`)
 - Percentage parsing (`45%`, `6/10`)
+- Structured progress parsing: `OSC 9;4` terminal progress sequences (§6.3.1), before text heuristics
 - Write throttling
 - Terminal exit status (`done` / `error`)
 - Elapsed time indirectly, by keeping `startedAt` and `updatedAt` fresh
@@ -355,6 +356,57 @@ Unknown options MUST fail with a non-zero exit code and usage text. A relay star
 - The relay MUST NOT grow an unbounded line buffer. The reference flushes a line after 64 KiB.
 - The relay SHOULD parse `NN%` and `N/M` into `progress`. Percentages take precedence; the last valid match wins. `N/M` is only accepted when `M > 0` and `N <= M`.
 
+### 6.3.1 Structured progress sources: OSC 9;4
+
+Many build tools (Gradle's rich console, `mise`, PowerShell 7.4+, `winget`, ...)
+emit the ConEmu / Windows Terminal "progress report" sequence natively:
+
+```
+ESC ] 9 ; 4 ; <state> [ ; <progress 0-100> ] ( BEL | ESC \ )
+```
+
+States: `0` clear, `1` normal, `2` error, `3` indeterminate/busy, `4` paused/warning.
+
+The relay SHOULD parse these sequences as a structured, zero-heuristic progress
+source, with the following requirements:
+
+1. **Chunk-level interception.** Parsing MUST happen on raw read chunks BEFORE
+   line splitting and ANSI stripping. OSC 9;4 sequences typically arrive
+   without a trailing newline, often several per redraw, and can be split
+   across chunk boundaries.
+2. **Partial-sequence carry.** A chunk ending inside an incomplete OSC 9;4
+   sequence MUST be buffered until the terminator arrives. Only tails that
+   plausibly begin an OSC 9;4 sequence MAY be held; everything else passes
+   through unchanged. Held buffers MUST be bounded.
+3. **Escape stripping.** Parsed sequences MUST NOT reach `detail` as raw escape
+   bytes. Complete OSC sequences of any type are already stripped per line; the
+   chunk-level filter guarantees the same for OSC 9;4 even when sequences are
+   split across lines or chunks.
+4. **Precedence.** OSC 9;4 values take precedence over text-guessed `NN%` /
+   `N/M`. Once an OSC 9;4 sequence has been observed on a stream, text
+   heuristics are suppressed for that stream: a tool that reports structured
+   progress once will keep doing so, and mixing both sources makes the bar
+   jump backwards. Text heuristics still apply to streams that never emit
+   OSC 9;4. (Sticky-per-stream, not per-chunk, because lines can be held in
+   the splitter's carry buffer across chunk boundaries.)
+5. **Multiple sequences.** When one chunk contains several OSC 9;4 sequences,
+   apply them in order; the last one wins.
+6. **State mapping (provisional).**
+
+   | State | Effect |
+   |-------|--------|
+   | `0` | Clear `progress` (explicit `null`); status unchanged |
+   | `1` | `progress = clamp(p, 0, 100) / 100` when supplied; status unchanged |
+   | `2` | Status `error` (provisional); update `progress` when supplied |
+   | `3` | Clear `progress` (indeterminate); status unchanged |
+   | `4` | Status `waiting`; update `progress` when supplied, else preserve |
+
+   These writes are **provisional**: they MUST NOT produce `done`, MUST NOT
+   resurrect a `done`/`error` entry, and MUST be overwritten by the exit
+   mapping (§6.6) when the command terminates. OSC writes also follow the
+   merge semantics of §4.5 (`null` is an explicit clear) and the write
+   throttle of §6.5.
+
 ### 6.4 Output behavior (tee)
 
 By default the relay MUST tee:
@@ -383,6 +435,11 @@ Throttling exists because a fast build can emit thousands of lines per second, a
 | Pipe stdin reaches EOF | `done` | `1.0` | last line, or `stdin closed` |
 | Relay/state write fails | unchanged | unchanged | warning on stderr, command continues |
 | Spawn fails | `error` | preserved | error message |
+
+The exit mapping is **authoritative**: any provisional status or progress
+written from OSC 9;4 data (§6.3.1) is overwritten by this table when the
+wrapped command or pipe terminates. In particular, an OSC state `2` seen
+mid-run does not make a later `exit 0` report `error`.
 
 **Pipe-mode limitation:** piping (`cmd | relay`) does not expose the upstream exit code. Implementations MUST document this. Use wrap mode when accuracy matters, or have the harness pass the exit status separately (for example, write it to a side channel and call `progress-emit --status error`).
 
@@ -528,6 +585,9 @@ An implementation is conformant if it satisfies all of the following.
 - [ ] Pipe mode marks `done` on EOF and documents that it cannot see the upstream exit code.
 - [ ] Bare `\r` progress bars are handled.
 - [ ] ANSI escapes are stripped.
+- [ ] OSC 9;4 sequences are parsed at the chunk level, including sequences split across chunks, and never leak escape bytes into `detail` (§6.3.1).
+- [ ] OSC 9;4 values take precedence over text heuristics (sticky per stream once structured data is seen); multiple sequences in one chunk apply last-wins.
+- [ ] OSC 9;4 status writes are provisional: they never produce `done` and the exit mapping overrides them at termination.
 - [ ] Writes are throttled and the final transition is immediate.
 - [ ] Output is teed by default.
 - [ ] Existing title/parent are preserved when attaching to an agent-created entry.
@@ -558,7 +618,7 @@ An implementation is conformant if it satisfies all of the following.
 
 Implementation versions:
 
-- MCP server / relay: `2.1.0`
+- MCP server / relay: `2.2.0`
 - OpenCode plugin: `1.1.0`
 
 ---
