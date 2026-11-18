@@ -73,6 +73,17 @@ The agent MUST NOT call the progress tool:
 - after every line of terminal output;
 - solely to refresh elapsed time or a percentage that a relay can supply.
 
+**Long-horizon work without a relay is the exception that defines the cadence.**
+Research, planning, codebase exploration, refactors, and documentation are not
+shell commands: no relay exists, so the agent's own multi-turn rhythm is the
+data plane. During such work the agent SHOULD spend one of its turns between
+tool calls — roughly every few calls, or whenever it starts or finishes a
+step — on a progress update (fresh `detail`, a `progress` fraction, or a
+status change), the same way it maintains a todo list. This is not polling:
+polling burns tokens on timers and terminal output; a between-turn update
+burns one fire-and-forget tool call at a natural boundary and keeps the
+summary rollup live.
+
 ### 3.2 Data plane (relay / OS process)
 
 The relay owns:
@@ -523,13 +534,22 @@ This is exactly what `mcp-server/relay.js` does; it can be ported to any languag
 For harnesses that cannot return per-tool hints, include this in the system prompt:
 
 ```text
-When you start a long-running shell command, call progress once with
-status "running", then attach the out-of-band relay:
+For ANY long-horizon task — research, planning, codebase exploration,
+multi-file refactors, documentation, long-running shell commands — call
+progress once with status "running" before you start, and keep it current
+while you work: for non-shell work, spend one of your turns between tool
+calls every few steps on a progress update (fresh detail or a 0..1
+progress fraction); use parentId to expose the phase structure
+(plan / implement / verify).
+
+For long-running shell commands, attach the out-of-band relay instead of
+waiting on the command:
 
   progress-relay --id <id> -- <cmd>
 
-Do not poll, sleep, or call progress in a loop to refresh elapsed time or
-percentages. Call progress again only when the task finishes or fails.
+Do not poll, sleep, or call progress in a loop to refresh shell telemetry
+(elapsed time, percentages). Close the task with done/error when the work
+finishes or fails.
 ```
 
 The prompt is a fallback. The tool response hint is more reliable because it arrives immediately before the shell call.
