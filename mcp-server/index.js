@@ -389,7 +389,29 @@ function handleProgressCall(id, args) {
     const enumerated = `${entry.title ?? ''}\n${entry.detail ?? ''}`.match(
       /(?:^|\n)\s*\d{1,2}[.)?:]?\s+\S/g
     );
-    if ((enumerated?.length ?? 0) >= 3) {
+    const antiPattern = (enumerated?.length ?? 0) >= 3;
+    if (antiPattern) {
+      const strikes = nudgeStrikes.get(entry.id) ?? 0;
+      nudgeStrikes.set(entry.id, strikes + 1);
+
+      // First offense, no children yet: return the response as an ERROR
+      // result. The update was already recorded (nothing is lost), but
+      // error results are what reliably stop an agent mid-plan and make it
+      // restructure. Once children exist, soften to the text tip.
+      if (strikes === 0 && !treeHasChildren(entry.id)) {
+        toolError(
+          id,
+          [
+            `INVALID USAGE — this entry embeds a numbered step list (${enumerated.length} items), which cannot show per-step status or progress in the rollup. The update WAS recorded; nothing is lost.`,
+            `Resubmit the plan as child entries so each step gets its own status:`,
+            `  progress({ id: "${entry.id}-step-1", status: "running", title: "<step>", parentId: "${entry.id}" })`,
+            `Create one child per step up front, keep them current as you work (mark a child done, start the next), and strip the numbered list from this entry's title/detail. The parent rolls up automatically.`,
+            `Load the progress-tool skill for the full pattern.`,
+          ].join('\n')
+        );
+        return;
+      }
+
       text += [
         '',
         'Tip: a numbered step list inside one entry cannot show per-step status or progress.',

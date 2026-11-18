@@ -445,6 +445,20 @@ test('running response nudges the tree for numbered step lists, silently skips p
       params: {
         name: 'progress',
         arguments: {
+          id: 'anti-pattern',
+          status: 'running',
+          title: numberedTitle,
+          progress: 0.15,
+        },
+      },
+    },
+    {
+      jsonrpc: '2.0',
+      id: 4,
+      method: 'tools/call',
+      params: {
+        name: 'progress',
+        arguments: {
           id: 'plain-entry',
           status: 'running',
           title: 'Compiling SDL2',
@@ -470,11 +484,18 @@ test('running response nudges the tree for numbered step lists, silently skips p
     .map((line) => JSON.parse(line));
 
   assert.equal(stderr, '');
-  const numbered = responses.find((r) => r.id === 2);
-  assert.match(numbered.result.content[0].text, /Tip: a numbered step list inside one entry/);
-  assert.match(numbered.result.content[0].text, /parentId: "anti-pattern"/);
+  const firstOffense = responses.find((r) => r.id === 2);
+  assert.equal(firstOffense.result.isError, true, 'first numbered-list call returns an error result');
+  assert.match(firstOffense.result.content[0].text, /INVALID USAGE — this entry embeds a numbered step list/);
+  assert.match(firstOffense.result.content[0].text, /parentId: "anti-pattern"/);
+  assert.match(firstOffense.result.content[0].text, /The update WAS recorded/);
 
-  const plain = responses.find((r) => r.id === 3);
+  const repeat = responses.find((r) => r.id === 3);
+  assert.equal(repeat.result.isError, false, 'strike is capped: later calls soften to a text tip');
+  assert.match(repeat.result.content[0].text, /Tip: a numbered step list inside one entry/);
+
+  const plain = responses.find((r) => r.id === 4);
+  assert.equal(plain.result.isError, false);
   assert.doesNotMatch(plain.result.content[0].text, /Tip: a numbered step list/);
   assert.match(plain.result.content[0].text, /relay --id plain-entry/);
 });
