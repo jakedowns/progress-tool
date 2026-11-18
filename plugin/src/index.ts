@@ -141,6 +141,7 @@ export default Plugin.define({
     const monitors = new Map<string, MonitorState>();
     const lastSeenProgress = new Map<string, number>();
     const NUDGE_KEY = 'progress-nudge';
+    let promptReminderHook: Awaited<ReturnType<typeof ctx.session.hook>> | undefined;
 
     let toolHook: Awaited<ReturnType<typeof ctx.tool.hook>> | undefined;
     if (strictMode !== 'off') {
@@ -247,6 +248,17 @@ export default Plugin.define({
       });
     }
 
+    // "Unhinged" mode (opt-in): append a progress reminder to every user
+    // message so the agent re-checks its task list whenever the workload
+    // changes. Off by default — it edits user input text.
+    if (ctx.options?.unhinged === true) {
+      const promptHook = await ctx.session.hook('prompt', (event) => {
+        event.prompt.text = `${event.prompt.text}\n\n[did the user's message just change your workload? update your task list!]`;
+      });
+      promptReminderHook = promptHook;
+      console.log(`[opencode-progress] v${pluginVersion} unhinged mode: prompt suffix enabled`);
+    }
+
     console.log(`[opencode-progress] server part v${pluginVersion} loaded`);
 
     return () => {
@@ -254,6 +266,7 @@ export default Plugin.define({
       void rulesRegistration?.dispose();
       void toolHook?.dispose();
       void idleHook?.dispose();
+      void promptReminderHook?.dispose();
     };
   },
 });

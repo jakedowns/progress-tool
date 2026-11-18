@@ -659,6 +659,39 @@ test('stale running entries are swept; waiting entries are not; 0 disables', () 
   assert.ok(readState(file2).entries['old-running'], 'PROGRESS_STALE_MS=0 disables the sweep');
 });
 
+test('terminal dismissal survives terminal re-reports; non-terminal dismissal clears on any agent update', () => {
+  const { file } = tempState();
+  const store = require(path.join(ROOT, 'state-store'));
+
+  // Dismissed while DONE → later done/error re-reports are not news.
+  run(['emit', '--id', 'term-1', '--status', 'done', '--title', 'Finished'], { state: file });
+  store.mutateState((state) => {
+    const entry = Object.values(state.entries).find((e) => e.id === 'term-1');
+    entry.dismissed = { status: 'done', at: 12345 };
+    return state;
+  }, file);
+  run(['emit', '--id', 'term-1', '--status', 'done', '--detail', 're-confirmed'], { state: file });
+  assert.deepEqual(
+    readState(file).entries['term-1'].dismissed,
+    { status: 'done', at: 12345 },
+    'terminal dismissal preserved through a terminal re-report'
+  );
+
+  // A lifecycle restart still revives it.
+  run(['emit', '--id', 'term-1', '--status', 'running'], { state: file });
+  assert.equal(readState(file).entries['term-1'].dismissed ?? null, null);
+
+  // Dismissed while RUNNING → closing it counts as an update and revives.
+  run(['emit', '--id', 'run-1', '--status', 'running', '--title', 'Working'], { state: file });
+  store.mutateState((state) => {
+    const entry = Object.values(state.entries).find((e) => e.id === 'run-1');
+    entry.dismissed = { status: 'running', at: 67890 };
+    return state;
+  }, file);
+  run(['emit', '--id', 'run-1', '--status', 'done'], { state: file });
+  assert.equal(readState(file).entries['run-1'].dismissed ?? null, null, 'completion revives a running-state dismissal');
+});
+
 test('MCP handshake exposes the zero-polling contract and relay hint', async () => {
   const { file } = tempState();
   const child = spawn(process.execPath, [INDEX], {
@@ -710,7 +743,7 @@ test('MCP handshake exposes the zero-polling contract and relay hint', async () 
   assert.equal(responses.length, 3);
 
   const init = responses.find((r) => r.id === 1);
-  assert.equal(init.result.serverInfo.version, '2.6.0');
+  assert.equal(init.result.serverInfo.version, '2.6.1');
   assert.match(init.result.instructions, /Never poll, sleep/);
   assert.match(init.result.instructions, /OPENCODE_SESSION_ID/);
   assert.match(init.result.instructions, /line breaks/i);
@@ -718,6 +751,11 @@ test('MCP handshake exposes the zero-polling contract and relay hint', async () 
   const list = responses.find((r) => r.id === 2);
   const tool = list.result.tools[0];
   assert.equal(tool.name, 'progress');
+  assert.ok(
+    !(tool.inputSchema.required ?? []).includes('id'),
+    'top-level id must not be required: entries[]-only bulk calls must validate'
+  );
+  assert.deepEqual(tool.inputSchema.properties.entries.items.required, ['id', 'status', 'title']);
   assert.match(tool.description, /ZERO-POLLING/);
   assert.match(tool.description, /OPENCODE_SESSION_ID/);
   assert.match(tool.description, /LINE BREAKS & LONG TEXT/);

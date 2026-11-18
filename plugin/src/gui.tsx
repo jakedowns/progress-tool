@@ -276,7 +276,7 @@ export default Plugin.define({
       }
     };
 
-    console.log("[opencode-progress] gui setup", ctx.app.version, ctx.app.platform);
+    console.log(`[opencode-progress] gui setup v${pkg.version} (opencode ${ctx.app.version}, ${ctx.app.platform})`);
     if (ctx.options?.notifyOnLoad === true) {
       ctx.toast.show({
         title: "Progress plugin loaded",
@@ -451,19 +451,20 @@ export default Plugin.define({
         const parts = barParts(top.progress, options);
         const topTitle = oneLineText(top.title);
 
-        // Multi-root pill: "(N · agg%) Title" — the count is a PREFIX so it
-        // survives the capsule's ellipsis truncation (long task titles get
-        // cut from the end, which used to hide the suffix).
+        // Collapsed pill prefix: the aggregate % shows even with a single
+        // root; the root count is included only when there is more than one
+        // ("(2 · 60%)", "(40%)"). Prefix placement survives truncation.
         const rootProgresses = visibleRoots
           .map((root) => root.progress)
           .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
         const aggregatePct =
-          visibleRoots.length > 1 && rootProgresses.length > 0
+          rootProgresses.length > 0
             ? progressLabel(rootProgresses.reduce((a, b) => a + b, 0) / rootProgresses.length)
             : null;
-        const pillPrefix =
-          visibleRoots.length > 1
-            ? `(${visibleRoots.length}${aggregatePct ? ` · ${aggregatePct}` : ""}) `
+        const pillPrefix = aggregatePct
+          ? `(${visibleRoots.length > 1 ? `${visibleRoots.length} · ` : ""}${aggregatePct}) `
+          : visibleRoots.length > 1
+            ? `(${visibleRoots.length}) `
             : "";
 
         const label =

@@ -4,7 +4,7 @@ A non-blocking twin of `question` so coding agents can signal long-running work 
 
 Implements the [Agent Progress Tool proposal](https://gist.github.com/jakedowns/ddc4eb4817184a074c82c61dc6e7228c) for OpenCode 2, and is written as a portable reference implementation that any model, agent, or harness can copy, adapt, or train on.
 
-**Versions:** MCP server `2.6.0` · OpenCode plugin `2.9.0`
+**Versions:** MCP server `2.6.1` · OpenCode plugin `2.9.1`
 
 > [!IMPORTANT]
 > **No `AGENTS.md` edits required.** The bundled OpenCode plugin injects the progress & relay rules directly into every session's system instructions, and the MCP `progress` tool response reinforces them at the exact moment an agent starts a task — so agents know to wrap long-running commands with `progress-relay` *before* their first build, not after. Progress reporting works without any prompt engineering.
@@ -488,6 +488,10 @@ The plugin at `plugin/` targets the OpenCode **V2** plugin API and exposes four 
      todos pending") into the same execution, listing the open entries.
      Debounced by entry signature, a 2-minute cooldown, and a per-run cap, so
      an agent that genuinely cannot act is not looped.
+   - `unhinged`: set to `true` to append
+     `[did the user's message just change your workload? update your task list!]`
+     to every user message (via the prompt hook). **Default `false`** — it
+     edits user input text, so it is strictly opt-in.
 
    Running and waiting tasks stay visible. Errors stay visible until dismissed or updated on
    purpose, so a failure cannot silently scroll away. Completed tasks stay visible too unless
@@ -495,12 +499,15 @@ The plugin at `plugin/` targets the OpenCode **V2** plugin API and exposes four 
    **✕** icon that dismisses that tree, and **✕ Dismiss all** hides every current report.
    Dismissal is scoped to the task itself: a dismissed tree stays hidden through relay telemetry
    and sibling/other-root activity. An **agent update** clears the dismissal — on the updated
-   entry and on all of its ancestors — so real work inside a dismissed tree always comes back.
-   A done-dismissed tree stays hidden even when new children are appended under it (the
+   entry and on all of its ancestors — so real work inside a dismissed tree always comes back,
+   **except terminal dismissal**: if you dismissed a task after it was already done/error, later
+   done/error re-reports do not revive it (you've seen the outcome); only a restart (running/
+   waiting) does. A done-dismissed tree stays hidden even when new children are appended under it (the
    done→running flip does not revive it); a child *failing* brings it back. With more than one
    root task, the pill shows `(N · agg%)` as a prefix — the number of roots and the mean of
    their progress. No extra agent hook is needed: report `status: "done"` once and the view
-   handles retention and hiding.
+   handles retention and hiding. Completed entries are pruned after 60 minutes by default
+   (`PROGRESS_TTL_MS`, e.g. `86400000` for a day).
 
 3. Verify:
 

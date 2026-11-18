@@ -61,7 +61,7 @@ function treeHasChildren(parentId) {
   }
 }
 
-const SERVER_VERSION = '2.6.0';
+const SERVER_VERSION = '2.6.1';
 const VALID_STATUSES = ['running', 'waiting', 'done', 'error'];
 
 const SERVER_INSTRUCTIONS = [
@@ -106,7 +106,7 @@ const TOOL_DESCRIPTION = [
   '(2) Use the out-of-band relay (progress-relay) to WRAP long-running programmatic tool calls — build scripts, compilers, test suites, installs, anything that reports progress on stdout — so telemetry streams at zero token cost.',
   '',
   'BULK TREE CREATION:',
-  '- Pass `entries: [{ id, status, title, parentId, ... }]` (max 50) to create or update a whole parent+children tree in ONE atomic call — one round trip, no half-built tree. Use either entries[] or the single-entry fields, not both.',
+  '- Pass `entries: [{ id, status, title, parentId, ... }]` (max 50) to create or update a whole parent+children tree in ONE atomic call — one round trip, no half-built tree. Use EITHER entries[] alone OR the single-entry fields, not both. Each entry item requires id/status/title; the top-level id/status/title are only for the single form.',
   'OWNERSHIP & ZERO-POLLING CONTRACT:',
   '- You own TASK MILESTONES and TREE STRUCTURE: call this tool when starting a phase (status: "running"), when creating child sub-tasks (parentId), and when a phase finishes (status: "done" | "error"). For long-horizon NON-SHELL work (research, planning, exploration, refactors, documentation) there is no relay, so also spend one of your turns between tool calls every few steps on a progress update (fresh detail or a 0..1 progress fraction) — todowrite-style cadence keeps the rollup live. Cover ANY long-horizon work, not just shell commands; anything past a couple of minutes or a single reply deserves an entry.',
   '- NEVER poll, sleep, or loop on terminal output just to refresh progress percentages or elapsed time.',
@@ -286,7 +286,11 @@ function handleToolsList(id) {
                 'Optional session ID override; automatically resolved from PROGRESS_SESSION_ID or OPENCODE_SESSION_ID when set by the harness.',
             },
           },
-          required: ['id', 'status', 'title'],
+          // No top-level `required`: this tool accepts EITHER the single-entry
+          // form (id + status + title) OR `entries[]` (bulk). Declaring the
+          // single fields as required made schema-validating clients reject
+          // bulk-only calls before they ever reached the handler. The handler
+          // validates whichever form is used and returns a clear error.
           additionalProperties: false,
         },
         annotations: {

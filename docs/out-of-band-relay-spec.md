@@ -207,6 +207,12 @@ An entry MAY carry a dismissal record written by view clients:
 - **Agent-plane writes** (the MCP tool, the `emit` CLI) MUST clear the field
   on the written entry AND on all of its ancestors within the session scope:
   a dismissed tree must not hide later real updates inside it.
+- **Terminal dismissal** is the exception: a dismissal taken while the entry
+  was already terminal (`done`/`error`) MUST survive later terminal
+  re-reports — the user has seen the outcome, and a repeated done/error is
+  not news. A dismissal taken while the entry was `running`/`waiting` MUST
+  clear on any agent update, including completion, so the task visibly
+  resolves. A lifecycle restart clears either kind.
 - **Relay telemetry** writes MUST preserve the field (only a lifecycle
   restart clears it, §4.5): dismissed running tasks must stay hidden through
   feeds that tick many times per second.
@@ -221,7 +227,7 @@ An entry MAY carry a dismissal record written by view clients:
 
 ### 4.6 Lifecycle cleanup
 
-Completed entries (`done` or `error`) SHOULD be pruned after a retention period (default: 10 minutes). Implementations MUST allow the retention period to be configured (reference: `PROGRESS_TTL_MS`).
+Completed entries (`done` or `error`) SHOULD be pruned after a retention period (default: 60 minutes; `PROGRESS_TTL_MS` overrides — set `86400000` for a day).
 `running` entries untouched for `PROGRESS_STALE_MS` (default: 60 minutes, `0` disables) SHOULD be pruned as orphans: a genuinely running task receives relay telemetry or agent updates, so a `running` entry with no writes for an hour is abandoned. `waiting` entries MUST NOT be swept — they are explicitly paused (human-blocked work may sit for days).
 
 ### 4.7 Concurrency guarantee

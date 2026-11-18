@@ -22,7 +22,7 @@ const os = require('os');
 const path = require('path');
 
 const STATE_VERSION = 2;
-const DEFAULT_TTL_MS = 10 * 60 * 1000;
+const DEFAULT_TTL_MS = 60 * 60 * 1000;
 /** Running entries untouched for this long are orphans and get swept (§4.6). */
 const DEFAULT_STALE_MS = 60 * 60 * 1000;
 const LOCK_RETRY_MS = 10;
@@ -350,8 +350,21 @@ function applyUpsert(state, input, now) {
   // longer applies, and neither does any dismissal on its ancestors — a
   // dismissed parent must not hide an actively updated descendant. Relay
   // telemetry only clears the flag on a lifecycle restart.
+  //
+  // EXCEPTION — terminal dismissal (§4.9): if the entry was dismissed while
+  // already terminal (done/error) and this write is terminal too, preserve
+  // the dismissal. The user has seen the outcome; a repeated done/error is
+  // not news. A lifecycle restart (next status running/waiting) still clears
+  // it, and a dismissal taken while running/waiting clears on ANY agent
+  // update so completion revives it visually.
   if (!fromRelay) {
-    entry.dismissed = undefined;
+    const wasDismissedTerminal =
+      prev?.dismissed &&
+      (prev.dismissed.status === 'done' || prev.dismissed.status === 'error');
+    const nextTerminal = status === 'done' || status === 'error';
+    if (!(wasDismissedTerminal && nextTerminal)) {
+      entry.dismissed = undefined;
+    }
     clearAncestorDismissals(state, entry.parentId, sessionId);
   } else if (isRestart) {
     entry.dismissed = undefined;
