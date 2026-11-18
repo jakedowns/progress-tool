@@ -79,6 +79,7 @@ export function writeDismissal(key: string, status: string): boolean {
     const tmp = `${file}.${process.pid}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
     fs.renameSync(tmp, file);
+    console.log(`[opencode-progress] dismissal persisted key=${key} status=${status} at=${entry.dismissed.at}`);
     return true;
   } catch (error) {
     console.error("[opencode-progress] dismissal write failed", String(error));

@@ -5,11 +5,32 @@
  * relay and exposes it to the TUI and GUI parts through RPC.
  */
 
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { Plugin } from "@opencode/plugin";
 import { ProgressRpc } from "./rpc.js";
 import { readProgressState, writeDismissal } from "./state.js";
 import { normalizeRefreshMs } from "./tree.js";
 import { PROGRESS_RULES, instructionsEnabled } from "./instructions.js";
+
+/**
+ * The plugin's own version, read at runtime so a running server part can be
+ * identified in logs independently of the (separately loaded) GUI bundle.
+ * The desktop app reloads GUI bundles on window reopen but only reloads this
+ * server part on a service restart — logging the version makes that
+ * split-brain visible ("GUI updated, server stale").
+ */
+const pluginVersion = (() => {
+  try {
+    return (
+      JSON.parse(
+        readFileSync(fileURLToPath(new URL("../package.json", import.meta.url)), "utf8")
+      ).version ?? "unknown"
+    );
+  } catch {
+    return "unknown";
+  }
+})();
 
 export default Plugin.define({
   id: "opencode-progress",
@@ -22,7 +43,9 @@ export default Plugin.define({
         return { entries: state.entries ?? {}, updatedAt: Date.now() };
       },
       dismiss: async ({ key, status }) => {
-        return { ok: writeDismissal(key, status) };
+        const ok = writeDismissal(key, status);
+        console.log(`[opencode-progress] v${pluginVersion} dismiss rpc key=${key} status=${status} ok=${ok}`);
+        return { ok };
       },
     });
 
