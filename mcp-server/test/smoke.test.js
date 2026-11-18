@@ -627,6 +627,38 @@ test('closing a parent cascades done to all descendants in the same session', ()
   assert.equal(state['casc-other'].status, 'running', 'unrelated entries are untouched');
 });
 
+test('stale running entries are swept; waiting entries are not; 0 disables', () => {
+  const fs = require('node:fs');
+  const old = Date.now() - 2 * 60 * 60 * 1000;
+  const seed = (file) =>
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        entries: {
+          'old-running': { id: 'old-running', status: 'running', title: 'Orphan', updatedAt: old },
+          'old-waiting': { id: 'old-waiting', status: 'waiting', title: 'Paused', updatedAt: old },
+        },
+        version: 2,
+      })
+    );
+
+  const { file } = tempState();
+  seed(file);
+  // Any write triggers prune.
+  run(['emit', '--id', 'trigger', '--status', 'done', '--title', 'Trigger'], { state: file });
+  const entries = readState(file).entries;
+  assert.equal(entries['old-running'], undefined, 'stale running entry swept');
+  assert.ok(entries['old-waiting'], 'waiting entries are never swept');
+
+  const { file: file2 } = tempState();
+  seed(file2);
+  run(['emit', '--id', 'trigger2', '--status', 'done', '--title', 'Trigger'], {
+    state: file2,
+    env: { PROGRESS_STALE_MS: '0' },
+  });
+  assert.ok(readState(file2).entries['old-running'], 'PROGRESS_STALE_MS=0 disables the sweep');
+});
+
 test('MCP handshake exposes the zero-polling contract and relay hint', async () => {
   const { file } = tempState();
   const child = spawn(process.execPath, [INDEX], {
@@ -678,7 +710,7 @@ test('MCP handshake exposes the zero-polling contract and relay hint', async () 
   assert.equal(responses.length, 3);
 
   const init = responses.find((r) => r.id === 1);
-  assert.equal(init.result.serverInfo.version, '2.5.0');
+  assert.equal(init.result.serverInfo.version, '2.6.0');
   assert.match(init.result.instructions, /Never poll, sleep/);
   assert.match(init.result.instructions, /OPENCODE_SESSION_ID/);
   assert.match(init.result.instructions, /line breaks/i);

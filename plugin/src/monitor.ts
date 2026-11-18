@@ -158,3 +158,73 @@ export function silentRunNudge(count: number): string {
 export function staleProgressNudge(callsSinceProgress: number): string {
   return `⚠ STRICT MODE: ${callsSinceProgress} tool calls since any progress value changed, and you have pending tasks — any updates? Update the running entries now (fresh detail and a 0.0–1.0 progress fraction, or close what is finished), or mark them waiting.`;
 }
+
+// --- Idle reminder (turn-end nudge) --------------------------------------
+
+export interface IdleEntry {
+  id: string;
+  title?: string;
+  status: string;
+  dismissed?: { at: number } | null;
+}
+
+export interface IdleTracker {
+  /** Sorted signature of the open entries at the last reminder. */
+  signature: string;
+  /** Epoch ms of the last reminder. */
+  lastAt: number;
+  /** Reminders sent for the current (unchanged) signature. */
+  count: number;
+}
+
+export interface IdleDecision {
+  action: "remind" | "none";
+  signature: string;
+  lastAt: number;
+  count: number;
+  message?: string;
+}
+
+/**
+ * Decide whether to remind the model on session idle (turn end).
+ *
+ * Fires when the session is about to go idle with open (running/waiting,
+ * non-dismissed) entries. Guardrails against loops — the synthetic message
+ * runs in the same execution, so an agent that ignores it would otherwise
+ * idle again immediately:
+ * - Same signature re-idles are suppressed until `cooldownMs` and capped at
+ *   `maxPerRun` reminders; a changed signature resets the count.
+ */
+export function idleReminder(
+  tracker: IdleTracker,
+  entries: readonly IdleEntry[],
+  options: { cooldownMs?: number; maxPerRun?: number; now?: number } = {}
+): IdleDecision {
+  const cooldownMs = options.cooldownMs ?? 120_000;
+  const maxPerRun = options.maxPerRun ?? 3;
+  const now = options.now ?? Date.now();
+
+  const open = entries
+    .filter((entry) => (entry.status === "running" || entry.status === "waiting") && !entry.dismissed)
+    .map((entry) => `${entry.id} (${entry.status})`)
+    .sort();
+  const signature = open.join(" | ");
+
+  if (open.length === 0) {
+    return { action: "none", signature, lastAt: tracker.lastAt, count: 0 };
+  }
+
+  const changed = signature !== tracker.signature;
+  const count = changed ? 0 : tracker.count;
+  if (!changed && (count >= maxPerRun || now - tracker.lastAt < cooldownMs)) {
+    return { action: "none", signature, lastAt: tracker.lastAt, count };
+  }
+
+  const message = [
+    `⚠ IDLE WITH OPEN TASKS (${open.length}): ${open.join(", ")}.`,
+    `You are about to go idle, but these progress entries are still running/waiting.`,
+    `Close what is finished (status "done" or "error"), mark genuinely blocked work "waiting" with a detail, or continue the work now. Do not leave stale trees behind.`,
+  ].join(" ");
+
+  return { action: "remind", signature, lastAt: now, count: count + 1, message };
+}

@@ -23,6 +23,8 @@ const path = require('path');
 
 const STATE_VERSION = 2;
 const DEFAULT_TTL_MS = 10 * 60 * 1000;
+/** Running entries untouched for this long are orphans and get swept (§4.6). */
+const DEFAULT_STALE_MS = 60 * 60 * 1000;
 const LOCK_RETRY_MS = 10;
 const LOCK_TIMEOUT_MS = 5000;
 const LOCK_STALE_MS = 15000;
@@ -254,6 +256,10 @@ function acquireLock(stateFile) {
 
 function prune(state, now) {
   const ttl = Number(process.env.PROGRESS_TTL_MS || DEFAULT_TTL_MS);
+  // Orphan sweep: a genuinely running task receives relay ticks (4Hz) or
+  // agent updates; a `running` entry untouched for an hour is abandoned.
+  // 0 disables. `waiting` entries are explicitly paused and never swept.
+  const staleMs = Number(process.env.PROGRESS_STALE_MS ?? DEFAULT_STALE_MS);
   for (const [id, entry] of Object.entries(state.entries)) {
     if (!entry || typeof entry !== 'object') {
       delete state.entries[id];
@@ -263,6 +269,10 @@ function prune(state, now) {
       (entry.status === 'done' || entry.status === 'error') &&
       now - (entry.updatedAt || 0) > ttl
     ) {
+      delete state.entries[id];
+      continue;
+    }
+    if (entry.status === 'running' && staleMs > 0 && now - (entry.updatedAt || 0) > staleMs) {
       delete state.entries[id];
     }
   }

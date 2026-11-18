@@ -19,7 +19,9 @@ import {
   normalizeStaleAfterMs,
   silentRunNudge,
   staleProgressNudge,
+  idleReminder,
   type MonitorState,
+  type IdleTracker,
 } from "./monitor.js";
 
 /**
@@ -216,12 +218,42 @@ export default Plugin.define({
       console.log(`[opencode-progress] v${pluginVersion} strict mode: ${strictMode} (threshold ${strictThreshold})`);
     }
 
+    // Idle reminder: at turn end (session about to go idle) with open,
+    // non-dismissed entries, admit ONE synthetic message — it runs in the
+    // same execution instead of the session going idle, so the model gets a
+    // turn-end reminder ("you have a tree of todos pending"). Debounced by
+    // entry signature + cooldown + per-run cap (monitor.ts).
+    const idleTrackers = new Map<string, IdleTracker>();
+    let idleHook: Awaited<ReturnType<typeof ctx.session.hook>> | undefined;
+    if (ctx.options?.idleReminder !== false) {
+      idleHook = await ctx.session.hook('experimental.idle', async (event) => {
+        try {
+          const entries = Object.values(readProgressState().entries ?? {}).filter(
+            (entry) => entry && entry.sessionId === event.sessionID
+          );
+          const tracker = idleTrackers.get(event.sessionID) ?? { signature: '', lastAt: 0, count: 0 };
+          const decision = idleReminder(tracker, entries, { now: Date.now() });
+          idleTrackers.set(event.sessionID, {
+            signature: decision.signature,
+            lastAt: decision.lastAt,
+            count: decision.count,
+          });
+          if (decision.action !== 'remind' || !decision.message) return;
+          console.log(`[opencode-progress] v${pluginVersion} idle reminder (${decision.count}) for ${event.sessionID}`);
+          await ctx.session.synthetic({ sessionID: event.sessionID, text: decision.message });
+        } catch (error) {
+          console.error('[opencode-progress] idle reminder failed', String(error));
+        }
+      });
+    }
+
     console.log(`[opencode-progress] server part v${pluginVersion} loaded`);
 
     return () => {
       clearInterval(timer);
       void rulesRegistration?.dispose();
       void toolHook?.dispose();
+      void idleHook?.dispose();
     };
   },
 });

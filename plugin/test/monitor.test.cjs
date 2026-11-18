@@ -26,6 +26,7 @@ const {
   normalizeStaleAfterMs,
   silentRunNudge,
   staleProgressNudge,
+  idleReminder,
 } = require(path.join(OUT, 'monitor.cjs'));
 
 const idle = () => ({ count: 0, callsSinceProgress: 0, nudged: false, forced: false, lastStaleNudgeAt: 0 });
@@ -150,4 +151,61 @@ test('normalizers and message texts', () => {
   assert.match(silentRunNudge(4), /STRICT MODE: 4 consecutive tool calls/);
   assert.match(staleProgressNudge(7), /STRICT MODE: 7 tool calls since any progress value changed/);
   assert.match(staleProgressNudge(7), /any updates\?/);
+});
+
+test('idle reminder: fires for open entries, skips dismissed/closed, names them', () => {
+  const now = 1_000_000_000;
+  const entries = [
+    { id: 'build', status: 'running' },
+    { id: 'docs', status: 'waiting' },
+    { id: 'closed', status: 'done' },
+    { id: 'muted', status: 'running', dismissed: { at: 1 } },
+  ];
+  const decision = idleReminder({ signature: '', lastAt: 0, count: 0 }, entries, { now });
+  assert.equal(decision.action, 'remind');
+  assert.match(decision.message, /IDLE WITH OPEN TASKS \(2\)/);
+  assert.match(decision.message, /build \(running\)/);
+  assert.match(decision.message, /docs \(waiting\)/);
+  assert.doesNotMatch(decision.message, /closed/);
+  assert.doesNotMatch(decision.message, /muted/);
+});
+
+test('idle reminder: no open entries → silent', () => {
+  const decision = idleReminder({ signature: '', lastAt: 0, count: 0 }, [{ id: 'done', status: 'done' }]);
+  assert.equal(decision.action, 'none');
+});
+
+test('idle reminder: same signature is throttled and capped; changed signature resets', () => {
+  const now = 1_000_000_000;
+  const entries = [{ id: 'a', status: 'running' }];
+  const tracker = { signature: '', lastAt: 0, count: 0 };
+
+  let d = idleReminder(tracker, entries, { now, cooldownMs: 60_000, maxPerRun: 2 });
+  assert.equal(d.action, 'remind');
+  tracker.signature = d.signature;
+  tracker.lastAt = d.lastAt;
+  tracker.count = d.count;
+
+  // Immediately idle again with the same open entry: throttled.
+  d = idleReminder(tracker, entries, { now: now + 1000, cooldownMs: 60_000, maxPerRun: 2 });
+  assert.equal(d.action, 'none');
+
+  // After cooldown: second reminder.
+  d = idleReminder(tracker, entries, { now: now + 61_000, cooldownMs: 60_000, maxPerRun: 2 });
+  assert.equal(d.action, 'remind');
+  tracker.lastAt = d.lastAt;
+  tracker.count = d.count;
+
+  // Cap reached for this signature: silent even after cooldown.
+  d = idleReminder(tracker, entries, { now: now + 10 * 60_000, cooldownMs: 60_000, maxPerRun: 2 });
+  assert.equal(d.action, 'none', 'per-run cap suppresses repeats for the same signature');
+
+  // A changed set of open entries resets the run and reminds again.
+  d = idleReminder(tracker, [...entries, { id: 'b', status: 'waiting' }], {
+    now: now + 10 * 60_000,
+    cooldownMs: 60_000,
+    maxPerRun: 2,
+  });
+  assert.equal(d.action, 'remind');
+  assert.equal(d.count, 1);
 });

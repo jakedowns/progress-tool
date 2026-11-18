@@ -222,6 +222,7 @@ An entry MAY carry a dismissal record written by view clients:
 ### 4.6 Lifecycle cleanup
 
 Completed entries (`done` or `error`) SHOULD be pruned after a retention period (default: 10 minutes). Implementations MUST allow the retention period to be configured (reference: `PROGRESS_TTL_MS`).
+`running` entries untouched for `PROGRESS_STALE_MS` (default: 60 minutes, `0` disables) SHOULD be pruned as orphans: a genuinely running task receives relay telemetry or agent updates, so a `running` entry with no writes for an hour is abandoned. `waiting` entries MUST NOT be swept — they are explicitly paused (human-blocked work may sit for days).
 
 ### 4.7 Concurrency guarantee
 
