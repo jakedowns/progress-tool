@@ -1,0 +1,160 @@
+/**
+ * Strict-mode monitor: detect agents calling tools back-to-back without
+ * updating progress, and decide whether/how to nudge.
+ *
+ * Two detection paths:
+ *
+ * 1. SILENT RUN — the session has no running/waiting entry at all and the
+ *    agent keeps calling tools. At `threshold` consecutive silent calls:
+ *    "you're working without a task entry — start one".
+ *
+ * 2. STALE PROGRESS — the session HAS pending tasks, the agent keeps calling
+ *    tools, but no progress value has changed (across all roots and
+ *    descendants) for `staleAfterMs`, AND at least `staleMinCalls` tool calls
+ *    have happened since that last change. At most once per `cooldownMs`:
+ *    "you have pending tasks and haven't changed their % recently — any
+ *    updates?".
+ *
+ * Progress activity is measured from the store, not from the model's
+ * self-reports: any progress write (tool call or relay tick) bumps an
+ * entry's updatedAt, which resets the staleness clock and the
+ * calls-since-progress counter.
+ *
+ * Pure decision logic — no I/O — so it is unit-testable. The plugin server
+ * part applies the decision: an instructions entry (visible to the model at
+ * the next step boundary, without queuing a message turn) for "nudge" /
+ * "stale-nudge", plus a synthetic message for "force".
+ */
+
+export type StrictMode = "nudge" | "force" | "off";
+
+export interface MonitorState {
+  /** Consecutive tool calls with no active entry. */
+  count: number;
+  /** Tool calls since any progress value changed (tool write or relay tick). */
+  callsSinceProgress: number;
+  /** A silent-run nudge is currently standing (instructions entry present). */
+  nudged: boolean;
+  /** A forced synthetic reminder was already sent this non-compliance run. */
+  forced: boolean;
+  /** Epoch ms of the last stale-progress nudge (cooldown). */
+  lastStaleNudgeAt: number;
+}
+
+export type MonitorAction = "none" | "nudge" | "force" | "clear" | "stale-nudge";
+
+export interface ObserveInput {
+  /** The call was to the progress tool itself. */
+  isProgressCall: boolean;
+  /** The session currently has a running/waiting progress entry. */
+  hasActive: boolean;
+  /** Epoch ms of the last progress write across all roots + descendants. */
+  lastProgressAt?: number;
+  /** True when the store's newest update is newer than the last observed one. */
+  progressAdvanced?: boolean;
+  /** Epoch ms now. */
+  now?: number;
+}
+
+export interface ObserveOptions {
+  threshold?: number;
+  strictMode?: StrictMode;
+  /** No progress write for this long with pending tasks ⇒ stale nudge. Default 5 min. */
+  staleAfterMs?: number;
+  /** Tool calls since the last progress write before a stale nudge. Default 3. */
+  staleMinCalls?: number;
+  /** Minimum gap between stale nudges. Default 2 min. */
+  cooldownMs?: number;
+}
+
+export function normalizeStrictMode(raw: unknown): StrictMode {
+  const value = (raw ?? {}) as Record<string, unknown>;
+  if (value.strictMode === "force") return "force";
+  if (value.strictMode === "off") return "off";
+  return "nudge";
+}
+
+export function normalizeStaleAfterMs(raw: unknown, fallback = 5 * 60 * 1000): number {
+  const value = (raw ?? {}) as Record<string, unknown>;
+  const ms = value.staleAfterMs;
+  return typeof ms === "number" && Number.isFinite(ms) && ms >= 30_000 ? ms : fallback;
+}
+
+/**
+ * Decide the response to one observed tool call.
+ *
+ * Precedence: a progress call always clears a standing nudge and resets all
+ * counters. With pending tasks, stale-progress detection applies; without
+ * them, silent-run detection applies.
+ */
+export function observeToolCall(
+  monitor: MonitorState,
+  input: ObserveInput,
+  options: ObserveOptions = {}
+): { action: MonitorAction; count: number; callsSinceProgress: number; lastStaleNudgeAt: number } {
+  const threshold = options.threshold ?? 3;
+  const strictMode = options.strictMode ?? 'nudge';
+  const staleAfterMs = options.staleAfterMs ?? 5 * 60 * 1000;
+  const staleMinCalls = options.staleMinCalls ?? 3;
+  const cooldownMs = options.cooldownMs ?? 2 * 60 * 1000;
+
+  const untouched = {
+    count: monitor.count,
+    callsSinceProgress: monitor.callsSinceProgress,
+    lastStaleNudgeAt: monitor.lastStaleNudgeAt,
+  };
+
+  if (strictMode === 'off') return { action: 'none', count: 0, callsSinceProgress: 0, lastStaleNudgeAt: monitor.lastStaleNudgeAt };
+
+  if (input.isProgressCall) {
+    return {
+      action: monitor.nudged ? 'clear' : 'none',
+      count: 0,
+      callsSinceProgress: 0,
+      lastStaleNudgeAt: monitor.lastStaleNudgeAt,
+    };
+  }
+
+  // A relay tick (or any write since the last observation) is progress
+  // activity: reset the staleness clock and the counter.
+  const callsSinceProgress = input.progressAdvanced ? 0 : monitor.callsSinceProgress + 1;
+  const now = input.now ?? Date.now();
+  const lastProgressAt = input.lastProgressAt ?? now;
+
+  if (input.hasActive) {
+    // Compliant on the "has a task" axis. A standing nudge entry clears only
+    // when actual progress happened (a progress call or a store write) —
+    // otherwise a stale-progress reminder would be wiped by the very next
+    // tool call before the agent acted on it.
+    const progressed = input.progressAdvanced === true;
+    const clearAction: MonitorAction = monitor.nudged && progressed ? 'clear' : 'none';
+    const age = now - lastProgressAt;
+    if (
+      age >= staleAfterMs &&
+      callsSinceProgress >= staleMinCalls &&
+      now - monitor.lastStaleNudgeAt >= cooldownMs
+    ) {
+      return { action: 'stale-nudge', count: 0, callsSinceProgress, lastStaleNudgeAt: now };
+    }
+    return { action: clearAction, count: 0, callsSinceProgress, lastStaleNudgeAt: monitor.lastStaleNudgeAt };
+  }
+
+  const count = monitor.count + 1;
+  if (count >= threshold && !monitor.nudged) {
+    if (strictMode === 'force' && !monitor.forced) {
+      return { action: 'force', count, callsSinceProgress, lastStaleNudgeAt: monitor.lastStaleNudgeAt };
+    }
+    return { action: 'nudge', count, callsSinceProgress, lastStaleNudgeAt: monitor.lastStaleNudgeAt };
+  }
+  return { ...untouched, action: 'none', count, callsSinceProgress };
+}
+
+/** The standing instructions-entry nudge text (silent run). */
+export function silentRunNudge(count: number): string {
+  return `⚠ STRICT MODE: ${count} consecutive tool calls with no progress entry. Call the progress tool NOW (status "running", a stable id, a short title), then keep it current between steps — see the progress-tool skill.`;
+}
+
+/** The stale-progress nudge text (pending tasks, unchanged %). */
+export function staleProgressNudge(callsSinceProgress: number): string {
+  return `⚠ STRICT MODE: ${callsSinceProgress} tool calls since any progress value changed, and you have pending tasks — any updates? Update the running entries now (fresh detail and a 0.0–1.0 progress fraction, or close what is finished), or mark them waiting.`;
+}

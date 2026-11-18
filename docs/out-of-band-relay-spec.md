@@ -203,8 +203,17 @@ An entry MAY carry a dismissal record written by view clients:
   the user dismissed it (terminal vs non-terminal, the child-failure
   carve-out).
 - Writers: view clients only (a user action), via the §4.3/§4.4 atomic and
-  locked protocol. Agent and relay writes MUST preserve the field.
-- A lifecycle restart MUST clear it (§4.5).
+  locked protocol.
+- **Agent-plane writes** (the MCP tool, the `emit` CLI) MUST clear the field
+  on the written entry AND on all of its ancestors within the session scope:
+  a dismissed tree must not hide later real updates inside it.
+- **Relay telemetry** writes MUST preserve the field (only a lifecycle
+  restart clears it, §4.5): dismissed running tasks must stay hidden through
+  feeds that tick many times per second.
+- Views SHOULD show completed entries the user never dismissed. Auto-hiding
+  `done` entries after a success hold is OPT-IN (reference option:
+  `autoHideDone`, default `false`); when enabled it hides done entries
+  regardless of their dismissal state.
 - Revival semantics are view-level and shared by convention: terminal
   (`done`/`error`) dismissals revive only on a direct re-report of the task
   or a child failing; non-terminal dismissals also revive on any rolled-up
@@ -349,6 +358,26 @@ Roll-up is a read-time projection. Given flat entries with `parentId`:
 - The parent's `updatedAt` may be projected as the latest descendant `updatedAt`.
 
 Cycles MUST NOT crash the renderer. A cycle SHOULD be broken by treating a node whose parent chain revisits it as a root, or by ignoring the cyclic edge.
+
+### 5.6.1 Parent completion cascades to descendants
+
+When a progress call sets a parent's status to `done`, implementations MUST
+close all of its descendants (recursively, within the same session scope,
+§4.8) as `done`:
+
+- Auto-closed children are marked `done` with a note
+  (`auto-closed: parent <id> completed`), preserving any `progress` they
+  already had. They are NOT deleted, so success-hold aging (§3.3) and
+  retention (§4.6) apply to them like any other finished entry.
+- The relay's exit mapping (§6.6) counts: a wrapped command finishing
+  `done` cascades the same way.
+- `error` MUST NOT cascade silently. Children under an errored parent are
+  left for the agent to resolve or for a stale sweep to collect — a failure
+  is not the same as "everything underneath is finished".
+- Rationale: a forgotten child outlives its pruned parent and floats
+  parentless in the rollup; closing the parent declares the whole phase
+  finished, and the store should make the state consistent with that
+  declaration.
 
 ---
 
@@ -664,7 +693,8 @@ An implementation is conformant if it satisfies all of the following.
 - [ ] `PROGRESS_SESSION_ID` / `OPENCODE_SESSION_ID` scope entries automatically, with an explicit `--session` / `sessionId` taking precedence.
 - [ ] A second harness can read and render the same file without importing the server.
 - [ ] The contract is documented without requiring a specific harness.
-- [ ] Agent/relay upserts preserve a view-written `dismissed` record (§4.9), and lifecycle restarts clear it.
+- [ ] Agent-plane writes clear `dismissed` on the entry and its ancestors; relay telemetry preserves it; lifecycle restarts clear it (§4.9).
+- [ ] Completed entries are only auto-hidden when explicitly configured (default: visible until dismissed or pruned).
 - [ ] Dismissal writes are atomic and locked like every other writer (§4.3/§4.4).
 
 ---

@@ -500,28 +500,45 @@ test('running response nudges the tree for numbered step lists, silently skips p
   assert.match(plain.result.content[0].text, /relay --id plain-entry/);
 });
 
-test('upsert preserves view dismissal metadata; lifecycle restart clears it', () => {
+test('agent writes clear dismissal on the entry and ancestors; relay telemetry preserves it', () => {
   const { file } = tempState();
   const store = require(path.join(ROOT, 'state-store'));
-  run(['emit', '--id', 'dismiss-1', '--status', 'running', '--title', 'Task'], { state: file });
 
-  // Simulate the view-plane dismissal write (plugin writes entry.dismissed).
+  run(['emit', '--id', 'dismiss-parent', '--status', 'running', '--title', 'Parent'], { state: file });
+  run(['emit', '--id', 'dismiss-child', '--status', 'running', '--title', 'Child', '--parent', 'dismiss-parent'], {
+    state: file,
+  });
+
   store.mutateState((state) => {
-    const key = Object.keys(state.entries).find((k) => state.entries[k].id === 'dismiss-1');
-    state.entries[key].dismissed = { status: 'running', at: 12345 };
+    for (const entry of Object.values(state.entries)) entry.dismissed = { status: 'running', at: 12345 };
     return state;
   }, file);
 
-  // An agent/relay update on the same run preserves the dismissal.
-  run(['emit', '--id', 'dismiss-1', '--status', 'running', '--detail', 'progressing'], { state: file });
-  let entry = readState(file).entries['dismiss-1'];
-  assert.deepEqual(entry.dismissed, { status: 'running', at: 12345 });
-  assert.equal(entry.detail, 'progressing');
+  // Relay telemetry (source: 'relay') preserves the flags — dismissed running
+  // tasks must not resurrect on every 4Hz tick.
+  run(['relay', '--id', 'dismiss-child', '--quiet'], { state: file, input: 'tick\n' });
+  let entries = readState(file).entries;
+  assert.deepEqual(entries['dismiss-child'].dismissed, { status: 'running', at: 12345 });
 
-  // Lifecycle restart (terminal -> running) clears the stale dismissal.
-  run(['emit', '--id', 'dismiss-1', '--status', 'done'], { state: file });
-  run(['emit', '--id', 'dismiss-1', '--status', 'running'], { state: file });
-  entry = readState(file).entries['dismiss-1'];
+  // An agent update on the child clears its own flag AND its ancestors'.
+  run(['emit', '--id', 'dismiss-child', '--status', 'running', '--detail', 'agent update'], { state: file });
+  entries = readState(file).entries;
+  assert.equal(entries['dismiss-child'].dismissed ?? null, null);
+  assert.equal(entries['dismiss-parent'].dismissed ?? null, null, 'ancestor dismissal cleared by descendant update');
+});
+
+test('lifecycle restart clears a stale dismissal', () => {
+  const { file } = tempState();
+  const store = require(path.join(ROOT, 'state-store'));
+  run(['emit', '--id', 'restart-1', '--status', 'done', '--title', 'Task'], { state: file });
+  store.mutateState((state) => {
+    const entry = Object.values(state.entries).find((e) => e.id === 'restart-1');
+    entry.dismissed = { status: 'done', at: 12345 };
+    return state;
+  }, file);
+
+  run(['emit', '--id', 'restart-1', '--status', 'running'], { state: file });
+  const entry = readState(file).entries['restart-1'];
   assert.equal(entry.dismissed ?? null, null);
 });
 
@@ -593,6 +610,23 @@ test('bulk entries[] lands a whole tree in one atomic, all-or-nothing write', as
   assert.match(bothForms.result.content[0].text, /not both/);
 });
 
+test('closing a parent cascades done to all descendants in the same session', () => {
+  const { file } = tempState();
+  run(['emit', '--id', 'casc-parent', '--status', 'running', '--title', 'Parent'], { state: file });
+  run(['emit', '--id', 'casc-child', '--status', 'running', '--title', 'Child', '--parent', 'casc-parent'], { state: file });
+  run(['emit', '--id', 'casc-grand', '--status', 'waiting', '--title', 'Grandchild', '--parent', 'casc-child'], { state: file });
+  run(['emit', '--id', 'casc-other', '--status', 'running', '--title', 'Unrelated'], { state: file });
+
+  run(['emit', '--id', 'casc-parent', '--status', 'done', '--progress', '1'], { state: file });
+
+  const state = readState(file).entries;
+  assert.equal(state['casc-parent'].status, 'done');
+  assert.equal(state['casc-child'].status, 'done', 'child auto-closed');
+  assert.match(state['casc-child'].detail, /auto-closed: parent casc-parent completed/);
+  assert.equal(state['casc-grand'].status, 'done', 'grandchild cascades recursively');
+  assert.equal(state['casc-other'].status, 'running', 'unrelated entries are untouched');
+});
+
 test('MCP handshake exposes the zero-polling contract and relay hint', async () => {
   const { file } = tempState();
   const child = spawn(process.execPath, [INDEX], {
@@ -644,7 +678,7 @@ test('MCP handshake exposes the zero-polling contract and relay hint', async () 
   assert.equal(responses.length, 3);
 
   const init = responses.find((r) => r.id === 1);
-  assert.equal(init.result.serverInfo.version, '2.4.0');
+  assert.equal(init.result.serverInfo.version, '2.5.0');
   assert.match(init.result.instructions, /Never poll, sleep/);
   assert.match(init.result.instructions, /OPENCODE_SESSION_ID/);
   assert.match(init.result.instructions, /line breaks/i);

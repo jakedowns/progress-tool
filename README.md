@@ -4,7 +4,7 @@ A non-blocking twin of `question` so coding agents can signal long-running work 
 
 Implements the [Agent Progress Tool proposal](https://gist.github.com/jakedowns/ddc4eb4817184a074c82c61dc6e7228c) for OpenCode 2, and is written as a portable reference implementation that any model, agent, or harness can copy, adapt, or train on.
 
-**Versions:** MCP server `2.4.0` · OpenCode plugin `2.6.0`
+**Versions:** MCP server `2.5.0` · OpenCode plugin `2.8.0`
 
 > [!IMPORTANT]
 > **No `AGENTS.md` edits required.** The bundled OpenCode plugin injects the progress & relay rules directly into every session's system instructions, and the MCP `progress` tool response reinforces them at the exact moment an agent starts a task — so agents know to wrap long-running commands with `progress-relay` *before* their first build, not after. Progress reporting works without any prompt engineering.
@@ -463,7 +463,11 @@ The plugin at `plugin/` targets the OpenCode **V2** plugin API and exposes four 
    Lifecycle options:
 
    - `successHoldMs`: how long a `done` task stays visible after its last update
-     (default `8000`). Once it expires and nothing else is active, the pill/tree hides.
+     (default `8000`). Only applies when `autoHideDone` is enabled.
+   - `autoHideDone`: set to `true` to hide completed tasks after `successHoldMs`,
+     regardless of dismissal. **Default `false`**: done entries you never
+     dismissed stay visible until you dismiss them or the store prunes them —
+     including across plugin reloads.
    - `showDone`: set to `false` to drop completed tasks immediately.
    - `scope`: `"session"` (default) shows only the current chat's tasks; `"all"` shows every
      session sharing the state file.
@@ -471,19 +475,26 @@ The plugin at `plugin/` targets the OpenCode **V2** plugin API and exposes four 
      (default `1000`, minimum `100`). Applies to the TUI poller, desktop GUI
      refresh loop, and the plugin's server-side state watcher. The standalone
      GUI server has the same knob via `PROGRESS_GUI_REFRESH_MS`.
+   - `strictMode`: `"nudge"` (default), `"force"`, or `"off"`. The plugin watches
+     tool calls: without any task entry, or with pending tasks whose progress
+     has not changed, it writes a standing `progress-nudge` instruction
+     ("any updates?") and clears it on compliance. `"force"` additionally
+     sends one synthetic reminder per non-compliance run. Tune with
+     `strictThreshold` (default `3` calls), `staleAfterMs` (default `5` min),
+     and `cooldownMs` (default `2` min).
 
    Running and waiting tasks stay visible. Errors stay visible until dismissed or updated on
-   purpose, so a failure cannot silently scroll away. In the desktop pill, each root row has a
+   purpose, so a failure cannot silently scroll away. Completed tasks stay visible too unless
+   you dismiss them (or opt into `autoHideDone`). In the desktop pill, each root row has a
    **✕** icon that dismisses that tree, and **✕ Dismiss all** hides every current report.
-   Dismissal is scoped to the task itself: a dismissed tree stays hidden through telemetry ticks
-   and sibling/other-root activity. It reappears when the agent re-reports that task, or — for
-   non-terminal (running/waiting) dismissals — when its rolled-up status changes. A
-   done-dismissed tree stays hidden even when new children are appended under it (the
-   done→running flip does not revive it); only a direct re-report of the task or a child
-   *failing* brings it back. With more than one root task, the pill shows
-   the latest one plus `(N · agg%)` — the number of roots and the mean of their progress. No
-   extra agent hook is needed: report
-   `status: "done"` once and the view handles retention and hiding.
+   Dismissal is scoped to the task itself: a dismissed tree stays hidden through relay telemetry
+   and sibling/other-root activity. An **agent update** clears the dismissal — on the updated
+   entry and on all of its ancestors — so real work inside a dismissed tree always comes back.
+   A done-dismissed tree stays hidden even when new children are appended under it (the
+   done→running flip does not revive it); a child *failing* brings it back. With more than one
+   root task, the pill shows `(N · agg%)` as a prefix — the number of roots and the mean of
+   their progress. No extra agent hook is needed: report `status: "done"` once and the view
+   handles retention and hiding.
 
 3. Verify:
 

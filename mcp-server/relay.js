@@ -442,7 +442,9 @@ function createReporter(opts) {
     dirty = false;
 
     try {
-      upsertProgress(entry, opts.stateFile);
+      // `source: 'relay'` tells the store this is telemetry, not an agent
+      // update: relay ticks must not clear a user's dismissal (§4.9).
+      upsertProgress({ ...entry, source: 'relay' }, opts.stateFile);
     } catch (err) {
       warn(err);
     }

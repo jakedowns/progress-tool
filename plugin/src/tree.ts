@@ -225,6 +225,12 @@ export interface VisibilityOptions {
   successHoldMs?: number;
   /** Show completed tasks at all. Defaults to true. */
   showDone?: boolean;
+  /**
+   * Auto-hide completed tasks after `successHoldMs` (the old behavior).
+   * Defaults to FALSE: a done entry the user never dismissed stays visible
+   * until it is dismissed or pruned, including across plugin reloads.
+   */
+  autoHideDone?: boolean;
   /** Show only the current session's tasks (default) or every session. */
   scope?: "session" | "all";
 }
@@ -277,6 +283,8 @@ export function normalizeVisibilityOptions(raw: unknown): VisibilityOptions {
         ? options.successHoldMs
         : undefined,
     showDone: options.showDone !== false,
+    // Default OFF: never-dismissed done entries stay visible.
+    autoHideDone: options.autoHideDone === true,
     scope: options.scope === "all" ? "all" : "session",
   };
 }
@@ -303,8 +311,10 @@ export function scopeEntries(
 
 /**
  * Drop completed entries once their success confirmation has been visible long
- * enough. Running, waiting, and error entries always stay until dismissed or
- * updated.
+ * enough — ONLY when `autoHideDone` is enabled (default off). By default a
+ * done entry the user never dismissed stays visible until dismissed or pruned
+ * (including across plugin reloads); `showDone: false` hides all completed
+ * entries regardless.
  */
 export function visibleEntries(
   entries: Record<string, ProgressEntry>,
@@ -313,12 +323,13 @@ export function visibleEntries(
 ): Record<string, ProgressEntry> {
   const hold = options.successHoldMs ?? 8000;
   const showDone = options.showDone !== false;
+  const autoHideDone = options.autoHideDone === true;
   const visible: Record<string, ProgressEntry> = {};
   for (const [key, entry] of Object.entries(entries)) {
     if (!entry || typeof entry !== "object") continue;
     if (entry.status === "done") {
       if (!showDone) continue;
-      if (now - (entry.updatedAt ?? 0) >= hold) continue;
+      if (autoHideDone && now - (entry.updatedAt ?? 0) >= hold) continue;
     }
     visible[key] = entry;
   }

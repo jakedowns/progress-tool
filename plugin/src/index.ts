@@ -13,6 +13,14 @@ import { ProgressRpc } from "./rpc.js";
 import { readProgressState, writeDismissal } from "./state.js";
 import { normalizeRefreshMs } from "./tree.js";
 import { PROGRESS_RULES, instructionsEnabled } from "./instructions.js";
+import {
+  observeToolCall,
+  normalizeStrictMode,
+  normalizeStaleAfterMs,
+  silentRunNudge,
+  staleProgressNudge,
+  type MonitorState,
+} from "./monitor.js";
 
 /**
  * The plugin's own version, read at runtime so a running server part can be
@@ -120,11 +128,100 @@ export default Plugin.define({
       console.log(`[opencode-progress] v${pluginVersion} registered ${PACKAGED_SKILLS.length} packaged skills`);
     }
 
+    // Strict mode: watch tool calls and nudge when the agent works silently
+    // (no task entry) or leaves pending tasks' progress unchanged.
+    const strictMode = normalizeStrictMode(ctx.options);
+    const staleAfterMs = normalizeStaleAfterMs(ctx.options);
+    const strictThreshold =
+      typeof ctx.options?.strictThreshold === 'number' && ctx.options.strictThreshold >= 2
+        ? ctx.options.strictThreshold
+        : 3;
+    const monitors = new Map<string, MonitorState>();
+    const lastSeenProgress = new Map<string, number>();
+    const NUDGE_KEY = 'progress-nudge';
+
+    let toolHook: Awaited<ReturnType<typeof ctx.tool.hook>> | undefined;
+    if (strictMode !== 'off') {
+      toolHook = await ctx.tool.hook('execute.after', (event) => {
+        try {
+          const isProgressCall = /(^|_)progress$/.test(event.tool);
+          const entries = Object.values(readProgressState().entries ?? {}).filter(
+            (entry) => entry && entry.sessionId === event.sessionID
+          );
+          const hasActive = entries.some(
+            (entry) => entry.status === 'running' || entry.status === 'waiting'
+          );
+          const lastProgressAt = entries.reduce(
+            (max, entry) => Math.max(max, entry.updatedAt ?? 0),
+            0
+          );
+
+          const previousSeen = lastSeenProgress.get(event.sessionID) ?? 0;
+          const progressAdvanced = lastProgressAt > previousSeen;
+          if (lastProgressAt > previousSeen) lastSeenProgress.set(event.sessionID, lastProgressAt);
+
+          const monitor = monitors.get(event.sessionID) ?? {
+            count: 0,
+            callsSinceProgress: 0,
+            nudged: false,
+            forced: false,
+            lastStaleNudgeAt: 0,
+          };
+          const step = observeToolCall(
+            monitor,
+            {
+              isProgressCall,
+              hasActive,
+              lastProgressAt: lastProgressAt || undefined,
+              progressAdvanced,
+              now: Date.now(),
+            },
+            { strictMode, staleAfterMs, threshold: strictThreshold }
+          );
+
+          monitor.count = step.count;
+          monitor.callsSinceProgress = step.callsSinceProgress;
+          monitor.lastStaleNudgeAt = step.lastStaleNudgeAt;
+          if (step.action === 'nudge' || step.action === 'force' || step.action === 'stale-nudge') {
+            monitor.nudged = true;
+          }
+          if (step.action === 'force') monitor.forced = true;
+          if (step.action === 'clear') monitor.nudged = false;
+          monitors.set(event.sessionID, monitor);
+
+          const text =
+            step.action === 'stale-nudge'
+              ? staleProgressNudge(step.callsSinceProgress)
+              : silentRunNudge(step.count);
+
+          if (step.action === 'nudge' || step.action === 'force' || step.action === 'stale-nudge') {
+            void ctx.session.instructions.entry
+              .put({ sessionID: event.sessionID, key: NUDGE_KEY, value: text })
+              .catch(() => {});
+          }
+          if (step.action === 'force') {
+            void ctx.session
+              .synthetic({ sessionID: event.sessionID, text })
+              .catch(() => {});
+          }
+          if (step.action === 'clear') {
+            void ctx.session.instructions.entry
+              .remove({ sessionID: event.sessionID, key: NUDGE_KEY })
+              .catch(() => {});
+          }
+        } catch (error) {
+          console.error('[opencode-progress] strict-mode monitor failed', String(error));
+        }
+      });
+      console.log(`[opencode-progress] v${pluginVersion} strict mode: ${strictMode} (threshold ${strictThreshold})`);
+    }
+
     console.log(`[opencode-progress] server part v${pluginVersion} loaded`);
 
     return () => {
       clearInterval(timer);
       void rulesRegistration?.dispose();
+      void toolHook?.dispose();
     };
   },
 });

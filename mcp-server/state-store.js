@@ -298,6 +298,10 @@ function applyUpsert(state, input, now) {
 
   const sessionId = resolveSessionId(input.sessionId);
   const key = storageKey(input.id, sessionId);
+  // Transport marker, never persisted: relay telemetry ticks must not clear
+  // a user's dismissal (that would resurrect dismissed running tasks at
+  // 4Hz); agent-plane writes (MCP tool, emit CLI) do clear it.
+  const fromRelay = input.source === 'relay';
 
   const prev = state.entries[key] || null;
   const status = input.status !== undefined ? input.status : prev?.status || 'running';
@@ -330,15 +334,77 @@ function applyUpsert(state, input, now) {
     createdAt: prev?.createdAt || now,
     updatedAt: now,
   };
+  delete entry.source;
 
-  // View-plane dismissal metadata is preserved across agent/relay writes
-  // (§4.5: undefined means leave unchanged) but a lifecycle restart is a
-  // fresh run: the user's stale dismissal must not mute it. Setting the
-  // key to undefined drops it on serialize.
-  if (isRestart) entry.dismissed = undefined;
+  // An agent update is fresh activity: the user's dismissal of THIS entry no
+  // longer applies, and neither does any dismissal on its ancestors — a
+  // dismissed parent must not hide an actively updated descendant. Relay
+  // telemetry only clears the flag on a lifecycle restart.
+  if (!fromRelay) {
+    entry.dismissed = undefined;
+    clearAncestorDismissals(state, entry.parentId, sessionId);
+  } else if (isRestart) {
+    entry.dismissed = undefined;
+  }
 
   state.entries[key] = entry;
+  if (entry.status === 'done') {
+    cascadeCloseDescendants(state, input.id, sessionId, now);
+  }
   return entry;
+}
+
+/**
+ * Clear the persisted dismissal on every ancestor of an actively updated
+ * entry (§4.9): dismissing a tree must not hide later real updates inside it.
+ * Walks parentId links within the same session scope, bounded for safety.
+ */
+function clearAncestorDismissals(state, parentId, sessionId) {
+  let current = parentId;
+  for (let depth = 0; depth < 10 && current; depth++) {
+    const key = storageKey(current, sessionId);
+    const ancestor = state.entries[key];
+    if (!ancestor) return;
+    let changed = false;
+    if (ancestor.dismissed !== undefined) {
+      ancestor.dismissed = undefined;
+      changed = true;
+    }
+    current = ancestor.parentId || null;
+    if (!changed && !current) return;
+  }
+}
+
+/**
+ * When a parent closes (done), all of its descendants close with it.
+ *
+ * Rationale: an explicit parent-done is the agent declaring the whole phase
+ * finished; children left running/waiting after that are orphans the user
+ * has to dismiss by hand (and which outlive the pruned parent, floating
+ * parentless in the rollup). Auto-closed children are marked done with a
+ * note, not deleted, so the success-hold aging and 10-minute retention
+ * apply to them like any other finished entry. Scoped to the same session:
+ * parentId is a clean id and MUST NOT cross session boundaries (§4.8).
+ */
+function cascadeCloseDescendants(state, parentId, sessionId, now) {
+  const sameScope = (entry) =>
+    (entry.sessionId || null) === (sessionId || null);
+  let frontier = [parentId];
+  for (let depth = 0; depth < 10 && frontier.length > 0; depth++) {
+    const next = [];
+    for (const [key, entry] of Object.entries(state.entries)) {
+      if (!entry || !frontier.includes(entry.parentId) || !sameScope(entry)) continue;
+      if (entry.status === 'done') continue;
+      entry.status = 'done';
+      entry.progress = entry.progress ?? 1;
+      entry.detail = entry.detail
+        ? `${normalizeProgressText(entry.detail)} (auto-closed: parent ${parentId} completed)`
+        : `auto-closed: parent ${parentId} completed`;
+      entry.updatedAt = now;
+      next.push(entry.id);
+    }
+    frontier = next;
+  }
 }
 
 /**

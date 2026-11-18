@@ -24,7 +24,12 @@ execFileSync(
   [path.join(ROOT, 'src', 'tree.ts'), '--bundle', '--format=cjs', `--outfile=${path.join(OUT, 'tree.cjs')}`],
   { stdio: 'pipe' }
 );
-const { buildTree, isDismissed, dismissalsFor } = require(path.join(OUT, 'tree.cjs'));
+const {
+  buildTree,
+  isDismissed,
+  dismissalsFor,
+  visibleEntries,
+} = require(path.join(OUT, 'tree.cjs'));
 execFileSync(
   path.join(ROOT, 'node_modules', '.bin', 'esbuild'),
   [path.join(ROOT, 'src', 'state.ts'), '--bundle', '--format=cjs', '--platform=node', `--outfile=${path.join(OUT, 'state.cjs')}`],
@@ -135,6 +140,22 @@ test('error dismissal: only a direct re-report revives; failures elsewhere do no
 
   assert.equal(isDismissed(makeTree([ROOT_ENTRY({ status: 'error', updatedAt: 1000 })])[0], dismissed), true);
   assert.equal(isDismissed(makeTree([ROOT_ENTRY({ status: 'error', updatedAt: 9000 })])[0], dismissed), false);
+});
+
+test('visibleEntries: done entries stay visible by default unless autoHideDone', () => {
+  const now = Date.now();
+  const entries = { old: { id: 'old', status: 'done', title: 'Old', updatedAt: now - 60 * 60 * 1000 } };
+
+  assert.ok(visibleEntries(entries, now)['old'], 'default: never-dismissed done entries stay visible');
+  assert.ok(
+    !visibleEntries(entries, now, { autoHideDone: true })['old'],
+    'autoHideDone: hides after the success hold'
+  );
+  assert.ok(
+    visibleEntries(entries, now, { autoHideDone: true, successHoldMs: 2 * 60 * 60 * 1000 })['old'],
+    'autoHideDone respects an explicit hold window'
+  );
+  assert.ok(!visibleEntries(entries, now, { showDone: false })['old'], 'showDone false still hides everything');
 });
 
 test('buildTree carries the persisted dismissed field through to nodes', () => {
