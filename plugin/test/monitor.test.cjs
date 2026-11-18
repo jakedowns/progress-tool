@@ -24,9 +24,11 @@ const {
   observeToolCall,
   normalizeStrictMode,
   normalizeStaleAfterMs,
+  normalizeWallClockMs,
   silentRunNudge,
   staleProgressNudge,
   idleReminder,
+  wallClockNudge,
 } = require(path.join(OUT, 'monitor.cjs'));
 
 const idle = () => ({ count: 0, callsSinceProgress: 0, nudged: false, forced: false, lastStaleNudgeAt: 0 });
@@ -208,4 +210,50 @@ test('idle reminder: same signature is throttled and capped; changed signature r
   });
   assert.equal(d.action, 'remind');
   assert.equal(d.count, 1);
+});
+
+test('wall-clock: fires only with open tasks, after the threshold, with cooldown', () => {
+  const now = 1_000_000_000;
+  const lastProgressAt = now - 20 * 60 * 1000;
+  const opts = { thresholdMs: 120_000 };
+
+  assert.equal(
+    wallClockNudge({ lastAt: 0 }, { hasActive: false, lastProgressAt, now }, opts).action,
+    'none'
+  );
+  assert.equal(
+    wallClockNudge({ lastAt: 0 }, { hasActive: true, lastProgressAt: now - 60_000, now }, opts).action,
+    'none'
+  );
+
+  let decision = wallClockNudge({ lastAt: 0 }, { hasActive: true, lastProgressAt, now }, opts);
+  assert.equal(decision.action, 'remind');
+  assert.match(decision.message, /~20 minutes/);
+  assert.match(decision.message, /progress-relay --id <id>/);
+
+  assert.equal(
+    wallClockNudge({ lastAt: decision.lastAt }, { hasActive: true, lastProgressAt, now: now + 60_000 }, opts).action,
+    'none',
+    'cooldown suppresses repeats'
+  );
+  assert.equal(
+    wallClockNudge(
+      { lastAt: decision.lastAt },
+      { hasActive: true, lastProgressAt, now: now + 3 * 60 * 1000 },
+      opts
+    ).action,
+    'remind',
+    'reminds again after the cooldown'
+  );
+});
+
+test('wall-clock: threshold 0 disables; normalizer defaults to 120s and floors at 60s', () => {
+  assert.equal(
+    wallClockNudge({ lastAt: 0 }, { hasActive: true, lastProgressAt: 0, now: 10 ** 12 }, { thresholdMs: 0 }).action,
+    'none'
+  );
+  assert.equal(normalizeWallClockMs({}), 2 * 60 * 1000);
+  assert.equal(normalizeWallClockMs({ wallClockMs: 0 }), 0);
+  assert.equal(normalizeWallClockMs({ wallClockMs: 5_000 }), 2 * 60 * 1000, 'below floor → default');
+  assert.equal(normalizeWallClockMs({ wallClockMs: 120_000 }), 120_000);
 });

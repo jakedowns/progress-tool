@@ -36,6 +36,12 @@ exploration, multi-file refactors, documentation.
   is in progress, record the steer as a child entry — one line summarizing
   the ask plus what you plan to do in reaction — and update it as you
   respond. The user should see their steer land in the rollup.
+- **Why this tool exists:** the transcript — thought traces, tool calls,
+  command output — is a wall of text. The tree is the glance-able layer above
+  it: a live, high-level view of what you are doing, what you are waiting on,
+  and what is next. Keep it accurate at that level — a short headline title,
+  the current step in `detail`, an honest `progress` fraction — so the user
+  can read the pill instead of scrolling the log.
 - **Close:** end with `status: "done"` or `"error"`. **Close what you open** —
   an abandoned `running` entry is a zombie the user has to dismiss by hand.
 - Statuses are exactly `running | waiting | done | error` (use `waiting` for

@@ -228,3 +228,70 @@ export function idleReminder(
 
   return { action: "remind", signature, lastAt: now, count: count + 1, message };
 }
+
+// --- Wall-clock nudge -----------------------------------------------------
+
+export interface WallClockState {
+  /** Epoch ms of the last wall-clock reminder for this session. */
+  lastAt: number;
+}
+
+export interface WallClockInput {
+  /** Pending (running/waiting) entries exist for the session. */
+  hasActive: boolean;
+  /** Epoch ms of the newest progress write across the session's entries. */
+  lastProgressAt?: number;
+  /** Epoch ms now. */
+  now?: number;
+}
+
+export interface WallClockOptions {
+  /** No progress write for this long ⇒ remind. Default 2 minutes; 0 disables. */
+  thresholdMs?: number;
+  /** Minimum gap between wall-clock reminders. Default: same as threshold. */
+  cooldownMs?: number;
+}
+
+export function normalizeWallClockMs(raw: unknown, fallback = 2 * 60 * 1000): number {
+  const value = (raw ?? {}) as Record<string, unknown>;
+  const ms = value.wallClockMs;
+  if (ms === 0) return 0; // explicitly disabled
+  return typeof ms === "number" && Number.isFinite(ms) && ms >= 60_000 ? ms : fallback;
+}
+
+/**
+ * Wall-clock reminder: the dimension the call-count monitor cannot cover.
+ *
+ * The tool-call monitor only fires when the agent calls tools. An agent that
+ * is blocked — waiting on a background task it never wrapped in the relay, or
+ * simply thinking for a long time — produces no events at all, so without a
+ * timer nothing would nudge it. The plugin evaluates this on a 30s interval
+ * for every session with pending entries.
+ */
+export function wallClockNudge(
+  state: WallClockState,
+  input: WallClockInput,
+  options: WallClockOptions = {}
+): { action: "remind" | "none"; lastAt: number; message?: string } {
+  const thresholdMs = options.thresholdMs ?? 2 * 60 * 1000;
+  const cooldownMs = options.cooldownMs ?? thresholdMs;
+  const now = input.now ?? Date.now();
+
+  if (thresholdMs <= 0 || !input.hasActive) {
+    return { action: "none", lastAt: state.lastAt };
+  }
+
+  const lastProgressAt = input.lastProgressAt ?? now;
+  const age = now - lastProgressAt;
+  if (age < thresholdMs) return { action: "none", lastAt: state.lastAt };
+  if (now - state.lastAt < cooldownMs) return { action: "none", lastAt: state.lastAt };
+
+  const minutes = Math.max(1, Math.round(age / 60_000));
+  const message = [
+    `⚠ WALL CLOCK: it has been ~${minutes} minute${minutes === 1 ? "" : "s"} since any progress value changed, and you still have open tasks.`,
+    `Update the tracker now (fresh detail, a 0.0–1.0 progress fraction, or close what is finished).`,
+    `If you are waiting on a long-running command, route it through the out-of-band relay so telemetry stays live without polling: progress-relay --id <id> -- <cmd>.`,
+  ].join(" ");
+
+  return { action: "remind", lastAt: now, message };
+}

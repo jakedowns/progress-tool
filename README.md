@@ -2,9 +2,11 @@
 
 A non-blocking twin of `question` so coding agents can signal long-running work without looking dead, plus a **zero-token-burn out-of-band relay** so the agent never has to poll `stdout` just to keep the UI alive. (Also described as low-token-burn or token-minimizing progress: token cost scales with milestones, not with task duration.)
 
+**The tree is the glance-able layer above the transcript.** Thought traces, tool calls and command output are a wall of text; the rollup is the live, high-level view of what is happening, what is blocked, and what is next — so a user can read the pill instead of scrolling the log.
+
 Implements the [Agent Progress Tool proposal](https://gist.github.com/jakedowns/ddc4eb4817184a074c82c61dc6e7228c) for OpenCode 2, and is written as a portable reference implementation that any model, agent, or harness can copy, adapt, or train on.
 
-**Versions:** MCP server `2.6.1` · OpenCode plugin `2.9.1`
+**Versions:** MCP server `2.6.1` · OpenCode plugin `2.10.0`
 
 > [!IMPORTANT]
 > **No `AGENTS.md` edits required.** The bundled OpenCode plugin injects the progress & relay rules directly into every session's system instructions, and the MCP `progress` tool response reinforces them at the exact moment an agent starts a task — so agents know to wrap long-running commands with `progress-relay` *before* their first build, not after. Progress reporting works without any prompt engineering.
@@ -517,6 +519,25 @@ The plugin at `plugin/` targets the OpenCode **V2** plugin API and exposes four 
    ```
 
    Both should list `opencode-progress` with features `server`, `tui`, `rpc`, and `gui`.
+
+**Long commands in this repo — including our own toolchain — go through the relay.**
+Bundles and test suites are exactly the "long-running programmatic calls" this tool
+exists for, so practice what it preaches:
+
+```bash
+progress-relay --id build-1 -- npx vite build   # wrap mode: exit 0 -> done, non-zero -> error
+progress-relay --id test-1  -- npm test         # wrap the whole suite
+npm test | progress-relay --id test-1           # pipe mode: done on EOF (exit code unknown)
+```
+
+`progress-relay` tees output, so you still see the build log and TAP output; `--quiet`
+suppresses the tee. Use wrap mode whenever the exit status matters (it does for tests),
+and run it in the background when the harness supports that so you keep working.
+
+Two artifacts result, by design: the **state entry** holds only the latest line and parsed
+percentage (bounded, cheap), while the **harness's background job output file** holds the full
+log — readable after completion with the normal shell/file tools. Exception: `--quiet` disables
+the tee, so use it only when the log truly isn't needed afterwards.
 
 4. Desktop/web: **Settings → Extensions → Plugins → Reload** (or open a new window).
    A progress pill appears in the composer; its menu lists the dependency tree.

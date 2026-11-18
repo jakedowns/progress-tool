@@ -17,11 +17,14 @@ import {
   observeToolCall,
   normalizeStrictMode,
   normalizeStaleAfterMs,
+  normalizeWallClockMs,
   silentRunNudge,
   staleProgressNudge,
   idleReminder,
+  wallClockNudge,
   type MonitorState,
   type IdleTracker,
+  type WallClockState,
 } from "./monitor.js";
 
 /**
@@ -259,10 +262,63 @@ export default Plugin.define({
       console.log(`[opencode-progress] v${pluginVersion} unhinged mode: prompt suffix enabled`);
     }
 
+    // Wall-clock nudge: the call-count monitor cannot fire while an agent is
+    // blocked (no tool calls ⇒ no events). A 30s timer evaluates every
+    // session with pending entries and, after wallClockMs (default 10m) with
+    // no progress write, writes a standing instruction — removed again as
+    // soon as progress resumes.
+    const wallClockMs = normalizeWallClockMs(ctx.options);
+    const wallTrackers = new Map<string, WallClockState>();
+    const WALL_KEY = 'progress-wall-clock';
+    let wallTimer: ReturnType<typeof setInterval> | undefined;
+    if (wallClockMs > 0) {
+      wallTimer = setInterval(() => {
+        try {
+          const entries = Object.values(readProgressState().entries ?? {});
+          const sessions = new Set(
+            entries.map((entry) => entry?.sessionId).filter((id): id is string => Boolean(id))
+          );
+          const now = Date.now();
+          for (const sessionID of sessions) {
+            const sessionEntries = entries.filter((entry) => entry?.sessionId === sessionID);
+            const hasActive = sessionEntries.some(
+              (entry) => entry.status === 'running' || entry.status === 'waiting'
+            );
+            const lastProgressAt = sessionEntries.reduce(
+              (max, entry) => Math.max(max, entry.updatedAt ?? 0),
+              0
+            );
+            const tracker = wallTrackers.get(sessionID) ?? { lastAt: 0 };
+            const decision = wallClockNudge(
+              tracker,
+              { hasActive, lastProgressAt, now },
+              { thresholdMs: wallClockMs }
+            );
+            wallTrackers.set(sessionID, { lastAt: decision.lastAt });
+
+            if (decision.action === 'remind' && decision.message) {
+              console.log(`[opencode-progress] v${pluginVersion} wall-clock nudge for ${sessionID}`);
+              void ctx.session.instructions.entry
+                .put({ sessionID, key: WALL_KEY, value: decision.message })
+                .catch(() => {});
+            } else if (hasActive && now - lastProgressAt < wallClockMs) {
+              void ctx.session.instructions.entry
+                .remove({ sessionID, key: WALL_KEY })
+                .catch(() => {});
+            }
+          }
+        } catch (error) {
+          console.error('[opencode-progress] wall-clock nudge failed', String(error));
+        }
+      }, 30_000);
+      console.log(`[opencode-progress] v${pluginVersion} wall-clock nudge: ${Math.round(wallClockMs / 60000)}m`);
+    }
+
     console.log(`[opencode-progress] server part v${pluginVersion} loaded`);
 
     return () => {
       clearInterval(timer);
+      if (wallTimer) clearInterval(wallTimer);
       void rulesRegistration?.dispose();
       void toolHook?.dispose();
       void idleHook?.dispose();
