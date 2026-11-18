@@ -501,7 +501,9 @@ export default Plugin.define({
           ],
         };
       },
-      menu: (input) => <ProgressMenu sessionID={input.session.id} />,
+      menu: (input) => (
+        <ProgressMenu session={input.session} sessionID={input.session.id} />
+      ),
     }));
 
     return () => {
