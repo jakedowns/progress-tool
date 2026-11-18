@@ -276,6 +276,20 @@ Rendering requirements:
 - GUI views SHOULD wrap titles and constrain long details to a scrollable region.
 - Hover/tooltip text, when available, SHOULD expose the full unmodified title and detail.
 
+### 5.1.2 Bulk tree creation
+
+The tool MAY accept an optional `entries` array (max 50 items, each taking the
+same fields as the single form). Implementations SHOULD:
+
+- Apply the whole batch in ONE atomic, locked write (§4.3/§4.4), so a
+  parent + children tree never appears half-built in the rollup.
+- Validate every item before writing: an invalid item rejects the entire
+  batch with nothing written (all-or-nothing).
+- Treat `entries[]` and the single-entry fields as mutually exclusive.
+
+The single-field form remains canonical for incremental updates; bulk is for
+plan-shaped writes (a parent plus its children in one round trip).
+
 ### 5.2 Behavior
 
 - The call MUST return immediately. It MUST NOT wait for human input.

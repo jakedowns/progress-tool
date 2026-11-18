@@ -293,54 +293,93 @@ function mutateState(mutator, stateFile = DEFAULT_STATE_FILE) {
  * lets the relay attach to an entry the agent already created without
  * clobbering its title, parent, or status.
  */
-function upsertProgress(input, stateFile = DEFAULT_STATE_FILE) {
+function applyUpsert(state, input, now) {
   if (!input || !input.id) throw new Error('upsertProgress requires an id');
 
   const sessionId = resolveSessionId(input.sessionId);
   const key = storageKey(input.id, sessionId);
 
+  const prev = state.entries[key] || null;
+  const status = input.status !== undefined ? input.status : prev?.status || 'running';
+
+  const wasTerminal = prev?.status === 'done' || prev?.status === 'error';
+  const isRestart = wasTerminal && (status === 'running' || status === 'waiting');
+
+  const entry = {
+    ...(prev || {}),
+    id: input.id,
+    ...(sessionId ? { sessionId } : {}),
+    status,
+    title: normalizeProgressText(
+      input.title !== undefined ? input.title : prev?.title || input.id
+    ),
+    detail:
+      input.detail !== undefined
+        ? normalizeProgressText(input.detail)
+        : isRestart
+        ? null
+        : normalizeProgressText(prev?.detail ?? null),
+    progress:
+      input.progress !== undefined
+        ? input.progress
+        : isRestart
+        ? null
+        : prev?.progress ?? null,
+    parentId: input.parentId !== undefined ? input.parentId : prev?.parentId ?? null,
+    startedAt: isRestart ? now : prev?.startedAt || prev?.createdAt || now,
+    createdAt: prev?.createdAt || now,
+    updatedAt: now,
+  };
+
+  // View-plane dismissal metadata is preserved across agent/relay writes
+  // (§4.5: undefined means leave unchanged) but a lifecycle restart is a
+  // fresh run: the user's stale dismissal must not mute it. Setting the
+  // key to undefined drops it on serialize.
+  if (isRestart) entry.dismissed = undefined;
+
+  state.entries[key] = entry;
+  return entry;
+}
+
+/**
+ * Create or update one progress entry.
+ *
+ * Fields that are `undefined` are preserved from the existing entry. This
+ * lets the relay attach to an entry the agent already created without
+ * clobbering its title, parent, or status.
+ */
+function upsertProgress(input, stateFile = DEFAULT_STATE_FILE) {
+  return mutateState((state) => applyUpsert(state, input, Date.now()), stateFile);
+}
+
+/**
+ * Create or update many entries in ONE atomic, locked write (§4.3/§4.4):
+ * a parent + children tree lands whole, so the rollup never shows an
+ * intermediate half-built tree. All-or-nothing: every input is validated
+ * before the write, and a failure inside the mutator leaves the document
+ * untouched. Cap: 50 entries per call.
+ */
+function upsertManyProgress(inputs, stateFile = DEFAULT_STATE_FILE) {
+  if (!Array.isArray(inputs) || inputs.length === 0) {
+    throw new Error('entries[] requires a non-empty array');
+  }
+  if (inputs.length > 50) {
+    throw new Error(`entries[] too large: ${inputs.length} (max 50)`);
+  }
+  for (const input of inputs) {
+    if (!input || typeof input !== 'object' || !input.id || typeof input.id !== 'string') {
+      throw new Error('each entry[] item requires an id (string)');
+    }
+    if (!input.status || !['running', 'waiting', 'done', 'error'].includes(input.status)) {
+      throw new Error(`entries[${input.id}] requires a valid status (running|waiting|done|error)`);
+    }
+    if (!input.title || typeof input.title !== 'string') {
+      throw new Error(`entries[${input.id}] requires a title (string)`);
+    }
+  }
   return mutateState((state) => {
     const now = Date.now();
-    const prev = state.entries[key] || null;
-    const status = input.status !== undefined ? input.status : prev?.status || 'running';
-
-    const wasTerminal = prev?.status === 'done' || prev?.status === 'error';
-    const isRestart = wasTerminal && (status === 'running' || status === 'waiting');
-
-    const entry = {
-      ...(prev || {}),
-      id: input.id,
-      ...(sessionId ? { sessionId } : {}),
-      status,
-      title: normalizeProgressText(
-        input.title !== undefined ? input.title : prev?.title || input.id
-      ),
-      detail:
-        input.detail !== undefined
-          ? normalizeProgressText(input.detail)
-          : isRestart
-          ? null
-          : normalizeProgressText(prev?.detail ?? null),
-      progress:
-        input.progress !== undefined
-          ? input.progress
-          : isRestart
-          ? null
-          : prev?.progress ?? null,
-      parentId: input.parentId !== undefined ? input.parentId : prev?.parentId ?? null,
-      startedAt: isRestart ? now : prev?.startedAt || prev?.createdAt || now,
-      createdAt: prev?.createdAt || now,
-      updatedAt: now,
-    };
-
-    // View-plane dismissal metadata is preserved across agent/relay writes
-    // (§4.5: undefined means leave unchanged) but a lifecycle restart is a
-    // fresh run: the user's stale dismissal must not mute it. Setting the
-    // key to undefined drops it on serialize.
-    if (isRestart) entry.dismissed = undefined;
-
-    state.entries[key] = entry;
-    return entry;
+    return inputs.map((input) => applyUpsert(state, input, now));
   }, stateFile);
 }
 
@@ -485,6 +524,7 @@ module.exports = {
   atomicWrite,
   mutateState,
   upsertProgress,
+  upsertManyProgress,
   clearProgress,
   getAllProgress,
   buildTree,

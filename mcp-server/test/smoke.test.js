@@ -504,6 +504,74 @@ test('upsert preserves view dismissal metadata; lifecycle restart clears it', ()
   assert.equal(entry.dismissed ?? null, null);
 });
 
+test('bulk entries[] lands a whole tree in one atomic, all-or-nothing write', async () => {
+  const { file } = tempState();
+  const child = spawn(process.execPath, [INDEX], {
+    env: stateEnv(file),
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', (chunk) => (stdout += chunk));
+  child.stderr.on('data', (chunk) => (stderr += chunk));
+
+  const parent = { id: 'bulk-plan', status: 'running', title: 'Bulk plan' };
+  const children = [1, 2, 3].map((n) => ({
+    id: `bulk-plan-step-${n}`,
+    status: n === 1 ? 'running' : 'waiting',
+    title: `Step ${n}`,
+    parentId: 'bulk-plan',
+  }));
+  const badBatch = [
+    parent,
+    { id: 'no-title', status: 'running' }, // missing title -> whole batch rejected
+  ];
+
+  const requests = [
+    { jsonrpc: '2.0', id: 1, method: 'initialize', params: {} },
+    { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'progress', arguments: { entries: [parent, ...children] } } },
+    { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'progress', arguments: { entries: badBatch } } },
+    { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'progress', arguments: { id: 'both', status: 'running', title: 'Both', entries: [parent] } } },
+  ];
+
+  for (const request of requests) {
+    child.stdin.write(JSON.stringify(request) + '\n');
+  }
+  child.stdin.end();
+
+  await new Promise((resolve, reject) => {
+    child.on('error', reject);
+    child.on('close', resolve);
+  });
+
+  const responses = stdout
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+
+  assert.equal(stderr, '');
+  const okBulk = responses.find((r) => r.id === 2);
+  assert.equal(okBulk.result.isError, false);
+  assert.match(okBulk.result.content[0].text, /Recorded 4 progress entries in one atomic write/);
+  assert.match(okBulk.result.content[0].text, /parent=bulk-plan/);
+
+  const state = readState(file).entries;
+  assert.equal(state['bulk-plan'].status, 'running');
+  assert.equal(state['bulk-plan-step-1'].status, 'running');
+  assert.equal(state['bulk-plan-step-3'].parentId, 'bulk-plan');
+  assert.equal(Object.keys(state).length, 4, 'exactly the batch entries exist');
+
+  const badBatchResponse = responses.find((r) => r.id === 3);
+  assert.equal(badBatchResponse.result.isError, true, 'invalid batch rejects all-or-nothing');
+  assert.match(badBatchResponse.result.content[0].text, /nothing was written/);
+  assert.equal(Object.keys(readState(file).entries).length, 4, 'no partial write from the rejected batch');
+
+  const bothForms = responses.find((r) => r.id === 4);
+  assert.equal(bothForms.result.isError, true);
+  assert.match(bothForms.result.content[0].text, /not both/);
+});
+
 test('MCP handshake exposes the zero-polling contract and relay hint', async () => {
   const { file } = tempState();
   const child = spawn(process.execPath, [INDEX], {
@@ -555,7 +623,7 @@ test('MCP handshake exposes the zero-polling contract and relay hint', async () 
   assert.equal(responses.length, 3);
 
   const init = responses.find((r) => r.id === 1);
-  assert.equal(init.result.serverInfo.version, '2.3.0');
+  assert.equal(init.result.serverInfo.version, '2.4.0');
   assert.match(init.result.instructions, /Never poll, sleep/);
   assert.match(init.result.instructions, /OPENCODE_SESSION_ID/);
   assert.match(init.result.instructions, /line breaks/i);

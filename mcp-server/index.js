@@ -35,6 +35,7 @@ const path = require('path');
 
 const {
   upsertProgress,
+  upsertManyProgress,
   ensureStateFile,
   readState,
   resolveStatePath,
@@ -60,7 +61,7 @@ function treeHasChildren(parentId) {
   }
 }
 
-const SERVER_VERSION = '2.3.0';
+const SERVER_VERSION = '2.4.0';
 const VALID_STATUSES = ['running', 'waiting', 'done', 'error'];
 
 const SERVER_INSTRUCTIONS = [
@@ -104,6 +105,8 @@ const TOOL_DESCRIPTION = [
   '(1) Use this tool INSTEAD of todo/task-tracking tools (todowrite / TaskCreate): any multi-step plan belongs in this tree, where it also drives the live indicator.',
   '(2) Use the out-of-band relay (progress-relay) to WRAP long-running programmatic tool calls — build scripts, compilers, test suites, installs, anything that reports progress on stdout — so telemetry streams at zero token cost.',
   '',
+  'BULK TREE CREATION:',
+  '- Pass `entries: [{ id, status, title, parentId, ... }]` (max 50) to create or update a whole parent+children tree in ONE atomic call — one round trip, no half-built tree. Use either entries[] or the single-entry fields, not both.',
   'OWNERSHIP & ZERO-POLLING CONTRACT:',
   '- You own TASK MILESTONES and TREE STRUCTURE: call this tool when starting a phase (status: "running"), when creating child sub-tasks (parentId), and when a phase finishes (status: "done" | "error"). For long-horizon NON-SHELL work (research, planning, exploration, refactors, documentation) there is no relay, so also spend one of your turns between tool calls every few steps on a progress update (fresh detail or a 0..1 progress fraction) — todowrite-style cadence keeps the rollup live. Cover ANY long-horizon work, not just shell commands; anything past a couple of minutes or a single reply deserves an entry.',
   '- NEVER poll, sleep, or loop on terminal output just to refresh progress percentages or elapsed time.',
@@ -255,6 +258,28 @@ function handleToolsList(id) {
               description:
                 'Optional parent task ID to nest this task in a dependency tree.',
             },
+            entries: {
+              type: 'array',
+              maxItems: 50,
+              description:
+                'BULK: create/update a whole parent+children tree in ONE atomic write (max 50). Each item takes the same fields as the single form. Use either entries[] or the single-entry fields, not both.',
+              items: {
+                type: 'object',
+                properties: {
+                  id: { type: 'string' },
+                  status: {
+                    type: 'string',
+                    enum: VALID_STATUSES,
+                  },
+                  title: { type: 'string' },
+                  detail: { type: 'string' },
+                  progress: { type: 'number', minimum: 0, maximum: 1 },
+                  parentId: { type: 'string' },
+                },
+                required: ['id', 'status', 'title'],
+                additionalProperties: false,
+              },
+            },
             sessionId: {
               type: 'string',
               description:
@@ -280,6 +305,16 @@ function handleProgressCall(id, args) {
   if (!args || typeof args !== 'object' || Array.isArray(args)) {
     toolError(id, 'Invalid arguments: expected an object.');
     return;
+  }
+
+  // Bulk form: entries[] creates/updates a whole parent+children tree in one
+  // atomic write. Single-entry fields and entries[] are mutually exclusive.
+  if (Array.isArray(args.entries)) {
+    if (args.id || args.status || args.title) {
+      toolError(id, 'Pass either entries[] or single-entry fields (id/status/title), not both.');
+      return;
+    }
+    return handleBulkProgress(id, args);
   }
 
   const {
@@ -364,6 +399,86 @@ function handleProgressCall(id, args) {
     }
   }
 
+  toolOk(id, text);
+}
+
+/**
+ * Bulk form: entries[] lands a whole tree (parent + children) in one atomic
+ * write, so the rollup never shows an intermediate half-built tree and the
+ * agent pays one round trip instead of N.
+ */
+function handleBulkProgress(id, args) {
+  const { entries, sessionId } = args;
+
+  if (entries.length === 0) {
+    toolError(id, 'entries[] must be a non-empty array.');
+    return;
+  }
+  if (entries.length > 50) {
+    toolError(id, `entries[] too large: ${entries.length} (max 50).`);
+    return;
+  }
+
+  const problems = [];
+  entries.forEach((entry, index) => {
+    const label = `entries[${index}]${entry && entry.id ? ` (${entry.id})` : ''}`;
+    if (!entry || typeof entry !== 'object') {
+      problems.push(`${label} must be an object`);
+      return;
+    }
+    if (!entry.id || typeof entry.id !== 'string') problems.push(`${label}.id (string) is required`);
+    if (!entry.status || !VALID_STATUSES.includes(entry.status)) {
+      problems.push(`${label}.status must be one of ${VALID_STATUSES.join('|')}`);
+    }
+    if (!entry.title || typeof entry.title !== 'string') problems.push(`${label}.title (string) is required`);
+    if (entry.detail !== undefined && entry.detail !== null && typeof entry.detail !== 'string') {
+      problems.push(`${label}.detail must be a string`);
+    }
+    if (entry.parentId !== undefined && entry.parentId !== null && typeof entry.parentId !== 'string') {
+      problems.push(`${label}.parentId must be a string`);
+    }
+    if (
+      entry.progress !== undefined &&
+      entry.progress !== null &&
+      (typeof entry.progress !== 'number' || !Number.isFinite(entry.progress) || entry.progress < 0 || entry.progress > 1)
+    ) {
+      problems.push(`${label}.progress must be a number between 0 and 1`);
+    }
+  });
+  if (problems.length > 0) {
+    toolError(id, `Invalid entries[] (nothing was written):\n${problems.join('\n')}`);
+    return;
+  }
+
+  let created;
+  try {
+    created = upsertManyProgress(
+      entries.map((entry) => ({
+        id: entry.id,
+        status: entry.status,
+        title: entry.title,
+        detail: entry.detail,
+        progress: entry.progress,
+        parentId: entry.parentId === '' ? null : entry.parentId,
+        sessionId,
+      })),
+      resolveStatePath()
+    );
+  } catch (err) {
+    toolError(id, err.message);
+    return;
+  }
+
+  const lines = created.map((entry) => {
+    const bits = [`[${entry.id}] (${entry.status}) ${entry.title}`];
+    if (entry.parentId) bits.push(`parent=${entry.parentId}`);
+    return `- ${bits.join(' - ')}`;
+  });
+  const runningRoot = created.find((entry) => entry.status === 'running' && !entry.parentId);
+  let text = `Recorded ${created.length} progress entries in one atomic write:\n${lines.join('\n')}`;
+  if (runningRoot) {
+    text += relayHint(runningRoot.id, null, runningRoot.sessionId);
+  }
   toolOk(id, text);
 }
 
