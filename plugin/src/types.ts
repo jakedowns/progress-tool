@@ -21,6 +21,13 @@ export interface ProgressEntry {
   startedAt?: number;
   createdAt?: number;
   updatedAt?: number;
+  /**
+   * View-plane metadata: a user dismissed this task, with the rolled-up
+   * status at dismiss time. Written by the plugin (atomic + locked, spec
+   * §4.3/§4.4), preserved by agent/relay upserts, cleared on lifecycle
+   * restart. Revival semantics live in tree.ts `isDismissed`.
+   */
+  dismissed?: { status: string; at: number } | null;
 }
 
 export interface ProgressState {

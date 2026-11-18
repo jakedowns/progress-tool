@@ -333,6 +333,12 @@ function upsertProgress(input, stateFile = DEFAULT_STATE_FILE) {
       updatedAt: now,
     };
 
+    // View-plane dismissal metadata is preserved across agent/relay writes
+    // (§4.5: undefined means leave unchanged) but a lifecycle restart is a
+    // fresh run: the user's stale dismissal must not mute it. Setting the
+    // key to undefined drops it on serialize.
+    if (isRestart) entry.dismissed = undefined;
+
     state.entries[key] = entry;
     return entry;
   }, stateFile);

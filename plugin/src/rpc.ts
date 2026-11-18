@@ -24,6 +24,26 @@ export const ProgressRpc = Rpc.define({
         additionalProperties: false,
       },
     },
+    dismiss: {
+      input: {
+        type: "object",
+        properties: {
+          // Storage key (may be session-scoped), not the bare task id.
+          key: { type: "string" },
+          // Rolled-up status at dismiss time; drives revival semantics
+          // (terminal vs non-terminal, child-failure carve-out).
+          status: { type: "string" },
+        },
+        required: ["key", "status"],
+        additionalProperties: false,
+      },
+      output: {
+        type: "object",
+        properties: { ok: { type: "boolean" } },
+        required: ["ok"],
+        additionalProperties: false,
+      },
+    },
   },
   events: {
     updated: {

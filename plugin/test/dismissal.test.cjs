@@ -25,6 +25,12 @@ execFileSync(
   { stdio: 'pipe' }
 );
 const { buildTree, isDismissed, dismissalsFor } = require(path.join(OUT, 'tree.cjs'));
+execFileSync(
+  path.join(ROOT, 'node_modules', '.bin', 'esbuild'),
+  [path.join(ROOT, 'src', 'state.ts'), '--bundle', '--format=cjs', '--platform=node', `--outfile=${path.join(OUT, 'state.cjs')}`],
+  { stdio: 'pipe' }
+);
+const { writeDismissal } = require(path.join(OUT, 'state.cjs'));
 
 /** buildTree sorts by severity/updatedAt; pick the root by id, not position. */
 function makeTreeFind(entries) {
@@ -129,4 +135,31 @@ test('error dismissal: only a direct re-report revives; failures elsewhere do no
 
   assert.equal(isDismissed(makeTree([ROOT_ENTRY({ status: 'error', updatedAt: 1000 })])[0], dismissed), true);
   assert.equal(isDismissed(makeTree([ROOT_ENTRY({ status: 'error', updatedAt: 9000 })])[0], dismissed), false);
+});
+
+test('buildTree carries the persisted dismissed field through to nodes', () => {
+  const [root] = makeTreeFind([ROOT_ENTRY({ dismissed: { status: 'running', at: 42 } })]);
+  assert.deepEqual(root.dismissed, { status: 'running', at: 42 });
+});
+
+test('writeDismissal persists {status, at} atomically and cleans up its lock', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'progress-dismiss-'));
+  const file = path.join(dir, 'state.json');
+  process.env.PROGRESS_STATE_PATH = file;
+  fs.writeFileSync(
+    file,
+    JSON.stringify({ entries: { 'sess-1:root': { id: 'root', status: 'running', title: 'R', updatedAt: 1000 } }, version: 2 })
+  );
+
+  assert.equal(writeDismissal('sess-1:root', 'running'), true);
+  const state = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const entry = Object.values(state.entries)[0];
+  assert.equal(entry.dismissed.status, 'running');
+  assert.equal(typeof entry.dismissed.at, 'number');
+  assert.ok(entry.dismissed.at >= 1000);
+  assert.equal(fs.existsSync(`${file}.lock`), false, 'lock released');
+
+  // Unknown key: no-op, still clean.
+  assert.equal(writeDismissal('missing-key', 'running'), false);
+  assert.equal(fs.existsSync(`${file}.lock`), false);
 });

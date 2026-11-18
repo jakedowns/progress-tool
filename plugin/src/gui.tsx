@@ -8,12 +8,12 @@
 
 import { ComposerPill, Plugin } from "@opencode/plugin/gui";
 import { For, Index, Show, createSignal } from "solid-js";
+import pkg from "../package.json";
 import { ProgressRpc } from "./rpc.js";
 import {
   buildTree,
   barParts,
   countActive,
-  dismissalsFor,
   flattenTreeWithDepth,
   isDismissed,
   normalizeBarOptions,
@@ -233,7 +233,13 @@ export default Plugin.define({
     // semantics (re-report always revives, non-terminal status changes revive,
     // terminal dismissals only revive on failure or re-report) live in
     // tree.ts's isDismissed, shared and unit-tested.
-    const [dismissed, setDismissed] = createSignal<Record<string, { status: string; at: number }>>({});
+    //
+    // The dismissed state is PERSISTED in the shared state doc as
+    // entry.dismissed = { status, at } (view-plane metadata written through
+    // the plugin server's locked atomic writer), so it survives window
+    // reloads and is shared by every view. This signal holds only optimistic
+    // writes between the click and the next observed state.
+    const [pendingDismissed, setPendingDismissed] = createSignal<Record<string, { status: string; at: number }>>({});
     const options = normalizeBarOptions(ctx.options);
     const visibility = normalizeVisibilityOptions(ctx.options);
     const refreshMs = normalizeRefreshMs(ctx.options);
@@ -252,6 +258,17 @@ export default Plugin.define({
           entries: (result?.entries ?? {}) as Record<string, ProgressEntry>,
           loaded: true,
         });
+        // Drop optimistic dismissals once the persisted state reflects them.
+        setPendingDismissed((prev) => {
+          const next = { ...prev };
+          for (const [key, value] of Object.entries(prev)) {
+            const d = (result?.entries ?? {})[key]?.dismissed;
+            if (d && typeof d === "object" && (d as { at: number }).at >= value.at - 500) {
+              delete next[key];
+            }
+          }
+          return next;
+        });
       } catch (error) {
         if (!alive) return;
         setState((prev) => ({ ...prev, loaded: true, error: String(error) }));
@@ -263,7 +280,7 @@ export default Plugin.define({
     if (ctx.options?.notifyOnLoad === true) {
       ctx.toast.show({
         title: "Progress plugin loaded",
-        description: `${ctx.app.platform} ${ctx.app.version}`,
+        description: `${ctx.app.platform} · opencode-progress v${pkg.version}`,
         variant: "success",
         duration: 2500,
       });
@@ -271,11 +288,58 @@ export default Plugin.define({
     void refresh();
     const timer = setInterval(() => void refresh(), refreshMs);
 
-    const ProgressMenu = (props: { sessionID: string }) => {
+    /** Persisted dismissals, read straight from the state doc entries. */
+    const dismissedFromEntries = () => {
+      const map: Record<string, { status: string; at: number }> = {};
+      for (const [key, entry] of Object.entries(state().entries)) {
+        const d = entry.dismissed;
+        if (d && typeof d === "object" && typeof d.at === "number") {
+          map[key] = { status: String(d.status ?? ""), at: d.at };
+        }
+      }
+      return map;
+    };
+
+    /** Persisted + optimistic: pending wins while newer than persisted. */
+    const dismissedMap = () => {
+      const merged = dismissedFromEntries();
+      for (const [key, pending] of Object.entries(pendingDismissed())) {
+        const persisted = merged[key];
+        if (!persisted || pending.at > persisted.at) merged[key] = pending;
+      }
+      return merged;
+    };
+
+    type DismissSession = {
+      server: {
+        client: {
+          rpc: (contract: unknown) => {
+            dismiss(input: { key: string; status: string }): Promise<{ ok: boolean }>;
+          };
+        };
+      };
+    };
+
+    /** Persist the dismissal via the plugin server, optimistically in-memory. */
+    const dismissKey = (
+      session: DismissSession,
+      key: string,
+      status: string
+    ) => {
+      setPendingDismissed((prev) => ({ ...prev, [key]: { status, at: Date.now() } }));
+      void session.server.client
+        .rpc(ProgressRpc)
+        .dismiss({ key, status })
+        .catch((error: unknown) =>
+          console.error("[opencode-progress] dismiss rpc failed", String(error))
+        );
+    };
+
+    const ProgressMenu = (props: { session: DismissSession; sessionID: string }) => {
       const scoped = () => scopeEntries(state().entries, props.sessionID, visibility);
       const visibleRoots = () => {
         const roots = buildTree(visibleEntries(scoped(), Date.now(), visibility));
-        return roots.filter((root) => !isDismissed(root, dismissed()));
+        return roots.filter((root) => !isDismissed(root, dismissedMap()));
       };
       const rows = () => flattenTreeWithDepth(visibleRoots());
 
@@ -309,14 +373,7 @@ export default Plugin.define({
                   options={options}
                   onDismiss={
                     depth === 0
-                      ? () =>
-                          setDismissed((prev) => ({
-                            ...prev,
-                            [node.key]: {
-                              status: node.status ?? "",
-                              at: node.reportedAt ?? 0,
-                            },
-                          }))
+                      ? () => dismissKey(props.session, node.key, node.status ?? "")
                       : undefined
                   }
                 />
@@ -324,7 +381,11 @@ export default Plugin.define({
             </For>
             <button
               type="button"
-              onClick={() => setDismissed((prev) => dismissalsFor(visibleRoots(), prev))}
+              onClick={() => {
+                for (const root of visibleRoots()) {
+                  dismissKey(props.session, root.key, root.status ?? "");
+                }
+              }}
               style={{
                 "margin-top": "6px",
                 border: "none",
@@ -340,6 +401,17 @@ export default Plugin.define({
               ✕ Dismiss all
             </button>
           </Show>
+          <div
+            style={{
+              "margin-top": "4px",
+              padding: "4px 8px 6px",
+              "font-size": "10px",
+              opacity: "0.45",
+              "user-select": "none",
+            }}
+          >
+            progress plugin desktop v{pkg.version}
+          </div>
         </div>
       );
     };
@@ -370,7 +442,7 @@ export default Plugin.define({
         }
 
         const roots = buildTree(visibleEntries(scoped, Date.now(), visibility));
-        const visibleRoots = roots.filter((root) => !isDismissed(root, dismissed()));
+        const visibleRoots = roots.filter((root) => !isDismissed(root, dismissedMap()));
         if (visibleRoots.length === 0) return undefined;
 
         const active = countActive(visibleRoots);
@@ -403,7 +475,7 @@ export default Plugin.define({
 
         return {
           label,
-          title: active > 0 ? `${active} active task${active === 1 ? "" : "s"}` : "Agent progress",
+          title: `${active > 0 ? `${active} active task${active === 1 ? "" : "s"}` : "Agent progress"}`,
           rows: [
             ...flattenTreeWithDepth(visibleRoots)
               .slice(0, 7)
@@ -414,20 +486,17 @@ export default Plugin.define({
                   ...row,
                   icon: "circle-x" as const,
                   detail: row.detail ?? "dismiss",
-                  run: () =>
-                    setDismissed((prev) => ({
-                      ...prev,
-                      [node.key]: {
-                        status: node.status ?? "",
-                        at: node.reportedAt ?? 0,
-                      },
-                    })),
+                  run: () => dismissKey(input.session, node.key, node.status ?? ""),
                 };
               }),
             {
               id: "dismiss",
               label: "✕ Dismiss all",
-              run: () => setDismissed((prev) => dismissalsFor(visibleRoots, prev)),
+              run: () => {
+                for (const root of visibleRoots) {
+                  dismissKey(input.session, root.key, root.status ?? "");
+                }
+              },
             },
           ],
         };

@@ -479,6 +479,31 @@ test('running response nudges the tree for numbered step lists, silently skips p
   assert.match(plain.result.content[0].text, /relay --id plain-entry/);
 });
 
+test('upsert preserves view dismissal metadata; lifecycle restart clears it', () => {
+  const { file } = tempState();
+  const store = require(path.join(ROOT, 'state-store'));
+  run(['emit', '--id', 'dismiss-1', '--status', 'running', '--title', 'Task'], { state: file });
+
+  // Simulate the view-plane dismissal write (plugin writes entry.dismissed).
+  store.mutateState((state) => {
+    const key = Object.keys(state.entries).find((k) => state.entries[k].id === 'dismiss-1');
+    state.entries[key].dismissed = { status: 'running', at: 12345 };
+    return state;
+  }, file);
+
+  // An agent/relay update on the same run preserves the dismissal.
+  run(['emit', '--id', 'dismiss-1', '--status', 'running', '--detail', 'progressing'], { state: file });
+  let entry = readState(file).entries['dismiss-1'];
+  assert.deepEqual(entry.dismissed, { status: 'running', at: 12345 });
+  assert.equal(entry.detail, 'progressing');
+
+  // Lifecycle restart (terminal -> running) clears the stale dismissal.
+  run(['emit', '--id', 'dismiss-1', '--status', 'done'], { state: file });
+  run(['emit', '--id', 'dismiss-1', '--status', 'running'], { state: file });
+  entry = readState(file).entries['dismiss-1'];
+  assert.equal(entry.dismissed ?? null, null);
+});
+
 test('MCP handshake exposes the zero-polling contract and relay hint', async () => {
   const { file } = tempState();
   const child = spawn(process.execPath, [INDEX], {

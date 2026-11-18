@@ -7,7 +7,7 @@
 
 import { Plugin } from "@opencode/plugin";
 import { ProgressRpc } from "./rpc.js";
-import { readProgressState } from "./state.js";
+import { readProgressState, writeDismissal } from "./state.js";
 import { normalizeRefreshMs } from "./tree.js";
 import { PROGRESS_RULES, instructionsEnabled } from "./instructions.js";
 
@@ -20,6 +20,9 @@ export default Plugin.define({
       list: async () => {
         const state = readProgressState();
         return { entries: state.entries ?? {}, updatedAt: Date.now() };
+      },
+      dismiss: async ({ key, status }) => {
+        return { ok: writeDismissal(key, status) };
       },
     });
 

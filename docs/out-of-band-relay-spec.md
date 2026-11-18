@@ -108,6 +108,8 @@ The relay does not make a blocking shell call asynchronous. It makes the display
 
 The view reads the state store and renders it. It MAY poll the file or subscribe to filesystem events. It MUST tolerate missing fields and unknown fields, and it MUST NOT require the relay to be present.
 
+A view MAY write exactly one kind of data: the per-entry `dismissed` record of §4.9 (a user action), using the same §4.3/§4.4 atomic and locked protocol as every other writer. All task state (status, title, detail, progress, topology) remains owned by the agent and the relay.
+
 ---
 
 ## 4. State store contract
@@ -150,7 +152,7 @@ Implementations MUST support an override:
 `<storage-key>` is `<id>` for legacy unscoped entries, or `<sessionId>:<id>` when a session is active. `entry.id` and `entry.parentId` remain clean task IDs even when the storage key is composite.
 
 Required per entry: `id`, `status`, `title`, `updatedAt`.
-Optional per entry: `sessionId`, `detail`, `progress`, `parentId`, `startedAt`, `createdAt`.
+Optional per entry: `sessionId`, `detail`, `progress`, `parentId`, `startedAt`, `createdAt`, `dismissed` (§4.9).
 
 Readers MUST ignore unknown fields and MUST tolerate missing optional fields.
 
@@ -185,7 +187,28 @@ Specifically:
 - `undefined` means "leave unchanged".
 - `null` means "explicitly clear" for nullable fields.
 - `progress: 0` MUST be distinguishable from "no progress supplied".
-- Reusing an `id` that is currently `done` or `error` with a new `running`/`waiting` status SHOULD reset `startedAt`, `detail`, and `progress` unless the caller explicitly supplies them. This prevents a new run from inheriting a stale 100% bar.
+- Reusing an `id` that is currently `done` or `error` with a new `running`/`waiting` status SHOULD reset `startedAt`, `detail`, and `progress` unless the caller explicitly supplies them. This prevents a new run from inheriting a stale 100% bar. A lifecycle restart MUST also clear the entry's view-plane `dismissed` metadata (§4.9): a stale user dismissal must not mute a fresh run.
+
+### 4.9 View-plane metadata: user dismissal
+
+An entry MAY carry a dismissal record written by view clients:
+
+```json
+"dismissed": { "status": "running", "at": 1795017842669 }
+```
+
+- `status` is the entry's rolled-up status at dismiss time; `at` is the epoch
+  millisecond of the dismissal. A bare boolean or timestamp alone is
+  insufficient: revival semantics depend on what the tree looked like when
+  the user dismissed it (terminal vs non-terminal, the child-failure
+  carve-out).
+- Writers: view clients only (a user action), via the §4.3/§4.4 atomic and
+  locked protocol. Agent and relay writes MUST preserve the field.
+- A lifecycle restart MUST clear it (§4.5).
+- Revival semantics are view-level and shared by convention: terminal
+  (`done`/`error`) dismissals revive only on a direct re-report of the task
+  or a child failing; non-terminal dismissals also revive on any rolled-up
+  status change. Views MUST NOT require agent cooperation for dismissal.
 
 ### 4.6 Lifecycle cleanup
 
@@ -627,6 +650,8 @@ An implementation is conformant if it satisfies all of the following.
 - [ ] `PROGRESS_SESSION_ID` / `OPENCODE_SESSION_ID` scope entries automatically, with an explicit `--session` / `sessionId` taking precedence.
 - [ ] A second harness can read and render the same file without importing the server.
 - [ ] The contract is documented without requiring a specific harness.
+- [ ] Agent/relay upserts preserve a view-written `dismissed` record (§4.9), and lifecycle restarts clear it.
+- [ ] Dismissal writes are atomic and locked like every other writer (§4.3/§4.4).
 
 ---
 
