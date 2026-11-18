@@ -166,6 +166,8 @@ export interface IdleEntry {
   title?: string;
   status: string;
   dismissed?: { at: number } | null;
+  /** Epoch ms of the entry's last write; relay ticks keep this fresh. */
+  updatedAt?: number;
 }
 
 export interface IdleTracker {
@@ -198,14 +200,22 @@ export interface IdleDecision {
 export function idleReminder(
   tracker: IdleTracker,
   entries: readonly IdleEntry[],
-  options: { cooldownMs?: number; maxPerRun?: number; now?: number } = {}
+  options: { cooldownMs?: number; maxPerRun?: number; now?: number; staleAfterMs?: number } = {}
 ): IdleDecision {
   const cooldownMs = options.cooldownMs ?? 120_000;
   const maxPerRun = options.maxPerRun ?? 3;
   const now = options.now ?? Date.now();
+  // Relay-driven tasks tick several times per second; only entries nobody is
+  // writing to deserve an idle nag. Unknown timestamps count as stale.
+  const staleAfterMs = options.staleAfterMs ?? 60_000;
 
   const open = entries
-    .filter((entry) => (entry.status === "running" || entry.status === "waiting") && !entry.dismissed)
+    .filter(
+      (entry) =>
+        (entry.status === "running" || entry.status === "waiting") &&
+        !entry.dismissed &&
+        (entry.updatedAt == null || now - entry.updatedAt >= staleAfterMs)
+    )
     .map((entry) => `${entry.id} (${entry.status})`)
     .sort();
   const signature = open.join(" | ");

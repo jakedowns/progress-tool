@@ -143,6 +143,30 @@ test('recent progress activity never nudges', () => {
   assert.equal(step.action, 'none');
 });
 
+test('idle reminder: fresh relay ticks are excluded (only stale entries nag)', () => {
+  const now = 1_000_000_000;
+  const entries = [
+    { id: 'live', status: 'running', updatedAt: now - 2000 }, // relay ticking
+    { id: 'stale', status: 'running', updatedAt: now - 10 * 60_000 },
+    { id: 'unknown', status: 'waiting' },
+  ];
+  const decision = idleReminder({ signature: '', lastAt: 0, count: 0 }, entries, { now, staleAfterMs: 60_000 });
+  assert.equal(decision.action, 'remind');
+  assert.match(decision.message, /stale \(running\)/);
+  assert.match(decision.message, /unknown \(waiting\)/);
+  assert.doesNotMatch(decision.message, /live \(running\)/);
+});
+
+test('idle reminder: only fresh entries → silent', () => {
+  const now = 1_000_000_000;
+  const decision = idleReminder(
+    { signature: '', lastAt: 0, count: 0 },
+    [{ id: 'live', status: 'running', updatedAt: now - 1000 }],
+    { now }
+  );
+  assert.equal(decision.action, 'none');
+});
+
 test('normalizers and message texts', () => {
   assert.equal(normalizeStrictMode({ strictMode: 'force' }), 'force');
   assert.equal(normalizeStrictMode({ strictMode: 'off' }), 'off');
