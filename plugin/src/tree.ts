@@ -131,7 +131,7 @@ export function buildTree(entries: Record<string, ProgressEntry>): TreeNode[] {
       if (latestChild > (updatedAt ?? 0)) updatedAt = latestChild;
     }
 
-    return { ...entry, key, children, status, progress, updatedAt };
+    return { ...entry, key, children, status, progress, updatedAt, reportedAt: entry.updatedAt };
   };
 
   return roots.map(node);

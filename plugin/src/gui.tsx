@@ -53,6 +53,36 @@ function dotColor(status: TreeNode["status"]): string {
   return "#3b82f6";
 }
 
+/** "Nov 18, 2:03 PM" in the viewer's locale and timezone. */
+function formatDateTime(ms: number | undefined): string {
+  if (!ms) return "";
+  try {
+    return new Date(ms).toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  } catch {
+    return new Date(ms).toISOString();
+  }
+}
+
+/** Human-readable age: "just now", "42 seconds ago", "3 minutes ago", ... */
+function formatRelative(ms: number | undefined): string {
+  if (!ms) return "";
+  const delta = Math.max(0, Date.now() - ms);
+  if (delta < 10_000) return "just now";
+  const seconds = Math.floor(delta / 1000);
+  if (seconds < 60) return `${seconds} second${seconds === 1 ? "" : "s"} ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
+}
+
 /** Render normalized text with real <br> elements, never innerHTML. */
 function Multiline(props: { text: string }) {
   return (
@@ -140,6 +170,14 @@ function MenuRow(props: {
           <Show when={pct()}>
             <span>{pct()}</span>
           </Show>
+          <Show when={props.node.startedAt}>
+            <span
+              title={`Last updated ${formatRelative(props.node.updatedAt)} (${formatDateTime(props.node.updatedAt)})`}
+              style={{ "white-space": "nowrap", cursor: "default" }}
+            >
+              started {formatDateTime(props.node.startedAt)}
+            </span>
+          </Show>
         </div>
       </div>
       <Show when={props.onDismiss}>
@@ -186,11 +224,39 @@ function rowFor(node: TreeNode, depth: number, options: BarOptions) {
   };
 }
 
+/** Per-root dismissal snapshot: hidden until the task itself is re-reported or its rolled-up status changes. */
+function isDismissed(root: TreeNode, map: Record<string, { status: string; at: number }>): boolean {
+  const d = map[root.key];
+  if (!d) return false;
+  // The agent re-reported this task itself (new milestone or fresh lifecycle).
+  if ((root.reportedAt ?? 0) > d.at) return false;
+  // Its rolled-up status changed (waiting/done/error, or a new child flipped it).
+  if ((root.status ?? "") !== d.status) return false;
+  return true;
+}
+
+/** Snapshot every given root for "Dismiss all". */
+function dismissalsFor(
+  roots: readonly TreeNode[],
+  prev: Record<string, { status: string; at: number }>
+): Record<string, { status: string; at: number }> {
+  const next = { ...prev };
+  for (const root of roots) {
+    next[root.key] = { status: root.status ?? "", at: root.reportedAt ?? 0 };
+  }
+  return next;
+}
+
 export default Plugin.define({
   setup(ctx) {
     const [state, setState] = createSignal<GuiState>({ entries: {}, loaded: false });
-    const [dismissedAt, setDismissedAt] = createSignal(0);
-    const [dismissedRoots, setDismissedRoots] = createSignal<Record<string, number>>({});
+    // Dismissal is per root task and scoped to that task itself:
+    //   - Hidden through telemetry ticks (a relay bumps child updatedAt up to
+    //     4x/second) and through sibling/other-root activity.
+    //   - Revives only when the task itself is re-reported by the agent
+    //     (stored reportedAt bumps past the dismissal snapshot) or when its
+    //     rolled-up status changes (waiting/done/error, new child, restart).
+    const [dismissed, setDismissed] = createSignal<Record<string, { status: string; at: number }>>({});
     const options = normalizeBarOptions(ctx.options);
     const visibility = normalizeVisibilityOptions(ctx.options);
     const refreshMs = normalizeRefreshMs(ctx.options);
@@ -230,14 +296,9 @@ export default Plugin.define({
 
     const ProgressMenu = (props: { sessionID: string }) => {
       const scoped = () => scopeEntries(state().entries, props.sessionID, visibility);
-      const maxUpdatedAt = () =>
-        Object.values(scoped()).reduce((max, entry) => Math.max(max, entry?.updatedAt ?? 0), 0);
       const visibleRoots = () => {
         const roots = buildTree(visibleEntries(scoped(), Date.now(), visibility));
-        const dismissed = dismissedRoots();
-        return roots.filter(
-          (root) => (dismissed[root.key] ?? 0) < (root.updatedAt ?? 0)
-        );
+        return roots.filter((root) => !isDismissed(root, dismissed()));
       };
       const rows = () => flattenTreeWithDepth(visibleRoots());
 
@@ -272,9 +333,12 @@ export default Plugin.define({
                   onDismiss={
                     depth === 0
                       ? () =>
-                          setDismissedRoots((prev) => ({
+                          setDismissed((prev) => ({
                             ...prev,
-                            [node.key]: node.updatedAt ?? 0,
+                            [node.key]: {
+                              status: node.status ?? "",
+                              at: node.reportedAt ?? 0,
+                            },
                           }))
                       : undefined
                   }
@@ -283,7 +347,7 @@ export default Plugin.define({
             </For>
             <button
               type="button"
-              onClick={() => setDismissedAt(maxUpdatedAt())}
+              onClick={() => setDismissed((prev) => dismissalsFor(visibleRoots(), prev))}
               style={{
                 "margin-top": "6px",
                 border: "none",
@@ -328,30 +392,37 @@ export default Plugin.define({
           return { label: "progress: loading", title: "Progress plugin" };
         }
 
-        const maxUpdatedAt = Object.values(scoped).reduce(
-          (max, entry) => Math.max(max, entry?.updatedAt ?? 0),
-          0
-        );
-        if (!empty && dismissedAt() >= maxUpdatedAt) return undefined;
-
         const roots = buildTree(visibleEntries(scoped, Date.now(), visibility));
-        const dismissed = dismissedRoots();
-        const visibleRoots = roots.filter(
-          (root) => (dismissed[root.key] ?? 0) < (root.updatedAt ?? 0)
-        );
+        const visibleRoots = roots.filter((root) => !isDismissed(root, dismissed()));
         if (visibleRoots.length === 0) return undefined;
 
         const active = countActive(visibleRoots);
         const top = visibleRoots[0];
-        const pct = progressLabel(top.progress);
+        const topPct = progressLabel(top.progress);
         const parts = barParts(top.progress, options);
         const topTitle = oneLineText(top.title);
+
+        // Multi-root pill: "(N · agg%)" — root count plus the mean of root
+        // progress values (roll-up mean, nulls ignored; omitted when no root
+        // has a numeric progress). The latest root is shown first.
+        const rootProgresses = visibleRoots
+          .map((root) => root.progress)
+          .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+        const aggregatePct =
+          visibleRoots.length > 1 && rootProgresses.length > 0
+            ? progressLabel(rootProgresses.reduce((a, b) => a + b, 0) / rootProgresses.length)
+            : null;
+        const pillSuffix =
+          visibleRoots.length > 1
+            ? ` (${visibleRoots.length}${aggregatePct ? ` · ${aggregatePct}` : ""})`
+            : "";
+
         const label =
           parts.style === "emoji"
-            ? `${topTitle}: ${parts.bar}${parts.fraction}`
+            ? `${topTitle}: ${parts.bar}${parts.fraction}${pillSuffix}`
             : active > 0
-              ? `${topTitle}${pct ? ` ${pct}` : ""}`
-              : `${visibleRoots.length} tracked`;
+              ? `${topTitle}${topPct ? ` ${topPct}` : ""}${pillSuffix}`
+              : `${topTitle}${pillSuffix}`;
 
         return {
           label,
@@ -367,16 +438,19 @@ export default Plugin.define({
                   icon: "circle-x" as const,
                   detail: row.detail ?? "dismiss",
                   run: () =>
-                    setDismissedRoots((prev) => ({
+                    setDismissed((prev) => ({
                       ...prev,
-                      [node.key]: node.updatedAt ?? 0,
+                      [node.key]: {
+                        status: node.status ?? "",
+                        at: node.reportedAt ?? 0,
+                      },
                     })),
                 };
               }),
             {
               id: "dismiss",
               label: "✕ Dismiss all",
-              run: () => setDismissedAt(maxUpdatedAt),
+              run: () => setDismissed((prev) => dismissalsFor(visibleRoots, prev)),
             },
           ],
         };

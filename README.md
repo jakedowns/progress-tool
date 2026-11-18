@@ -4,7 +4,7 @@ A non-blocking twin of `question` so coding agents can signal long-running work 
 
 Implements the [Agent Progress Tool proposal](https://gist.github.com/jakedowns/ddc4eb4817184a074c82c61dc6e7228c) for OpenCode 2, and is written as a portable reference implementation that any model, agent, or harness can copy, adapt, or train on.
 
-**Versions:** MCP server `2.2.0` · OpenCode plugin `2.1.0`
+**Versions:** MCP server `2.2.0` · OpenCode plugin `2.3.0`
 
 > [!IMPORTANT]
 > **No `AGENTS.md` edits required.** The bundled OpenCode plugin injects the progress & relay rules directly into every session's system instructions, and the MCP `progress` tool response reinforces them at the exact moment an agent starts a task — so agents know to wrap long-running commands with `progress-relay` *before* their first build, not after. Progress reporting works without any prompt engineering.
@@ -472,8 +472,12 @@ The plugin at `plugin/` targets the OpenCode **V2** plugin API and exposes four 
 
    Running and waiting tasks stay visible. Errors stay visible until dismissed or updated on
    purpose, so a failure cannot silently scroll away. In the desktop pill, each root row has a
-   **✕** icon that dismisses that tree, and **✕ Dismiss all** hides every current report. A
-   dismissed tree reappears on its next progress update. No extra agent hook is needed: report
+   **✕** icon that dismisses that tree, and **✕ Dismiss all** hides every current report.
+   Dismissal is scoped to the task itself: a dismissed tree stays hidden through telemetry ticks
+   and sibling/other-root updates, and only reappears when the agent re-reports that task or its
+   rolled-up status changes (waiting/done/error). With more than one root task, the pill shows
+   the latest one plus `(N · agg%)` — the number of roots and the mean of their progress. No
+   extra agent hook is needed: report
    `status: "done"` once and the view handles retention and hiding.
 
 3. Verify:

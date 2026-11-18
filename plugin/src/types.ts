@@ -32,4 +32,10 @@ export interface TreeNode extends ProgressEntry {
   /** Stable key from the state file map (may be session-scoped). */
   key: string;
   children: TreeNode[];
+  /**
+   * The entry's own stored `updatedAt`, before buildTree projects the latest
+   * child update onto `updatedAt`. Dismissal logic uses this to tell "the
+   * agent re-reported this task" apart from "a child ticked / a sibling moved".
+   */
+  reportedAt?: number;
 }
