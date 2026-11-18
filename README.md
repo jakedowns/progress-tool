@@ -4,7 +4,7 @@ A non-blocking twin of `question` so coding agents can signal long-running work 
 
 Implements the [Agent Progress Tool proposal](https://gist.github.com/jakedowns/ddc4eb4817184a074c82c61dc6e7228c) for OpenCode 2, and is written as a portable reference implementation that any model, agent, or harness can copy, adapt, or train on.
 
-**Versions:** MCP server `2.3.0` · OpenCode plugin `2.5.0`
+**Versions:** MCP server `2.3.0` · OpenCode plugin `2.6.0`
 
 > [!IMPORTANT]
 > **No `AGENTS.md` edits required.** The bundled OpenCode plugin injects the progress & relay rules directly into every session's system instructions, and the MCP `progress` tool response reinforces them at the exact moment an agent starts a task — so agents know to wrap long-running commands with `progress-relay` *before* their first build, not after. Progress reporting works without any prompt engineering.
@@ -20,6 +20,8 @@ Implements the [Agent Progress Tool proposal](https://gist.github.com/jakedowns/
 > ```
 >
 > Want to see it live? Ask your agent to **"demo OSC 9;4 support"** (`.opencode/skills/osc-demo`) or **"demo the task tree"** (`.opencode/skills/tree-demo`) — both ship with this repo — or run them yourself: `bash demo/osc-demo.sh` streams native `OSC 9;4` progress sequences through `progress-relay`, and `bash demo/tree-demo.sh` builds a nested parent/child task tree that rolls up live (`PROGRESS_TREE_DEMO_FAIL=1` shows error roll-up).
+>
+> When installed from npm, the plugin **registers all three skills automatically** (usage, OSC demo, tree demo) via the skill registry — no separate skill install. Opt out with `{ "options": { "registerSkills": false } }`.
 
 ---
 

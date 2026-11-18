@@ -7,7 +7,8 @@
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { Plugin } from "@opencode/plugin";
+import path from "node:path";
+import { Plugin, Skill } from "@opencode/plugin";
 import { ProgressRpc } from "./rpc.js";
 import { readProgressState, writeDismissal } from "./state.js";
 import { normalizeRefreshMs } from "./tree.js";
@@ -31,6 +32,36 @@ const pluginVersion = (() => {
     return "unknown";
   }
 })();
+
+/** Skills shipped in the package and registered at setup (see plugin/skills/). */
+const PLUGIN_DIR = path.dirname(fileURLToPath(new URL("../package.json", import.meta.url)));
+const PACKAGED_SKILLS = [
+  {
+    id: "progress-tool",
+    name: "Progress Tool Usage",
+    description:
+      "Use the progress-tool MCP correctly — report long-horizon work (research, planning, exploration, refactors, docs) with the fire-and-forget progress tool, structure multi-step plans as a parentId tree, keep entries current between tool calls, and wrap long-running commands with the out-of-band progress-relay at zero token cost",
+  },
+  {
+    id: "osc-demo",
+    name: "OSC 9;4 Demo",
+    description:
+      "Demo OSC 9;4 terminal progress support in progress-tool — run a fake build that streams native OSC 9;4 progress sequences through the out-of-band relay (progress-relay), zero agent tokens",
+  },
+  {
+    id: "tree-demo",
+    name: "Task Tree Demo",
+    description:
+      "Demo nested task trees (parentId roll-up) in progress-tool — run a fake release pipeline with parent, child, and grandchild tasks streaming through the out-of-band relay at zero agent tokens, with an optional failure mode that rolls an error up the tree",
+  },
+];
+
+function loadPackagedSkillBody(id: string): string {
+  // Strip frontmatter: the skill tool adds the Markdown body, and the
+  // directory copies keep frontmatter for repo-local discovery.
+  const raw = readFileSync(path.join(PLUGIN_DIR, "skills", id, "SKILL.md"), "utf8");
+  return raw.replace(/^---\n[\s\S]*?\n---\n/, "").trimStart();
+}
 
 export default Plugin.define({
   id: "opencode-progress",
@@ -70,7 +101,26 @@ export default Plugin.define({
       console.log("[opencode-progress] progress rules injected into system instructions");
     }
 
-    console.log("[opencode-progress] server part loaded");
+    // Ship the usage + demo skills with the package so installing the plugin
+    // installs the skills. Opt out per project with
+    // `{ "options": { "registerSkills": false } }`.
+    if (ctx.options?.registerSkills !== false) {
+      await ctx.skill.transform((editor) => {
+        for (const skill of PACKAGED_SKILLS) {
+          editor.add({
+            id: Skill.ID.make(skill.id),
+            name: Skill.Name.make(skill.name),
+            description: skill.description,
+            path: Skill.Info.fields.path.make(path.join(PLUGIN_DIR, "skills", skill.id, "SKILL.md")),
+            content: loadPackagedSkillBody(skill.id),
+            autoinvoke: true,
+          });
+        }
+      });
+      console.log(`[opencode-progress] v${pluginVersion} registered ${PACKAGED_SKILLS.length} packaged skills`);
+    }
+
+    console.log(`[opencode-progress] server part v${pluginVersion} loaded`);
 
     return () => {
       clearInterval(timer);

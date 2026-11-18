@@ -8,8 +8,8 @@ description: Demo nested task trees (parentId roll-up) in progress-tool — run 
 Run the demo and explain what the viewer sees:
 
 1. Optionally, start the GUI first in a second terminal: `./launch-gui.sh` (from
-   the repository root — this skill lives in `<repo>/.opencode/skills/tree-demo/`,
-   so the repo root is two levels up).
+   the progress-tool repository root — clone it to run the demos; this skill
+   ships both in-repo and packaged with the plugin).
 2. Run the happy path: `bash demo/tree-demo.sh` (works from any directory; set
    `PROGRESS_STATE_PATH` to isolate the state file if needed).
 3. Run the failure mode: `PROGRESS_TREE_DEMO_FAIL=1 bash demo/tree-demo.sh` —

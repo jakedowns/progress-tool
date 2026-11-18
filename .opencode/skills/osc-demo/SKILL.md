@@ -8,8 +8,8 @@ description: Demo OSC 9;4 terminal progress support in progress-tool — run a f
 Run the demo and explain what the viewer sees:
 
 1. Optionally, start the GUI first in a second terminal: `./launch-gui.sh` (from
-   the repository root — this skill lives in `<repo>/.opencode/skills/osc-demo/`,
-   so the repo root is two levels up).
+   the progress-tool repository root — clone it to run the demos; this skill
+   ships both in-repo and packaged with the plugin).
 2. Run the demo: `bash demo/osc-demo.sh` (also works from any directory; set
    `PROGRESS_STATE_PATH` to isolate the state file if needed).
 3. Report the outcome: the fake build emits `OSC 9;4` sequences
