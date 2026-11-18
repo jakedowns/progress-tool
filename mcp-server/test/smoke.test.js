@@ -410,6 +410,75 @@ test('tree-demo failure mode rolls an error up to the parent', () => {
   assert.equal(state['build'].status, 'done');
 });
 
+test('running response nudges the tree for numbered step lists, silently skips plain entries', async () => {
+  const { file } = tempState();
+  const child = spawn(process.execPath, [INDEX], {
+    env: stateEnv(file),
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', (chunk) => (stdout += chunk));
+  child.stderr.on('data', (chunk) => (stderr += chunk));
+
+  const numberedTitle = ['UI polish batch', '1 changelog tab', '2 slider drag', '3 zero parallax'].join('\n');
+  const requests = [
+    { jsonrpc: '2.0', id: 1, method: 'initialize', params: {} },
+    {
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'tools/call',
+      params: {
+        name: 'progress',
+        arguments: {
+          id: 'anti-pattern',
+          status: 'running',
+          title: numberedTitle,
+        },
+      },
+    },
+    {
+      jsonrpc: '2.0',
+      id: 3,
+      method: 'tools/call',
+      params: {
+        name: 'progress',
+        arguments: {
+          id: 'plain-entry',
+          status: 'running',
+          title: 'Compiling SDL2',
+          detail: 'linking libSDL2.a',
+        },
+      },
+    },
+  ];
+
+  for (const request of requests) {
+    child.stdin.write(JSON.stringify(request) + '\n');
+  }
+  child.stdin.end();
+
+  await new Promise((resolve, reject) => {
+    child.on('error', reject);
+    child.on('close', resolve);
+  });
+
+  const responses = stdout
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+
+  assert.equal(stderr, '');
+  const numbered = responses.find((r) => r.id === 2);
+  assert.match(numbered.result.content[0].text, /Tip: a numbered step list inside one entry/);
+  assert.match(numbered.result.content[0].text, /parentId: "anti-pattern"/);
+
+  const plain = responses.find((r) => r.id === 3);
+  assert.doesNotMatch(plain.result.content[0].text, /Tip: a numbered step list/);
+  assert.match(plain.result.content[0].text, /relay --id plain-entry/);
+});
+
 test('MCP handshake exposes the zero-polling contract and relay hint', async () => {
   const { file } = tempState();
   const child = spawn(process.execPath, [INDEX], {
@@ -461,7 +530,7 @@ test('MCP handshake exposes the zero-polling contract and relay hint', async () 
   assert.equal(responses.length, 3);
 
   const init = responses.find((r) => r.id === 1);
-  assert.equal(init.result.serverInfo.version, '2.2.0');
+  assert.equal(init.result.serverInfo.version, '2.3.0');
   assert.match(init.result.instructions, /Never poll, sleep/);
   assert.match(init.result.instructions, /OPENCODE_SESSION_ID/);
   assert.match(init.result.instructions, /line breaks/i);

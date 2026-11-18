@@ -534,13 +534,19 @@ This is exactly what `mcp-server/relay.js` does; it can be ported to any languag
 For harnesses that cannot return per-tool hints, include this in the system prompt:
 
 ```text
+Treat progress as DUAL PURPOSE: a drop-in replacement for todo/
+task-tracking tools (todowrite, TaskCreate) — any multi-step plan
+belongs in this tree — and a relay wrapper for long-running commands.
+
 For ANY long-horizon task — research, planning, codebase exploration,
 multi-file refactors, documentation, long-running shell commands — call
 progress once with status "running" before you start, and keep it current
 while you work: for non-shell work, spend one of your turns between tool
 calls every few steps on a progress update (fresh detail or a 0..1
 progress fraction); use parentId to expose the phase structure
-(plan / implement / verify).
+(plan / implement / verify). For multi-step plans, create one child
+entry per step (parentId = the parent task) instead of embedding a
+numbered list in one title/detail.
 
 For long-running shell commands, attach the out-of-band relay instead of
 waiting on the command:

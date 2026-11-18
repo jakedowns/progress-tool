@@ -165,6 +165,50 @@ export function countActive(nodes: readonly TreeNode[]): number {
   return flattenTree(nodes).filter((node) => node.status === "running" || node.status === "waiting").length;
 }
 
+/**
+ * Per-root dismissal snapshot for views that let users hide a task tree.
+ *
+ * Revival semantics, scoped to the dismissed task itself:
+ * - A direct re-report of the task's own id (fresh milestone or lifecycle
+ *   restart) always revives it: `reportedAt` moves past the snapshot.
+ * - A non-terminal dismissal (running/waiting) also revives when the
+ *   rolled-up status changes (waiting/done/error, or a new child flips it).
+ * - A terminal dismissal (done/error) stays hidden through child activity —
+ *   appended children flipping the parent's rolled-up status do NOT revive
+ *   it — with one carve-out: a child failing (rolled-up status becomes
+ *   "error") still revives a done-dismissed tree, because a failure must
+ *   not silently scroll away. An error-dismissed tree revives only on a
+ *   direct re-report.
+ * - Sibling roots and unrelated updates never revive anything.
+ */
+export type Dismissal = { status: string; at: number };
+
+export function isDismissed(root: TreeNode, map: Record<string, Dismissal>): boolean {
+  const d = map[root.key];
+  if (!d) return false;
+  // The task itself was re-reported (new milestone or fresh lifecycle).
+  if ((root.reportedAt ?? 0) > d.at) return false;
+  const wasTerminal = d.status === "done" || d.status === "error";
+  // Non-terminal: any rolled-up status change revives. Terminal: only a
+  // failure appearing in the subtree revives a done-dismissed tree.
+  if (!wasTerminal || root.status === "error") {
+    if ((root.status ?? "") !== d.status) return false;
+  }
+  return true;
+}
+
+/** Snapshot every given root for "Dismiss all". */
+export function dismissalsFor(
+  roots: readonly TreeNode[],
+  prev: Record<string, Dismissal>
+): Record<string, Dismissal> {
+  const next = { ...prev };
+  for (const root of roots) {
+    next[root.key] = { status: root.status ?? "", at: root.reportedAt ?? 0 };
+  }
+  return next;
+}
+
 export type BarStyle = "blocks" | "emoji";
 
 export interface BarOptions {

@@ -13,7 +13,9 @@ import {
   buildTree,
   barParts,
   countActive,
+  dismissalsFor,
   flattenTreeWithDepth,
+  isDismissed,
   normalizeBarOptions,
   normalizeProgressText,
   normalizeRefreshMs,
@@ -224,38 +226,13 @@ function rowFor(node: TreeNode, depth: number, options: BarOptions) {
   };
 }
 
-/** Per-root dismissal snapshot: hidden until the task itself is re-reported or its rolled-up status changes. */
-function isDismissed(root: TreeNode, map: Record<string, { status: string; at: number }>): boolean {
-  const d = map[root.key];
-  if (!d) return false;
-  // The agent re-reported this task itself (new milestone or fresh lifecycle).
-  if ((root.reportedAt ?? 0) > d.at) return false;
-  // Its rolled-up status changed (waiting/done/error, or a new child flipped it).
-  if ((root.status ?? "") !== d.status) return false;
-  return true;
-}
-
-/** Snapshot every given root for "Dismiss all". */
-function dismissalsFor(
-  roots: readonly TreeNode[],
-  prev: Record<string, { status: string; at: number }>
-): Record<string, { status: string; at: number }> {
-  const next = { ...prev };
-  for (const root of roots) {
-    next[root.key] = { status: root.status ?? "", at: root.reportedAt ?? 0 };
-  }
-  return next;
-}
-
 export default Plugin.define({
   setup(ctx) {
     const [state, setState] = createSignal<GuiState>({ entries: {}, loaded: false });
-    // Dismissal is per root task and scoped to that task itself:
-    //   - Hidden through telemetry ticks (a relay bumps child updatedAt up to
-    //     4x/second) and through sibling/other-root activity.
-    //   - Revives only when the task itself is re-reported by the agent
-    //     (stored reportedAt bumps past the dismissal snapshot) or when its
-    //     rolled-up status changes (waiting/done/error, new child, restart).
+    // Dismissal is per root task and scoped to that task itself; the revival
+    // semantics (re-report always revives, non-terminal status changes revive,
+    // terminal dismissals only revive on failure or re-report) live in
+    // tree.ts's isDismissed, shared and unit-tested.
     const [dismissed, setDismissed] = createSignal<Record<string, { status: string; at: number }>>({});
     const options = normalizeBarOptions(ctx.options);
     const visibility = normalizeVisibilityOptions(ctx.options);

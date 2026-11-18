@@ -38,10 +38,14 @@ const {
   ensureStateFile,
 } = require('./state-store');
 
-const SERVER_VERSION = '2.2.0';
+const SERVER_VERSION = '2.3.0';
 const VALID_STATUSES = ['running', 'waiting', 'done', 'error'];
 
 const SERVER_INSTRUCTIONS = [
+  'The `progress` tool is DUAL PURPOSE: a drop-in replacement for',
+  'todo/task-tracking tools (todowrite / TaskCreate) for any multi-step',
+  'plan, and a wrapper (progress-relay) for long-running programmatic',
+  'commands that report progress on stdout.',
   'The `progress` tool is fire-and-forget. Call it at task milestones:',
   'once when a phase starts (status "running"), once when a child task is',
   'created (parentId), and once when a phase finishes ("done" or "error").',
@@ -51,10 +55,13 @@ const SERVER_INSTRUCTIONS = [
   'start or finish a step — on a progress update (fresh detail or a 0..1',
   'progress fraction); that todowrite-style between-turn cadence keeps the',
   'summary rollup live. Report ANY long-horizon work this way, not just',
-  'shell commands. Never poll, sleep, or loop on terminal output or timers',
-  'to refresh elapsed time or percentages — the relay streams telemetry at',
-  'zero token cost. For long-running shell commands, use the out-of-band',
-  'relay printed in the tool response (for example',
+  'shell commands. For multi-step plans, expose the steps in the tree — one',
+  'child entry per step (parentId = the parent task) — instead of embedding',
+  'a numbered list inside one title/detail, so each step gets its own',
+  'status/progress in the rollup. Never poll, sleep, or loop on terminal',
+  'output or timers to refresh elapsed time or percentages — the relay',
+  'streams telemetry at zero token cost. For long-running shell commands,',
+  'use the out-of-band relay printed in the tool response (for example',
   '`progress-relay --id <id> -- <cmd>`). The relay parses OSC 9;4 terminal',
   'progress sequences natively before text heuristics like "45%". Pass',
   'parentId to build a tree;',
@@ -71,6 +78,10 @@ const SERVER_INSTRUCTIONS = [
 const TOOL_DESCRIPTION = [
   'Report non-blocking task progress and dependency trees to the user\'s GUI. Fire-and-forget: never pauses execution or waits for human input.',
   '',
+  'DUAL PURPOSE:',
+  '(1) Use this tool INSTEAD of todo/task-tracking tools (todowrite / TaskCreate): any multi-step plan belongs in this tree, where it also drives the live indicator.',
+  '(2) Use the out-of-band relay (progress-relay) to WRAP long-running programmatic tool calls — build scripts, compilers, test suites, installs, anything that reports progress on stdout — so telemetry streams at zero token cost.',
+  '',
   'OWNERSHIP & ZERO-POLLING CONTRACT:',
   '- You own TASK MILESTONES and TREE STRUCTURE: call this tool when starting a phase (status: "running"), when creating child sub-tasks (parentId), and when a phase finishes (status: "done" | "error"). For long-horizon NON-SHELL work (research, planning, exploration, refactors, documentation) there is no relay, so also spend one of your turns between tool calls every few steps on a progress update (fresh detail or a 0..1 progress fraction) — todowrite-style cadence keeps the rollup live. Cover ANY long-horizon work, not just shell commands; anything past a couple of minutes or a single reply deserves an entry.',
   '- NEVER poll, sleep, or loop on terminal output just to refresh progress percentages or elapsed time.',
@@ -78,6 +89,7 @@ const TOOL_DESCRIPTION = [
   '',
   'TREE ROLLUP (BOOTVINE SEMANTICS):',
   '- Pass `parentId` to nest sub-tasks under a parent task.',
+  '- Multi-step plans belong in the TREE: one child entry per step (parentId = the parent task id) so each step gets its own status/progress. Do NOT embed numbered step lists in one title/detail — the rollup cannot see individual steps inside text.',
   '- Parent status and progress automatically roll up from children (any child "error" -> parent "error"; any child "running"/"waiting" -> parent "running"/"waiting"; parent progress = mean of child progress).',
   '',
   'SESSION ISOLATION:',
@@ -312,6 +324,22 @@ function handleProgressCall(id, args) {
   let text = parts.join(' - ');
   if (entry.status === 'running') {
     text += relayHint(entry.id, entry.parentId, entry.sessionId);
+
+    // Anti-pattern nudge (self-teaching at the decision point, spec §2.5):
+    // a numbered step list embedded in one title/detail cannot express
+    // per-step status or progress. Suggest the tree instead. Heuristic:
+    // three or more lines starting with a small ordinal number.
+    const enumerated = `${entry.title ?? ''}\n${entry.detail ?? ''}`.match(
+      /(?:^|\n)\s*\d{1,2}[.)?:]?\s+\S/g
+    );
+    if ((enumerated?.length ?? 0) >= 3) {
+      text += [
+        '',
+        'Tip: a numbered step list inside one entry cannot show per-step status or progress.',
+        `  Prefer the tree: one child entry per step — progress({ id: "${entry.id}-step-1", status: "running", title: "<step>", parentId: "${entry.id}" })`,
+        '  — and update each child as you go; the parent rolls up automatically.',
+      ].join('\n');
+    }
   }
 
   toolOk(id, text);

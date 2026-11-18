@@ -1,6 +1,6 @@
 {
   "name": "opencode-progress-plugin",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "description": "OpenCode plugin: native progress indicators for the TUI and desktop GUI (progress tool + out-of-band relay)",
   "type": "module",
   "exports": {
@@ -15,7 +15,8 @@
   ],
   "scripts": {
     "build": "vite build",
-    "dev": "vite build --watch"
+    "dev": "vite build --watch",
+    "test": "node --test test/"
   },
   "dependencies": {
     "@opencode/plugin": "^2.3.0"
