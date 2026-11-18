@@ -451,9 +451,9 @@ export default Plugin.define({
         const parts = barParts(top.progress, options);
         const topTitle = oneLineText(top.title);
 
-        // Multi-root pill: "(N · agg%)" — root count plus the mean of root
-        // progress values (roll-up mean, nulls ignored; omitted when no root
-        // has a numeric progress). The latest root is shown first.
+        // Multi-root pill: "(N · agg%) Title" — the count is a PREFIX so it
+        // survives the capsule's ellipsis truncation (long task titles get
+        // cut from the end, which used to hide the suffix).
         const rootProgresses = visibleRoots
           .map((root) => root.progress)
           .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
@@ -461,17 +461,17 @@ export default Plugin.define({
           visibleRoots.length > 1 && rootProgresses.length > 0
             ? progressLabel(rootProgresses.reduce((a, b) => a + b, 0) / rootProgresses.length)
             : null;
-        const pillSuffix =
+        const pillPrefix =
           visibleRoots.length > 1
-            ? ` (${visibleRoots.length}${aggregatePct ? ` · ${aggregatePct}` : ""})`
+            ? `(${visibleRoots.length}${aggregatePct ? ` · ${aggregatePct}` : ""}) `
             : "";
 
         const label =
           parts.style === "emoji"
-            ? `${topTitle}: ${parts.bar}${parts.fraction}${pillSuffix}`
+            ? `${pillPrefix}${topTitle}: ${parts.bar}${parts.fraction}`
             : active > 0
-              ? `${topTitle}${topPct ? ` ${topPct}` : ""}${pillSuffix}`
-              : `${topTitle}${pillSuffix}`;
+              ? `${pillPrefix}${topTitle}${topPct ? ` ${topPct}` : ""}`
+              : `${pillPrefix}${topTitle}`;
 
         return {
           label,

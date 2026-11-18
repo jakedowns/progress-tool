@@ -28,6 +28,14 @@ exploration, multi-file refactors, documentation.
   whenever you start or finish a step — on an update (fresh `detail`, a
   `progress: 0.0–1.0` fraction, or a status change). This todowrite-style
   cadence keeps the summary rollup live.
+- **Re-arm:** when your current tree is `done` and new work begins, open a
+  **fresh tree**. And if you have already made 2+ consecutive edits or shell
+  calls on one task with no active entry, that **is** multi-step work —
+  start a tree now (never too late: record what is done and what remains).
+- **Steering is work:** when the user redirects you mid-flight while a tree
+  is in progress, record the steer as a child entry — one line summarizing
+  the ask plus what you plan to do in reaction — and update it as you
+  respond. The user should see their steer land in the rollup.
 - **Close:** end with `status: "done"` or `"error"`. **Close what you open** —
   an abandoned `running` entry is a zombie the user has to dismiss by hand.
 - Statuses are exactly `running | waiting | done | error` (use `waiting` for

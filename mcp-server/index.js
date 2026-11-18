@@ -36,7 +36,29 @@ const path = require('path');
 const {
   upsertProgress,
   ensureStateFile,
+  readState,
+  resolveStatePath,
 } = require('./state-store');
+
+// First-offense tracking for the anti-pattern error result. The MCP server
+// is spawned per session, so an in-memory Map is enough: the first call
+// that embeds an enumerated step list gets an isError result (the strongest
+// self-correction lever a tool has), later ones fall back to the text tip.
+const nudgeStrikes = new Map();
+
+/**
+ * Whether any entry in the shared tree already nests under `parentId` —
+ * i.e. the agent partially restructured into the tree, in which case we
+ * soften to a text tip instead of an error result.
+ */
+function treeHasChildren(parentId) {
+  try {
+    const entries = readState(resolveStatePath()).entries || {};
+    return Object.values(entries).some((e) => e && e.parentId === parentId);
+  } catch (e) {
+    return false;
+  }
+}
 
 const SERVER_VERSION = '2.3.0';
 const VALID_STATUSES = ['running', 'waiting', 'done', 'error'];
