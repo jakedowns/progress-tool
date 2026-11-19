@@ -117,6 +117,14 @@ function MenuRow(props: {
 
   return (
     <div
+      onClick={(event: MouseEvent) => {
+        if (!props.hasChildren) return;
+        // Do not hijack text selection drags.
+        const selected = window.getSelection?.()?.toString();
+        if (selected) return;
+        event.preventDefault();
+        props.onToggle?.();
+      }}
       style={{
         display: "flex",
         "align-items": "flex-start",
@@ -124,30 +132,24 @@ function MenuRow(props: {
         "padding-left": `${props.depth * 14}px`,
         "padding-top": "5px",
         "padding-bottom": "5px",
+        cursor: props.hasChildren ? "pointer" : "default",
       }}
     >
       <Show when={props.hasChildren}>
-        <button
-          type="button"
-          aria-label={props.collapsed ? "Expand" : "Collapse"}
-          title={props.collapsed ? "Expand" : "Collapse"}
-          onClick={() => props.onToggle?.()}
+        <span
+          aria-hidden="true"
           style={{
             flex: "0 0 auto",
-            border: "none",
-            background: "transparent",
-            color: "inherit",
             opacity: "0.6",
             "font-size": "11px",
             width: "14px",
             "margin-top": "4px",
-            padding: "0",
-            cursor: "pointer",
+            "user-select": "none",
             "line-height": "1",
           }}
         >
           {props.collapsed ? "▸" : "▾"}
-        </button>
+        </span>
       </Show>
       <div
         style={{
@@ -223,7 +225,10 @@ function MenuRow(props: {
           type="button"
           title="Dismiss"
           aria-label="Dismiss"
-          onClick={() => props.onDismiss?.()}
+          onClick={(event: MouseEvent) => {
+            event.stopPropagation();
+            props.onDismiss?.();
+          }}
           style={{
             flex: "0 0 auto",
             border: "1px solid rgba(127,127,127,0.35)",
