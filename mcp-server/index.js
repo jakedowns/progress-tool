@@ -61,7 +61,7 @@ function treeHasChildren(parentId) {
   }
 }
 
-const SERVER_VERSION = '2.6.1';
+const SERVER_VERSION = '2.6.2';
 const VALID_STATUSES = ['running', 'waiting', 'done', 'error'];
 
 const SERVER_INSTRUCTIONS = [
@@ -114,7 +114,7 @@ const TOOL_DESCRIPTION = [
   '',
   'TREE ROLLUP (BOOTVINE SEMANTICS):',
   '- Pass `parentId` to nest sub-tasks under a parent task.',
-  '- Multi-step plans belong in the TREE: one child entry per step (parentId = the parent task id) so each step gets its own status/progress. Do NOT embed numbered step lists in one title/detail — the rollup cannot see individual steps inside text.',
+  '- Multi-step plans belong in the TREE, created in ONE bulk call: pass `entries: [{ id: "<plan>", status: "running", title: "<plan>" }, { id: "<plan>-step-1", status: "running", title: "<step 1>", parentId: "<plan>" }, …]` (max 50). One child entry per step so each gets its own status/progress. Do NOT embed numbered step lists in one title/detail — the rollup cannot see individual steps inside text.',
   '- Parent status and progress automatically roll up from children (any child "error" -> parent "error"; any child "running"/"waiting" -> parent "running"/"waiting"; parent progress = mean of child progress).',
   '',
   'SESSION ISOLATION:',
@@ -407,9 +407,13 @@ function handleProgressCall(id, args) {
           id,
           [
             `INVALID USAGE — this entry embeds a numbered step list (${enumerated.length} items), which cannot show per-step status or progress in the rollup. The update WAS recorded; nothing is lost.`,
-            `Resubmit the plan as child entries so each step gets its own status:`,
-            `  progress({ id: "${entry.id}-step-1", status: "running", title: "<step>", parentId: "${entry.id}" })`,
-            `Create one child per step up front, keep them current as you work (mark a child done, start the next), and strip the numbered list from this entry's title/detail. The parent rolls up automatically.`,
+            `Resubmit the WHOLE plan in one bulk call so each step gets its own status:`,
+            `  progress({ entries: [`,
+            `    { id: "${entry.id}", status: "running", title: "<plan>" },`,
+            `    { id: "${entry.id}-step-1", status: "running", title: "<step 1>", parentId: "${entry.id}" },`,
+            `    { id: "${entry.id}-step-2", status: "waiting", title: "<step 2>", parentId: "${entry.id}" }`,
+            `  ] })`,
+            `Then keep children current as you work (mark a child done, start the next) and strip the numbered list from this entry's title/detail. The parent rolls up automatically.`,
             `Load the progress-tool skill for the full pattern.`,
           ].join('\n')
         );
@@ -419,7 +423,7 @@ function handleProgressCall(id, args) {
       text += [
         '',
         'Tip: a numbered step list inside one entry cannot show per-step status or progress.',
-        `  Prefer the tree: one child entry per step — progress({ id: "${entry.id}-step-1", status: "running", title: "<step>", parentId: "${entry.id}" })`,
+        `  Prefer the tree, in ONE bulk call — progress({ entries: [{ id: "${entry.id}", status: "running", title: "<plan>" }, { id: "${entry.id}-step-1", status: "running", title: "<step>", parentId: "${entry.id}" }, …] })`,
         '  — and update each child as you go; the parent rolls up automatically.',
       ].join('\n');
     }
