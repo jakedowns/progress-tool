@@ -7,7 +7,7 @@
  */
 
 import { ComposerPill, Plugin } from "@opencode/plugin/gui";
-import { For, Index, Show, createSignal } from "solid-js";
+import { For, Index, Show, createEffect, createSignal } from "solid-js";
 import pkg from "../package.json";
 import { ProgressRpc } from "./rpc.js";
 import {
@@ -15,6 +15,9 @@ import {
   barParts,
   countActive,
   flattenTreeWithDepth,
+  visibleRows,
+  countDescendants,
+  summarizeEntries,
   isDismissed,
   normalizeBarOptions,
   normalizeProgressText,
@@ -104,6 +107,9 @@ function MenuRow(props: {
   depth: number;
   options: BarOptions;
   onDismiss?: () => void;
+  hasChildren?: boolean;
+  collapsed?: boolean;
+  onToggle?: () => void;
 }) {
   const pct = () => progressLabel(props.node.progress);
   const parts = () => barParts(props.node.progress, props.options);
@@ -119,6 +125,29 @@ function MenuRow(props: {
         "padding-bottom": "5px",
       }}
     >
+      <Show when={props.hasChildren}>
+        <button
+          type="button"
+          aria-label={props.collapsed ? "Expand" : "Collapse"}
+          title={props.collapsed ? "Expand" : "Collapse"}
+          onClick={() => props.onToggle?.()}
+          style={{
+            flex: "0 0 auto",
+            border: "none",
+            background: "transparent",
+            color: "inherit",
+            opacity: "0.6",
+            "font-size": "11px",
+            width: "14px",
+            "margin-top": "4px",
+            padding: "0",
+            cursor: "pointer",
+            "line-height": "1",
+          }}
+        >
+          {props.collapsed ? "▸" : "▾"}
+        </button>
+      </Show>
       <div
         style={{
           width: "8px",
@@ -171,6 +200,12 @@ function MenuRow(props: {
           </span>
           <Show when={pct()}>
             <span>{pct()}</span>
+          </Show>
+          <Show when={props.collapsed && props.node.children.length > 0}>
+            <span>
+              {countDescendants(props.node)} descendant
+              {countDescendants(props.node) === 1 ? "" : "s"}
+            </span>
           </Show>
           <Show when={props.node.startedAt}>
             <span
@@ -341,10 +376,28 @@ export default Plugin.define({
         const roots = buildTree(visibleEntries(scoped(), Date.now(), visibility));
         return roots.filter((root) => !isDismissed(root, dismissedMap()));
       };
-      const rows = () => flattenTreeWithDepth(visibleRoots());
+      const [collapsedRoots, setCollapsedRoots] = createSignal<Record<string, boolean>>({});
+      const rows = () => visibleRows(visibleRoots(), collapsedRoots());
+
+      // Our own scroll container: <For> rebuilds row DOM when the tree
+      // changes (e.g. after a dismiss), which resets scrollTop. Track the
+      // user's position and restore it after each re-render.
+      let listEl: HTMLDivElement | undefined;
+      let scrollTop = 0;
+      createEffect(() => {
+        rows();
+        const target = scrollTop;
+        queueMicrotask(() => {
+          if (listEl && listEl.scrollTop !== target) listEl.scrollTop = target;
+        });
+      });
 
       return (
         <div
+          ref={(el) => (listEl = el)}
+          onScroll={(event) => {
+            scrollTop = event.currentTarget.scrollTop;
+          }}
           style={{
             display: "flex",
             "flex-direction": "column",
@@ -371,6 +424,11 @@ export default Plugin.define({
                   node={node}
                   depth={depth}
                   options={options}
+                  hasChildren={depth === 0 && node.children.length > 0}
+                  collapsed={Boolean(collapsedRoots()[node.key])}
+                  onToggle={() =>
+                    setCollapsedRoots((prev) => ({ ...prev, [node.key]: !prev[node.key] }))
+                  }
                   onDismiss={
                     depth === 0
                       ? () => dismissKey(props.session, node.key, node.status ?? "")
@@ -476,7 +534,16 @@ export default Plugin.define({
 
         return {
           label,
-          title: `${active > 0 ? `${active} active task${active === 1 ? "" : "s"}` : "Agent progress"}`,
+          // Headline counts include descendants (the store, not just roots):
+          // "4 active · 3 done · 2 dismissed".
+          title: (() => {
+            const summary = summarizeEntries(scoped);
+            const parts: string[] = [];
+            if (summary.active > 0) parts.push(`${summary.active} active`);
+            if (summary.done > 0) parts.push(`${summary.done} done`);
+            if (summary.dismissed > 0) parts.push(`${summary.dismissed} dismissed`);
+            return parts.length > 0 ? parts.join(" · ") : "Agent progress";
+          })(),
           rows: [
             ...flattenTreeWithDepth(visibleRoots)
               .slice(0, 7)

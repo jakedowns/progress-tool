@@ -29,6 +29,9 @@ const {
   isDismissed,
   dismissalsFor,
   visibleEntries,
+  visibleRows,
+  countDescendants,
+  summarizeEntries,
 } = require(path.join(OUT, 'tree.cjs'));
 execFileSync(
   path.join(ROOT, 'node_modules', '.bin', 'esbuild'),
@@ -156,6 +159,30 @@ test('visibleEntries: done entries stay visible by default unless autoHideDone',
     'autoHideDone respects an explicit hold window'
   );
   assert.ok(!visibleEntries(entries, now, { showDone: false })['old'], 'showDone false still hides everything');
+});
+
+
+test('visibleRows, countDescendants, summarizeEntries', () => {
+  const [, roots] = makeTreeFind([
+    ROOT_ENTRY({ id: 'root', title: 'Root' }),
+    { id: 'c1', status: 'running', title: 'C1', parentId: 'root', updatedAt: 1000 },
+    { id: 'c2', status: 'done', title: 'C2', parentId: 'c1', updatedAt: 1000 },
+    { id: 'other', status: 'done', title: 'Other', updatedAt: 1000 },
+  ]);
+  const root = roots.find((r) => r.id === 'root');
+  assert.equal(visibleRows(roots, {}).length, 4, 'expanded shows all rows');
+  const collapsed = visibleRows(roots, { [root.key]: true });
+  assert.equal(collapsed.filter((row) => row.depth > 0).length, 0, 'collapsed hides descendants only');
+  assert.equal(collapsed.length, 2, 'collapsed root + other root remain');
+  assert.equal(countDescendants(root), 2);
+
+  const summary = summarizeEntries({
+    a: { status: 'running' },
+    b: { status: 'waiting' },
+    c: { status: 'done' },
+    d: { status: 'done', dismissed: { status: 'done', at: 1 } },
+  });
+  assert.deepEqual(summary, { active: 2, done: 2, dismissed: 1 });
 });
 
 test('buildTree carries the persisted dismissed field through to nodes', () => {

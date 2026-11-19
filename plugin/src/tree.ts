@@ -161,6 +161,56 @@ export function flattenTreeWithDepth(
   return out;
 }
 
+/**
+ * Rows for a collapsible tree view: every root is always shown; a root's
+ * descendants are included unless that root is in `collapsed`. Collapsing is
+ * top-level only (descendants have no independent toggle), which keeps the
+ * menu readable on long trees without a nested state model.
+ */
+export function visibleRows(
+  roots: readonly TreeNode[],
+  collapsed: Record<string, boolean>
+): Array<{ node: TreeNode; depth: number }> {
+  const out: Array<{ node: TreeNode; depth: number }> = [];
+  for (const root of roots) {
+    out.push({ node: root, depth: 0 });
+    if (!collapsed[root.key]) {
+      out.push(...flattenTreeWithDepth(root.children, 1));
+    }
+  }
+  return out;
+}
+
+/** How many descendants (all depths) a node has. */
+export function countDescendants(node: Pick<TreeNode, "children">): number {
+  return (node.children ?? []).reduce(
+    (total, child) => total + 1 + countDescendants(child),
+    0
+  );
+}
+
+/**
+ * Headline counts for the pill: active (running/waiting), done, and dismissed.
+ * Computed over the session-scoped entry set, before view filtering, so the
+ * numbers describe the store rather than the current visibility.
+ */
+export function summarizeEntries(entries: Record<string, ProgressEntry>): {
+  active: number;
+  done: number;
+  dismissed: number;
+} {
+  let active = 0;
+  let done = 0;
+  let dismissed = 0;
+  for (const entry of Object.values(entries)) {
+    if (!entry || typeof entry !== "object") continue;
+    if (entry.status === "running" || entry.status === "waiting") active++;
+    if (entry.status === "done") done++;
+    if (entry.dismissed) dismissed++;
+  }
+  return { active, done, dismissed };
+}
+
 export function countActive(nodes: readonly TreeNode[]): number {
   return flattenTree(nodes).filter((node) => node.status === "running" || node.status === "waiting").length;
 }
