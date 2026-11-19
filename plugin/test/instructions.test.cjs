@@ -1,0 +1,47 @@
+/**
+ * Guard: the injected rules module must parse and produce a usable string.
+ *
+ * This exists because an unescaped backtick inside PROGRESS_RULES (a template
+ * literal) once broke the whole plugin server part at load: tool descriptions
+ * stayed stale, the RPC went dark, and the GUI logged rpc timeouts.
+ */
+
+'use strict';
+
+const assert = require('node:assert');
+const { execFileSync } = require('node:child_process');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const test = require('node:test');
+
+const ROOT = path.join(__dirname, '..');
+const OUT = path.join(os.tmpdir(), `progress-instructions-test-${process.pid}`);
+fs.mkdirSync(OUT, { recursive: true });
+execFileSync(
+  path.join(ROOT, 'node_modules', '.bin', 'esbuild'),
+  [path.join(ROOT, 'src', 'instructions.ts'), '--bundle', '--format=cjs', '--platform=node', `--outfile=${path.join(OUT, 'instructions.cjs')}`],
+  { stdio: 'pipe' }
+);
+const { PROGRESS_RULES, instructionsEnabled } = require(path.join(OUT, 'instructions.cjs'));
+
+test('PROGRESS_RULES is a single non-empty string (no stray template delimiters)', () => {
+  assert.equal(typeof PROGRESS_RULES, 'string');
+  assert.ok(PROGRESS_RULES.length > 500, 'rules should be substantive');
+  assert.doesNotMatch(PROGRESS_RULES, /undefined/, 'no interpolated undefined values');
+});
+
+test('rules keep the core contracts', () => {
+  assert.match(PROGRESS_RULES, /DUAL PURPOSE/);
+  assert.match(PROGRESS_RULES, /progress-relay/);
+  assert.match(PROGRESS_RULES, /NEVER poll/);
+  assert.match(PROGRESS_RULES, /Steering is work/);
+  assert.match(PROGRESS_RULES, /RE-ARM/);
+  assert.match(PROGRESS_RULES, /Delegate independent work/);
+  assert.match(PROGRESS_RULES, /Why this tool exists/);
+});
+
+test('instructionsEnabled defaults on and can be disabled', () => {
+  assert.equal(instructionsEnabled({}), true);
+  assert.equal(instructionsEnabled({ injectInstructions: false }), false);
+});
