@@ -6,7 +6,7 @@ A non-blocking twin of `question` so coding agents can signal long-running work 
 
 Implements the [Agent Progress Tool proposal](https://gist.github.com/jakedowns/ddc4eb4817184a074c82c61dc6e7228c) for OpenCode 2, and is written as a portable reference implementation that any model, agent, or harness can copy, adapt, or train on.
 
-**Versions:** MCP server `2.6.1` · OpenCode plugin `2.10.1`
+**Versions:** MCP server `2.6.2` · OpenCode plugin `2.11.0`
 
 > [!IMPORTANT]
 > **No `AGENTS.md` edits required.** The bundled OpenCode plugin injects the progress & relay rules directly into every session's system instructions, and the MCP `progress` tool response reinforces them at the exact moment an agent starts a task — so agents know to wrap long-running commands with `progress-relay` *before* their first build, not after. Progress reporting works without any prompt engineering.
@@ -494,6 +494,12 @@ The plugin at `plugin/` targets the OpenCode **V2** plugin API and exposes four 
      `[did the user's message just change your workload? update your task list!]`
      to every user message (via the prompt hook). **Default `false`** — it
      edits user input text, so it is strictly opt-in.
+   - `verboseLogging`: set to `true` to record every nudge the plugin injects
+     as JSONL in `~/.opencode-progress-nudges.log` (override the path with
+     `PROGRESS_NUDGE_LOG`). Events: `config`, `strict` (silent-run / forced /
+     stale-progress), `wall-clock`, `idle-reminder`, `child-list-error`
+     (detected from the tool result), `unhinged`. **Default `false`**.
+     Example: `grep -c '"event":"wall-clock"' ~/.opencode-progress-nudges.log`.
 
    Running and waiting tasks stay visible. Errors stay visible until dismissed or updated on
    purpose, so a failure cannot silently scroll away. Completed tasks stay visible too unless

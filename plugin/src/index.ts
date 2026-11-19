@@ -26,6 +26,7 @@ import {
   type IdleTracker,
   type WallClockState,
 } from "./monitor.js";
+import { logNudge, nudgeLoggingEnabled } from "./telemetry.js";
 
 /**
  * The plugin's own version, read at runtime so a running server part can be
@@ -142,6 +143,7 @@ export default Plugin.define({
         ? ctx.options.strictThreshold
         : 3;
     const monitors = new Map<string, MonitorState>();
+    const verbose = nudgeLoggingEnabled(ctx.options);
     const lastSeenProgress = new Map<string, number>();
     const NUDGE_KEY = 'progress-nudge';
     let promptReminderHook: Awaited<ReturnType<typeof ctx.session.hook>> | undefined;
@@ -195,6 +197,22 @@ export default Plugin.define({
           if (step.action === 'clear') monitor.nudged = false;
           monitors.set(event.sessionID, monitor);
 
+          if (verbose && step.action !== 'none' && step.action !== 'clear') {
+            logNudge({
+              event: 'strict',
+              action: step.action,
+              sessionID: event.sessionID,
+              count: step.count,
+              callsSinceProgress: step.callsSinceProgress,
+            });
+          }
+          if (verbose && event.status === 'completed') {
+            const resultText = JSON.stringify(event.result ?? '');
+            if (resultText.includes('INVALID USAGE')) {
+              logNudge({ event: 'child-list-error', sessionID: event.sessionID, tool: event.tool });
+            }
+          }
+
           const text =
             step.action === 'stale-nudge'
               ? staleProgressNudge(step.callsSinceProgress)
@@ -220,6 +238,9 @@ export default Plugin.define({
         }
       });
       console.log(`[opencode-progress] v${pluginVersion} strict mode: ${strictMode} (threshold ${strictThreshold})`);
+    if (verbose) {
+      logNudge({ event: "config", strictMode, strictThreshold, wallClockMs: normalizeWallClockMs(ctx.options), idleReminder: ctx.options?.idleReminder !== false, unhinged: ctx.options?.unhinged === true });
+    }
     }
 
     // Idle reminder: at turn end (session about to go idle) with open,
@@ -244,6 +265,9 @@ export default Plugin.define({
           });
           if (decision.action !== 'remind' || !decision.message) return;
           console.log(`[opencode-progress] v${pluginVersion} idle reminder (${decision.count}) for ${event.sessionID}`);
+          if (verbose) {
+            logNudge({ event: 'idle-reminder', sessionID: event.sessionID, count: decision.count, openEntries: decision.signature.split(' | ').filter(Boolean).length });
+          }
           await ctx.session.synthetic({ sessionID: event.sessionID, text: decision.message });
         } catch (error) {
           console.error('[opencode-progress] idle reminder failed', String(error));
@@ -257,6 +281,7 @@ export default Plugin.define({
     if (ctx.options?.unhinged === true) {
       const promptHook = await ctx.session.hook('prompt', (event) => {
         event.prompt.text = `${event.prompt.text}\n\n[did the user's message just change your workload? update your task list!]`;
+        if (verbose) logNudge({ event: 'unhinged', sessionID: (event as { sessionID?: string }).sessionID });
       });
       promptReminderHook = promptHook;
       console.log(`[opencode-progress] v${pluginVersion} unhinged mode: prompt suffix enabled`);
@@ -298,6 +323,9 @@ export default Plugin.define({
 
             if (decision.action === 'remind' && decision.message) {
               console.log(`[opencode-progress] v${pluginVersion} wall-clock nudge for ${sessionID}`);
+              if (verbose) {
+                logNudge({ event: 'wall-clock', sessionID, ageMinutes: Math.round((now - lastProgressAt) / 60000), activeEntries: sessionEntries.filter((e) => e.status === 'running' || e.status === 'waiting').length });
+              }
               void ctx.session.instructions.entry
                 .put({ sessionID, key: WALL_KEY, value: decision.message })
                 .catch(() => {});

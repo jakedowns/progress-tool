@@ -207,7 +207,7 @@ export function idleReminder(
   const now = options.now ?? Date.now();
   // Relay-driven tasks tick several times per second; only entries nobody is
   // writing to deserve an idle nag. Unknown timestamps count as stale.
-  const staleAfterMs = options.staleAfterMs ?? 60_000;
+  const staleAfterMs = options.staleAfterMs ?? 5 * 60_000;
 
   const open = entries
     .filter(
