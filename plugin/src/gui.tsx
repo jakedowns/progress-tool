@@ -137,7 +137,7 @@ function MenuRow(props: {
             "overflow-wrap": "anywhere",
             "word-break": "break-word",
           }}
-          title={props.node.title}
+          title={`${props.node.status}: ${oneLineText(props.node.title)}`}
         >
           <Multiline text={props.node.title} />
         </div>
@@ -151,7 +151,7 @@ function MenuRow(props: {
               "overflow-wrap": "anywhere",
               "word-break": "break-word",
             }}
-            title={props.node.detail ?? ""}
+            title={props.node.detail ? `${props.node.status}: ${oneLineText(props.node.detail)}` : ""}
           >
             <Multiline text={props.node.detail ?? ""} />
           </div>

@@ -171,7 +171,8 @@ const LONG_COMMAND_RE =
  */
 export function relayHintFor(command: string | null | undefined): string | null {
   if (!command || typeof command !== "string") return null;
-  if (/progress-relay|progress-emit/.test(command)) return null;
+  // Already relayed: the bin/alias, or the bundled invocation path.
+  if (/progress-relay|progress-emit|index\.js\s+relay\b/.test(command)) return null;
   // Git operations are fast; their commit messages often mention test/build
   // commands in prose, which must not trigger a relay hint.
   if (/^\s*git\b/.test(command)) return null;

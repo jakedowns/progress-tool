@@ -70,6 +70,12 @@ const PACKAGED_SKILLS = [
     description:
       "Demo nested task trees (parentId roll-up) in progress-tool — run a fake release pipeline with parent, child, and grandchild tasks streaming through the out-of-band relay at zero agent tokens, with an optional failure mode that rolls an error up the tree",
   },
+  {
+    id: "delegation",
+    name: "Delegation (Subagents)",
+    description:
+      "Use subagents well — fan out independent research and verification in parallel, pick explore vs general, inherit the session's model, and avoid parallel-edit conflicts",
+  },
 ];
 
 function loadPackagedSkillBody(id: string): string {
@@ -329,6 +335,18 @@ export default Plugin.define({
     // queue (or abandoned). Always registered, even with strict mode off.
     const activityHook = await ctx.tool.hook('execute.after', (event) => {
       lastToolCallAt.set(event.sessionID, Date.now());
+      // Delegation telemetry: record subagent launches (Dax's general vs
+      // explore question, locally and continuously).
+      if (verbose && /subagent|(^|_)task$/.test(event.tool)) {
+        const input = (event.input ?? {}) as { agent?: string; subagent_type?: string; description?: string };
+        logNudge({
+          event: 'subagent',
+          sessionID: event.sessionID,
+          tool: event.tool,
+          agent: input.agent ?? input.subagent_type ?? null,
+          description: input.description ?? null,
+        });
+      }
     });
 
     // Pre-flight relay hint: see a long-running command BEFORE it runs and

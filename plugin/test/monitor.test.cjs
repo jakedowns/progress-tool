@@ -217,6 +217,11 @@ test('relay hint: detects long commands, skips relays and quick commands', () =>
   assert.equal(relayHintFor('cargo test --release'), 'cargo test --release');
   assert.equal(relayHintFor('npm test | progress-relay --id t1'), null, 'already relayed');
   assert.equal(relayHintFor('progress-relay --id b1 -- make'), null, 'already relayed');
+  assert.equal(
+    relayHintFor('cd /repo && node ../mcp-server/index.js relay --id b1 -- npm test'),
+    null,
+    'bundled relay invocation is already relayed'
+  );
   assert.equal(relayHintFor('git status'), null);
   assert.equal(relayHintFor('git commit -m "fix npm test"'), null, 'git commit messages mention commands in prose');
   assert.equal(relayHintFor('ls -la'), null);

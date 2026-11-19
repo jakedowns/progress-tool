@@ -16,7 +16,7 @@ const REPO = path.join(ROOT, '..');
 const PACKAGED = path.join(ROOT, 'skills');
 const LOCAL = path.join(REPO, '.opencode', 'skills');
 
-const IDS = ['progress-tool', 'osc-demo', 'tree-demo'];
+const IDS = ['progress-tool', 'osc-demo', 'tree-demo', 'delegation'];
 
 test('every packaged skill ships a SKILL.md with frontmatter', () => {
   for (const id of IDS) {

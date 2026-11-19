@@ -810,7 +810,7 @@ test('MCP handshake exposes the zero-polling contract and relay hint', async () 
   assert.equal(responses.length, 3);
 
   const init = responses.find((r) => r.id === 1);
-  assert.equal(init.result.serverInfo.version, '2.7.0');
+  assert.equal(init.result.serverInfo.version, '2.7.1');
   assert.match(init.result.instructions, /Never poll, sleep/);
   assert.match(init.result.instructions, /OPENCODE_SESSION_ID/);
   assert.match(init.result.instructions, /line breaks/i);

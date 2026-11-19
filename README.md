@@ -7,7 +7,7 @@ with user-dismissed entries hidden by default — useful before planning or when
 
 Implements the [Agent Progress Tool proposal](https://gist.github.com/jakedowns/ddc4eb4817184a074c82c61dc6e7228c) for OpenCode 2, and is written as a portable reference implementation that any model, agent, or harness can copy, adapt, or train on.
 
-**Versions:** MCP server `2.7.0` · OpenCode plugin `2.12.0`
+**Versions:** MCP server `2.7.1` · OpenCode plugin `2.13.0`
 
 > [!IMPORTANT]
 > **No `AGENTS.md` edits required.** The bundled OpenCode plugin injects the progress & relay rules directly into every session's system instructions, and the MCP `progress` tool response reinforces them at the exact moment an agent starts a task — so agents know to wrap long-running commands with `progress-relay` *before* their first build, not after. Progress reporting works without any prompt engineering.
@@ -542,6 +542,10 @@ progress-relay --id build-1 -- npx vite build   # wrap mode: exit 0 -> done, non
 progress-relay --id test-1  -- npm test         # wrap the whole suite
 npm test | progress-relay --id test-1           # pipe mode: done on EOF (exit code unknown)
 ```
+
+**Subagent usage report:** `node mcp-server/index.js report` reads the local OpenCode DB
+read-only (python3 stdlib) and prints the `general` vs `explore` split plus your delegation
+rate — the same query as Dax's subagent survey, run locally on demand.
 
 `progress-relay` tees output, so you still see the build log and TAP output; `--quiet`
 suppresses the tee. Use wrap mode whenever the exit status matters (it does for tests),

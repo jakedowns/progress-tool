@@ -62,7 +62,7 @@ function treeHasChildren(parentId) {
   }
 }
 
-const SERVER_VERSION = '2.7.0';
+const SERVER_VERSION = '2.7.1';
 const VALID_STATUSES = ['running', 'waiting', 'done', 'error'];
 
 const SERVER_INSTRUCTIONS = [
@@ -809,6 +809,11 @@ function main() {
 
   if (command === 'relay' || command === 'emit') {
     require('./relay').main(argv.slice(1), command);
+    return;
+  }
+
+  if (command === 'report') {
+    process.exitCode = require('./report').runReport(argv.slice(1));
     return;
   }
 
