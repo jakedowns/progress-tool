@@ -146,6 +146,9 @@ function MenuRow(props: {
             "margin-top": "4px",
             "user-select": "none",
             "line-height": "1",
+            display: "inline-block",
+            transform: props.collapsed ? "rotate(0deg)" : "rotate(90deg)",
+            transition: "transform 0.35s ease-in-out",
           }}
         >
           {props.collapsed ? "▸" : "▾"}
@@ -427,27 +430,43 @@ export default Plugin.define({
               </div>
             }
           >
-            <For each={rows()}>
-              {({ node, depth }) => (
-                <MenuRow
-                  node={node}
-                  depth={depth}
-                  options={options}
-                  hasChildren={depth === 0 && node.children.length > 0}
-                  collapsed={collapsedMap()[node.key] ?? false}
-                  onToggle={() =>
-                    setExpandedOverrides((prev) => ({
-                      ...prev,
-                      [node.key]: !(prev[node.key] ?? expandByDefault),
-                    }))
-                  }
-                  onDismiss={
-                    depth === 0
-                      ? () => dismissKey(props.session, node.key, node.status ?? "")
-                      : undefined
-                  }
-                />
-              )}
+            <For each={visibleRoots()}>
+              {(root) => {
+                const isCollapsed = () => collapsedMap()[root.key] ?? false;
+                return (
+                  <>
+                    <MenuRow
+                      node={root}
+                      depth={0}
+                      options={options}
+                      hasChildren={root.children.length > 0}
+                      collapsed={isCollapsed()}
+                      onToggle={() =>
+                        setExpandedOverrides((prev) => ({
+                          ...prev,
+                          [root.key]: !(prev[root.key] ?? expandByDefault),
+                        }))
+                      }
+                      onDismiss={() => dismissKey(props.session, root.key, root.status ?? "")}
+                    />
+                    <div
+                      style={{
+                        display: "grid",
+                        "grid-template-rows": isCollapsed() ? "0fr" : "1fr",
+                        transition: "grid-template-rows 0.5s ease-in-out",
+                      }}
+                    >
+                      <div style={{ overflow: "hidden", "min-height": "0" }}>
+                        <For each={flattenTreeWithDepth(root.children, 1)}>
+                          {({ node, depth }) => (
+                            <MenuRow node={node} depth={depth} options={options} />
+                          )}
+                        </For>
+                      </div>
+                    </div>
+                  </>
+                );
+              }}
             </For>
             <button
               type="button"
