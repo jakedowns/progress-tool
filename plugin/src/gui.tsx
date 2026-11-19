@@ -17,6 +17,7 @@ import {
   flattenTreeWithDepth,
   visibleRows,
   countDescendants,
+  collapsedRootMap,
   summarizeEntries,
   isDismissed,
   normalizeBarOptions,
@@ -425,9 +426,12 @@ export default Plugin.define({
                   depth={depth}
                   options={options}
                   hasChildren={depth === 0 && node.children.length > 0}
-                  collapsed={Boolean(collapsedRoots()[node.key])}
+                  collapsed={collapsedMap()[node.key] ?? false}
                   onToggle={() =>
-                    setCollapsedRoots((prev) => ({ ...prev, [node.key]: !prev[node.key] }))
+                    setExpandedOverrides((prev) => ({
+                      ...prev,
+                      [node.key]: !(prev[node.key] ?? expandByDefault),
+                    }))
                   }
                   onDismiss={
                     depth === 0

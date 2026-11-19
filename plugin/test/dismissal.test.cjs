@@ -32,6 +32,7 @@ const {
   visibleRows,
   countDescendants,
   summarizeEntries,
+  collapsedRootMap,
 } = require(path.join(OUT, 'tree.cjs'));
 execFileSync(
   path.join(ROOT, 'node_modules', '.bin', 'esbuild'),
@@ -183,6 +184,27 @@ test('visibleRows, countDescendants, summarizeEntries', () => {
     d: { status: 'done', dismissed: { status: 'done', at: 1 } },
   });
   assert.deepEqual(summary, { active: 2, done: 2, dismissed: 1 });
+});
+
+
+test('collapsedRootMap: collapsed by default, expand option, override wins', () => {
+  const [, roots] = makeTreeFind([
+    ROOT_ENTRY({ id: 'parent', title: 'Parent' }),
+    { id: 'kid', status: 'running', title: 'Kid', parentId: 'parent', updatedAt: 1000 },
+    { id: 'solo', status: 'running', title: 'Solo', updatedAt: 1000 },
+  ]);
+  const parent = roots.find((r) => r.id === 'parent');
+  const solo = roots.find((r) => r.id === 'solo');
+
+  const def = collapsedRootMap(roots, false, {});
+  assert.equal(def[parent.key], true, 'default: parents collapsed');
+  assert.equal(def[solo.key], undefined, 'childless roots have no toggle');
+
+  const expanded = collapsedRootMap(roots, true, {});
+  assert.equal(expanded[parent.key], false, 'expand option opens parents');
+
+  const override = collapsedRootMap(roots, true, { [parent.key]: false });
+  assert.equal(override[parent.key], true, 'explicit override wins');
 });
 
 test('buildTree carries the persisted dismissed field through to nodes', () => {

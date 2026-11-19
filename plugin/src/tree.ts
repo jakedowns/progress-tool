@@ -190,6 +190,24 @@ export function countDescendants(node: Pick<TreeNode, "children">): number {
 }
 
 /**
+ * Collapse state for root rows: collapsed by default, expanded when the
+ * user toggled it (overrides) or when `expandByDefault` is configured.
+ * Roots without children are omitted (nothing to collapse).
+ */
+export function collapsedRootMap(
+  roots: readonly TreeNode[],
+  expandByDefault: boolean,
+  overrides: Record<string, boolean>
+): Record<string, boolean> {
+  const map: Record<string, boolean> = {};
+  for (const root of roots) {
+    if (!root.children || root.children.length === 0) continue;
+    map[root.key] = !(overrides[root.key] ?? expandByDefault);
+  }
+  return map;
+}
+
+/**
  * Headline counts for the pill: active (running/waiting), done, and dismissed.
  * Computed over the session-scoped entry set, before view filtering, so the
  * numbers describe the store rather than the current visibility.
