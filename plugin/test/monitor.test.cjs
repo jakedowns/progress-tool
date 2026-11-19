@@ -218,6 +218,7 @@ test('relay hint: detects long commands, skips relays and quick commands', () =>
   assert.equal(relayHintFor('npm test | progress-relay --id t1'), null, 'already relayed');
   assert.equal(relayHintFor('progress-relay --id b1 -- make'), null, 'already relayed');
   assert.equal(relayHintFor('git status'), null);
+  assert.equal(relayHintFor('git commit -m "fix npm test"'), null, 'git commit messages mention commands in prose');
   assert.equal(relayHintFor('ls -la'), null);
   assert.equal(relayHintFor(''), null);
 
