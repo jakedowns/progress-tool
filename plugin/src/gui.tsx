@@ -377,8 +377,11 @@ export default Plugin.define({
         const roots = buildTree(visibleEntries(scoped(), Date.now(), visibility));
         return roots.filter((root) => !isDismissed(root, dismissedMap()));
       };
-      const [collapsedRoots, setCollapsedRoots] = createSignal<Record<string, boolean>>({});
-      const rows = () => visibleRows(visibleRoots(), collapsedRoots());
+      const [expandedOverrides, setExpandedOverrides] = createSignal<Record<string, boolean>>({});
+      const expandByDefault = ctx.options?.expandRootsByDefault === true;
+      const collapsedMap = () =>
+        collapsedRootMap(visibleRoots(), expandByDefault, expandedOverrides());
+      const rows = () => visibleRows(visibleRoots(), collapsedMap());
 
       // Our own scroll container: <For> rebuilds row DOM when the tree
       // changes (e.g. after a dismiss), which resets scrollTop. Track the

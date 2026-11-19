@@ -1,6 +1,6 @@
 {
   "name": "opencode-progress-plugin",
-  "version": "2.13.2",
+  "version": "2.13.3",
   "description": "OpenCode plugin: native progress indicators for the TUI and desktop GUI (progress tool + out-of-band relay)",
   "type": "module",
   "exports": {
