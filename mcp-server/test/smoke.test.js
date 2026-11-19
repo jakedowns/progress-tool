@@ -324,13 +324,13 @@ test('OSC state 4 (paused) marks waiting mid-run; exit 0 still reports done', as
   const { file } = tempState();
   const child = spawn(
     process.execPath,
-    [INDEX, 'relay', '--id', 'osc-wait', '--quiet', '--max-hz', '0', '--', 'bash', '-c', "printf '\\e]9;4;4;30\\a'; sleep 3; exit 0"],
+    [INDEX, 'relay', '--id', 'osc-wait', '--quiet', '--max-hz', '0', '--', 'bash', '-c', "printf '\\e]9;4;4;30\\a'; sleep 6; exit 0"],
     { env: stateEnv(file), stdio: ['ignore', 'pipe', 'pipe'] }
   );
 
   // Wait (bounded) for the relay to boot and the OSC state to land, instead
   // of racing a fixed delay against node + bash startup on loaded machines.
-  const deadline = Date.now() + 5000;
+  const deadline = Date.now() + 12000;
   let mid = null;
   for (;;) {
     try {
@@ -627,7 +627,7 @@ test('closing a parent cascades done to all descendants in the same session', ()
   assert.equal(state['casc-other'].status, 'running', 'unrelated entries are untouched');
 });
 
-test('stale running entries are swept; waiting entries are not; 0 disables', () => {
+test('retention is opt-in: nothing pruned by default; both knobs enable it', () => {
   const fs = require('node:fs');
   const old = Date.now() - 2 * 60 * 60 * 1000;
   const seed = (file) =>
@@ -637,26 +637,42 @@ test('stale running entries are swept; waiting entries are not; 0 disables', () 
         entries: {
           'old-running': { id: 'old-running', status: 'running', title: 'Orphan', updatedAt: old },
           'old-waiting': { id: 'old-waiting', status: 'waiting', title: 'Paused', updatedAt: old },
+          'old-done': { id: 'old-done', status: 'done', title: 'Finished', updatedAt: old },
         },
         version: 2,
       })
     );
 
+  // Default: entries ride forever, for reporting.
   const { file } = tempState();
   seed(file);
-  // Any write triggers prune.
   run(['emit', '--id', 'trigger', '--status', 'done', '--title', 'Trigger'], { state: file });
-  const entries = readState(file).entries;
-  assert.equal(entries['old-running'], undefined, 'stale running entry swept');
-  assert.ok(entries['old-waiting'], 'waiting entries are never swept');
+  let entries = readState(file).entries;
+  assert.ok(entries['old-running'], 'default keeps old running entries');
+  assert.ok(entries['old-waiting'], 'default keeps old waiting entries');
+  assert.ok(entries['old-done'], 'default keeps old done entries');
 
+  // Opt in to completed-entry retention.
   const { file: file2 } = tempState();
   seed(file2);
   run(['emit', '--id', 'trigger2', '--status', 'done', '--title', 'Trigger'], {
     state: file2,
-    env: { PROGRESS_STALE_MS: '0' },
+    env: { PROGRESS_AUTO_PRUNE_S: '3600' },
   });
-  assert.ok(readState(file2).entries['old-running'], 'PROGRESS_STALE_MS=0 disables the sweep');
+  entries = readState(file2).entries;
+  assert.equal(entries['old-done'], undefined, 'completed entries pruned when opted in');
+  assert.ok(entries['old-running'], 'running entries unaffected by TTL');
+
+  // Opt in to the running-orphan sweep.
+  const { file: file3 } = tempState();
+  seed(file3);
+  run(['emit', '--id', 'trigger3', '--status', 'done', '--title', 'Trigger'], {
+    state: file3,
+    env: { PROGRESS_STALE_MS: '3600000' },
+  });
+  entries = readState(file3).entries;
+  assert.equal(entries['old-running'], undefined, 'stale running entry swept when opted in');
+  assert.ok(entries['old-waiting'], 'waiting entries are never swept');
 });
 
 test('terminal dismissal survives terminal re-reports; non-terminal dismissal clears on any agent update', () => {
@@ -690,6 +706,57 @@ test('terminal dismissal survives terminal re-reports; non-terminal dismissal cl
   }, file);
   run(['emit', '--id', 'run-1', '--status', 'done'], { state: file });
   assert.equal(readState(file).entries['run-1'].dismissed ?? null, null, 'completion revives a running-state dismissal');
+});
+
+test('list tool reads session trees; dismissed hidden by default', async () => {
+  const { file } = tempState();
+  run(['emit', '--id', 'root-a', '--status', 'running', '--title', 'Root A', '--progress', '0.4'], { state: file });
+  run(['emit', '--id', 'child-a', '--status', 'waiting', '--title', 'Child A', '--parent', 'root-a'], { state: file });
+  run(['emit', '--id', 'muted', '--status', 'running', '--title', 'Muted task'], { state: file });
+  run(['emit', '--id', 'done-a', '--status', 'done', '--title', 'Finished task'], { state: file });
+  const store = require(path.join(ROOT, 'state-store'));
+  store.mutateState((state) => {
+    const entry = Object.values(state.entries).find((e) => e.id === 'muted');
+    entry.dismissed = { status: 'running', at: 1 };
+    return state;
+  }, file);
+
+  const child = spawn(process.execPath, [INDEX], { env: stateEnv(file), stdio: ['pipe', 'pipe', 'pipe'] });
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', (chunk) => (stdout += chunk));
+  child.stderr.on('data', (chunk) => (stderr += chunk));
+
+  const requests = [
+    { jsonrpc: '2.0', id: 1, method: 'initialize', params: {} },
+    { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'list', arguments: {} } },
+    { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'list', arguments: { includeDismissed: true } } },
+    { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'list', arguments: { includeTerminal: false, parentId: 'root-a' } } },
+  ];
+  for (const request of requests) child.stdin.write(JSON.stringify(request) + '\n');
+  child.stdin.end();
+  await new Promise((resolve, reject) => {
+    child.on('error', reject);
+    child.on('close', resolve);
+  });
+
+  const responses = stdout.split('\n').filter(Boolean).map((line) => JSON.parse(line));
+  assert.equal(stderr, '');
+  const list = responses.find((r) => r.id === 2);
+  const listText = list.result.content[0].text;
+  assert.match(listText, /scope=session/);
+  assert.match(listText, /- \[root-a\] \(running\) 40% Root A/);
+  assert.match(listText, /  - \[child-a\] \(waiting\)/);
+  assert.doesNotMatch(listText, /Muted task/, 'dismissed hidden by default');
+
+  const widened = responses.find((r) => r.id === 3).result.content[0].text;
+  assert.match(widened, /Muted task/);
+  assert.match(widened, /dismissed/);
+
+  const openOnly = responses.find((r) => r.id === 4).result.content[0].text;
+  assert.match(openOnly, /root-a/);
+  assert.match(openOnly, /child-a/, 'waiting entries are not terminal');
+  assert.doesNotMatch(openOnly, /Finished task/, 'done entries excluded when includeTerminal=false');
 });
 
 test('MCP handshake exposes the zero-polling contract and relay hint', async () => {
@@ -743,7 +810,7 @@ test('MCP handshake exposes the zero-polling contract and relay hint', async () 
   assert.equal(responses.length, 3);
 
   const init = responses.find((r) => r.id === 1);
-  assert.equal(init.result.serverInfo.version, '2.6.2');
+  assert.equal(init.result.serverInfo.version, '2.7.0');
   assert.match(init.result.instructions, /Never poll, sleep/);
   assert.match(init.result.instructions, /OPENCODE_SESSION_ID/);
   assert.match(init.result.instructions, /line breaks/i);

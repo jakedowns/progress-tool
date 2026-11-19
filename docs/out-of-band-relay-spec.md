@@ -227,8 +227,7 @@ An entry MAY carry a dismissal record written by view clients:
 
 ### 4.6 Lifecycle cleanup
 
-Completed entries (`done` or `error`) SHOULD be pruned after a retention period (default: 60 minutes; `PROGRESS_TTL_MS` overrides — set `86400000` for a day).
-`running` entries untouched for `PROGRESS_STALE_MS` (default: 60 minutes, `0` disables) SHOULD be pruned as orphans: a genuinely running task receives relay telemetry or agent updates, so a `running` entry with no writes for an hour is abandoned. `waiting` entries MUST NOT be swept — they are explicitly paused (human-blocked work may sit for days).
+Retention is **OPTIONAL and OFF by default**: implementations SHOULD keep entries so the store doubles as a report/history of what agents did. Implementations MAY prune completed entries after a configurable retention period (reference: `PROGRESS_AUTO_PRUNE_S` in seconds, absent or `-1` = disabled; legacy `PROGRESS_TTL_MS` in milliseconds). A `running`-orphan sweep MAY be enabled via `PROGRESS_STALE_MS` (milliseconds). `waiting` entries MUST NOT be swept — they are explicitly paused (human-blocked work may sit for days).
 
 ### 4.7 Concurrency guarantee
 
@@ -387,6 +386,22 @@ close all of its descendants (recursively, within the same session scope,
   declaration.
 
 ---
+
+## 5.7 Read/query companion (SHOULD)
+
+Implementations SHOULD expose a read-only companion tool that lets the agent
+inspect the store instead of guessing:
+
+- Returns the session's entries as a tree (indented by `parentId`), with
+  status, progress, and titles.
+- MUST be session-scoped by default; MAY offer an `all` scope.
+- MUST hide user-dismissed entries by default (they are deliberately muted),
+  and MAY include them on request with a `dismissed` marker.
+- SHOULD default to including `done`/`error` (history is useful for reporting)
+  and offer `includeTerminal: false` to see only open work.
+- MUST be annotated read-only.
+
+Reference: the `list` tool in `mcp-server/index.js`.
 
 ## 6. Data-plane contract (relay)
 

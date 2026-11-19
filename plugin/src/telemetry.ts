@@ -40,3 +40,37 @@ export function logNudge(event: Record<string, unknown>): void {
     // Telemetry must never break a session.
   }
 }
+
+/**
+ * Status-transition diffing for behaviour telemetry.
+ *
+ * Every observation of the store is compared against the previous snapshot
+ * so we can measure how agents actually drive the lifecycle:
+ *   null -> running   (start)
+ *   running -> running (repeat / progress-only update)
+ *   running -> done    (finish)
+ *   done -> running    (reopen / new lifecycle)
+ *   running -> waiting (pause)
+ */
+export type StatusSnapshot = Record<string, string>;
+
+export interface StatusTransition {
+  id: string;
+  from: string | null;
+  to: string;
+}
+
+export function diffStatuses(
+  prev: StatusSnapshot,
+  entries: ReadonlyArray<{ id: string; status: string }>
+): { transitions: StatusTransition[]; next: StatusSnapshot } {
+  const next: StatusSnapshot = {};
+  const transitions: StatusTransition[] = [];
+  for (const entry of entries) {
+    if (!entry || typeof entry.id !== "string") continue;
+    next[entry.id] = entry.status;
+    const from = prev[entry.id] ?? null;
+    if (from !== entry.status) transitions.push({ id: entry.id, from, to: entry.status });
+  }
+  return { transitions, next };
+}

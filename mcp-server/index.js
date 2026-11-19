@@ -39,6 +39,7 @@ const {
   ensureStateFile,
   readState,
   resolveStatePath,
+  resolveSessionId,
 } = require('./state-store');
 
 // First-offense tracking for the anti-pattern error result. The MCP server
@@ -61,7 +62,7 @@ function treeHasChildren(parentId) {
   }
 }
 
-const SERVER_VERSION = '2.6.2';
+const SERVER_VERSION = '2.7.0';
 const VALID_STATUSES = ['running', 'waiting', 'done', 'error'];
 
 const SERVER_INSTRUCTIONS = [
@@ -107,6 +108,9 @@ const TOOL_DESCRIPTION = [
   '',
   'BULK TREE CREATION:',
   '- Pass `entries: [{ id, status, title, parentId, ... }]` (max 50) to create or update a whole parent+children tree in ONE atomic call — one round trip, no half-built tree. Use EITHER entries[] alone OR the single-entry fields, not both. Each entry item requires id/status/title; the top-level id/status/title are only for the single form.',
+  '',
+  'READING STATE:',
+  '- The companion `list` tool returns your progress trees as text (session-scoped, user-dismissed entries hidden by default). Use it before planning or when unsure what is already tracked; pass includeDismissed/includeTerminal to widen.',
   'OWNERSHIP & ZERO-POLLING CONTRACT:',
   '- You own TASK MILESTONES and TREE STRUCTURE: call this tool when starting a phase (status: "running"), when creating child sub-tasks (parentId), and when a phase finishes (status: "done" | "error"). For long-horizon NON-SHELL work (research, planning, exploration, refactors, documentation) there is no relay, so also spend one of your turns between tool calls every few steps on a progress update (fresh detail or a 0..1 progress fraction) — todowrite-style cadence keeps the rollup live. Cover ANY long-horizon work, not just shell commands; anything past a couple of minutes or a single reply deserves an entry.',
   '- NEVER poll, sleep, or loop on terminal output just to refresh progress percentages or elapsed time.',
@@ -170,6 +174,15 @@ function relayBin() {
 
   cachedRelayBin = `${fileQuote(process.execPath)} ${fileQuote(__filename)} relay`;
   return cachedRelayBin;
+}
+
+function affirmation(id) {
+  const lines = [
+    'Thanks for using the progress tool — the user appreciates it!',
+    'Progress logged — thanks for keeping the task list current. The user appreciates it!',
+    'Thank you for remembering to use the progress tool; the user can see your progress.',
+  ];
+  return `\n${lines[String(id ?? 'ok').length % lines.length]}`;
 }
 
 function relayHint(id, parentId, sessionId) {
@@ -296,6 +309,51 @@ function handleToolsList(id) {
         annotations: {
           title: 'Progress',
           readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+      },
+      {
+        name: 'list',
+        description:
+          'Read the progress store. Lists progress trees this session owns, hiding user-dismissed entries by default. Read-only: use it before planning, or when unsure what is already tracked.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            scope: {
+              type: 'string',
+              enum: ['session', 'all'],
+              description: 'session (default) = this session only; all = every session sharing the state file.',
+            },
+            includeDismissed: {
+              type: 'boolean',
+              description: 'Include entries the user dismissed (default false).',
+            },
+            includeTerminal: {
+              type: 'boolean',
+              description: 'Include done/error entries (default true).',
+            },
+            parentId: {
+              type: 'string',
+              description: 'Restrict to one tree (that parent id and its entries).',
+            },
+            limit: {
+              type: 'integer',
+              minimum: 1,
+              maximum: 500,
+              description: 'Maximum entries to render (default 200).',
+            },
+            sessionId: {
+              type: 'string',
+              description: 'Optional session override.',
+            },
+          },
+          additionalProperties: false,
+        },
+        annotations: {
+          title: 'Progress List',
+          readOnlyHint: true,
           destructiveHint: false,
           idempotentHint: true,
           openWorldHint: false,
@@ -429,7 +487,7 @@ function handleProgressCall(id, args) {
     }
   }
 
-  toolOk(id, text);
+  toolOk(id, text + affirmation(entry.id));
 }
 
 /**
@@ -509,6 +567,97 @@ function handleBulkProgress(id, args) {
   if (runningRoot) {
     text += relayHint(runningRoot.id, null, runningRoot.sessionId);
   }
+  toolOk(id, text + affirmation(created[0]?.id));
+}
+
+function handleListCall(id, args) {
+  if (args && (typeof args !== 'object' || Array.isArray(args))) {
+    toolError(id, 'Invalid arguments: expected an object.');
+    return;
+  }
+  const options = args || {};
+  const scope = options.scope === 'all' ? 'all' : 'session';
+  const includeDismissed = options.includeDismissed === true;
+  const includeTerminal = options.includeTerminal !== false;
+  const parentFilter =
+    typeof options.parentId === 'string' && options.parentId ? options.parentId : null;
+  const limit = Number.isInteger(options.limit)
+    ? Math.min(500, Math.max(1, options.limit))
+    : 200;
+  const sessionId = resolveSessionId(options.sessionId);
+
+  let selected = Object.entries(readState(resolveStatePath()).entries || {}).map(
+    ([key, entry]) => ({ key, entry })
+  );
+  if (scope === 'session') {
+    selected = selected.filter(({ entry }) =>
+      sessionId ? entry.sessionId === sessionId : !entry.sessionId
+    );
+  }
+  if (!includeDismissed) selected = selected.filter(({ entry }) => !entry.dismissed);
+  if (!includeTerminal) {
+    selected = selected.filter(
+      ({ entry }) => entry.status !== 'done' && entry.status !== 'error'
+    );
+  }
+  if (parentFilter) {
+    selected = selected.filter(
+      ({ entry }) => entry.id === parentFilter || entry.parentId === parentFilter
+    );
+  }
+
+  if (selected.length === 0) {
+    toolOk(
+      id,
+      `No ${includeTerminal ? '' : 'open '}progress entries${
+        parentFilter ? ` under "${parentFilter}"` : ''
+      } (scope=${scope}${includeDismissed ? ', dismissed included' : ', dismissed hidden'}).`
+    );
+    return;
+  }
+
+  const truncated = selected.length > limit;
+  if (truncated) selected = selected.slice(0, limit);
+
+  const map = new Map(selected.map(({ entry }) => [entry.id, entry]));
+  const children = new Map();
+  const roots = [];
+  for (const { entry } of selected) {
+    const parent = entry.parentId && map.has(entry.parentId) ? entry.parentId : null;
+    if (parent && parent !== entry.id) {
+      if (!children.has(parent)) children.set(parent, []);
+      children.get(parent).push(entry);
+    } else {
+      roots.push(entry);
+    }
+  }
+
+  const lines = [];
+  const visit = (entry, depth) => {
+    const pct = entry.progress == null ? '' : ` ${Math.round(entry.progress * 100)}%`;
+    const flags = [];
+    if (entry.dismissed) flags.push('dismissed');
+    if (entry.parentId && !map.has(entry.parentId)) flags.push(`parent=${entry.parentId}`);
+    lines.push(
+      `${'  '.repeat(depth)}- [${entry.id}] (${entry.status})${pct} ${entry.title}${
+        flags.length ? ` · ${flags.join(' · ')}` : ''
+      }`
+    );
+    for (const child of children.get(entry.id) || []) visit(child, depth + 1);
+  };
+  for (const root of roots) visit(root, 0);
+
+  const counts = selected.reduce((acc, { entry }) => {
+    acc[entry.status] = (acc[entry.status] || 0) + 1;
+    return acc;
+  }, {});
+  const summary = Object.entries(counts)
+    .map(([status, count]) => `${status} ${count}`)
+    .join(', ');
+  let text = `Progress store (scope=${scope}${includeDismissed ? ', dismissed included' : ', dismissed hidden'}): ${selected.length} entr${
+    selected.length === 1 ? 'y' : 'ies'
+  }${summary ? ` — ${summary}` : ''}\n${lines.join('\n')}`;
+  if (truncated) text += `\n(truncated at ${limit} entries; raise limit for more)`;
   toolOk(id, text);
 }
 
@@ -552,7 +701,7 @@ function handleRequest(req) {
 
       case 'tools/call': {
         const { name, arguments: args } = params || {};
-        if (name !== 'progress') {
+        if (name !== 'progress' && name !== 'list') {
           sendError(id, -32601, `Unknown tool: ${name}`);
           break;
         }
@@ -564,6 +713,10 @@ function handleRequest(req) {
           metaSession
         ) {
           callArgs.sessionId = metaSession;
+        }
+        if (name === 'list') {
+          handleListCall(id, callArgs);
+          break;
         }
         handleProgressCall(id, callArgs);
         break;

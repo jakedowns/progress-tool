@@ -159,6 +159,33 @@ export function staleProgressNudge(callsSinceProgress: number): string {
   return `⚠ STRICT MODE: ${callsSinceProgress} tool calls since any progress value changed, and you have pending tasks — any updates? Update the running entries now (fresh detail and a 0.0–1.0 progress fraction, or close what is finished), or mark them waiting.`;
 }
 
+// --- Relay hint (pre-flight, before the command runs) ---------------------
+
+const LONG_COMMAND_RE =
+  /\b(?:npm|pnpm|yarn|bun)\s+(?:test|run\s+(?:build|test|lint|check|typecheck))\b|\b(?:vite\s+build|webpack|rollup|jest|vitest|pytest|cargo\s+(?:build|test)|go\s+(?:build|test)|make\b|gradle|mvn|docker\s+build)\b/i;
+
+/**
+ * Detect a long-running command that is NOT already piped through the relay.
+ * Returns the command when a hint should be shown, otherwise null. Detection
+ * only — the plugin never rewrites the command.
+ */
+export function relayHintFor(command: string | null | undefined): string | null {
+  if (!command || typeof command !== "string") return null;
+  if (/progress-relay|progress-emit/.test(command)) return null;
+  if (!LONG_COMMAND_RE.test(command)) return null;
+  return command.trim();
+}
+
+export function relayHintMessage(command: string): string {
+  const shown = command.length > 90 ? `${command.slice(0, 87)}…` : command;
+  return [
+    `⚠ This looks long-running — wrap it in the out-of-band relay so the UI stays live at zero token cost:`,
+    `  progress-relay --id <id> -- ${shown}`,
+    `  # or: ${shown} | progress-relay --id <id>`,
+    `Wrap mode maps the exit code to done/error. Run it in the background and keep working.`,
+  ].join("\n");
+}
+
 // --- Idle reminder (turn-end nudge) --------------------------------------
 
 export interface IdleEntry {
@@ -244,6 +271,8 @@ export function idleReminder(
 export interface WallClockState {
   /** Epoch ms of the last wall-clock reminder for this session. */
   lastAt: number;
+  /** Consecutive reminders since progress last changed (throttle). */
+  streak?: number;
 }
 
 export interface WallClockInput {
@@ -251,6 +280,11 @@ export interface WallClockInput {
   hasActive: boolean;
   /** Epoch ms of the newest progress write across the session's entries. */
   lastProgressAt?: number;
+  /**
+   * Epoch ms of the session's last tool call. Unset ⇒ dormant session: it may
+   * simply be queued at the inference provider, so do not nag.
+   */
+  lastToolCallAt?: number;
   /** Epoch ms now. */
   now?: number;
 }
@@ -260,6 +294,14 @@ export interface WallClockOptions {
   thresholdMs?: number;
   /** Minimum gap between wall-clock reminders. Default: same as threshold. */
   cooldownMs?: number;
+  /**
+   * Only remind sessions that called a tool within this window. Default
+   * 10 minutes — a session idle longer than this is likely stalled upstream
+   * (model queueing/throttling) or abandoned; nagging it is noise.
+   */
+  activeWindowMs?: number;
+  /** Cap reminders per non-progress stretch. Default 3; 0 = uncapped. */
+  maxStreak?: number;
 }
 
 export function normalizeWallClockMs(raw: unknown, fallback = 2 * 60 * 1000): number {
@@ -282,19 +324,32 @@ export function wallClockNudge(
   state: WallClockState,
   input: WallClockInput,
   options: WallClockOptions = {}
-): { action: "remind" | "none"; lastAt: number; message?: string } {
+): { action: "remind" | "none"; lastAt: number; streak: number; message?: string } {
   const thresholdMs = options.thresholdMs ?? 2 * 60 * 1000;
   const cooldownMs = options.cooldownMs ?? thresholdMs;
+  const activeWindowMs = options.activeWindowMs ?? 10 * 60 * 1000;
+  const maxStreak = options.maxStreak ?? 3;
   const now = input.now ?? Date.now();
+  const streak = state.streak ?? 0;
 
   if (thresholdMs <= 0 || !input.hasActive) {
-    return { action: "none", lastAt: state.lastAt };
+    return { action: "none", lastAt: state.lastAt, streak };
+  }
+  // Dormant session: no tool calls recently. This is the provider-queueing /
+  // abandoned case — the agent may be stalled upstream, not neglectful.
+  if (input.lastToolCallAt == null || now - input.lastToolCallAt > activeWindowMs) {
+    return { action: "none", lastAt: state.lastAt, streak };
+  }
+  // Throttle: a few reminders per non-progress stretch is plenty; more only
+  // trains the model to ignore them.
+  if (maxStreak > 0 && streak >= maxStreak) {
+    return { action: "none", lastAt: state.lastAt, streak };
   }
 
   const lastProgressAt = input.lastProgressAt ?? now;
   const age = now - lastProgressAt;
-  if (age < thresholdMs) return { action: "none", lastAt: state.lastAt };
-  if (now - state.lastAt < cooldownMs) return { action: "none", lastAt: state.lastAt };
+  if (age < thresholdMs) return { action: "none", lastAt: state.lastAt, streak };
+  if (now - state.lastAt < cooldownMs) return { action: "none", lastAt: state.lastAt, streak };
 
   const minutes = Math.max(1, Math.round(age / 60_000));
   const message = [
@@ -303,5 +358,5 @@ export function wallClockNudge(
     `If you are waiting on a long-running command, route it through the out-of-band relay so telemetry stays live without polling: progress-relay --id <id> -- <cmd>.`,
   ].join(" ");
 
-  return { action: "remind", lastAt: now, message };
+  return { action: "remind", lastAt: now, streak: streak + 1, message };
 }

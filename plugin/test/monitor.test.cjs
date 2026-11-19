@@ -29,6 +29,8 @@ const {
   staleProgressNudge,
   idleReminder,
   wallClockNudge,
+  relayHintFor,
+  relayHintMessage,
 } = require(path.join(OUT, 'monitor.cjs'));
 
 const idle = () => ({ count: 0, callsSinceProgress: 0, nudged: false, forced: false, lastStaleNudgeAt: 0 });
@@ -167,6 +169,62 @@ test('idle reminder: only fresh entries → silent', () => {
   assert.equal(decision.action, 'none');
 });
 
+test('wall-clock: dormant sessions are never nudged (provider-queue stalls)', () => {
+  const now = 1_000_000_000;
+  const stale = now - 20 * 60 * 1000;
+  // Last tool call 20 minutes ago → dormant, even with pending tasks.
+  assert.equal(
+    wallClockNudge(
+      { lastAt: 0 },
+      { hasActive: true, lastProgressAt: stale, lastToolCallAt: stale, now },
+      { thresholdMs: 120_000 }
+    ).action,
+    'none'
+  );
+  // No tool call ever recorded → dormant.
+  assert.equal(
+    wallClockNudge({ lastAt: 0 }, { hasActive: true, lastProgressAt: stale, now }, { thresholdMs: 120_000 }).action,
+    'none'
+  );
+  // Active within the window → reminds.
+  assert.equal(
+    wallClockNudge(
+      { lastAt: 0 },
+      { hasActive: true, lastProgressAt: stale, lastToolCallAt: now - 60_000, now },
+      { thresholdMs: 120_000 }
+    ).action,
+    'remind'
+  );
+});
+
+test('wall-clock: streak caps reminders per non-progress stretch', () => {
+  const now = 1_000_000_000;
+  const opts = { thresholdMs: 120_000, cooldownMs: 0, maxStreak: 2 };
+  const input = { hasActive: true, lastProgressAt: now - 10 * 60 * 1000, lastToolCallAt: now - 60_000, now };
+  assert.equal(wallClockNudge({ lastAt: 0, streak: 0 }, input, opts).action, 'remind');
+  assert.equal(wallClockNudge({ lastAt: 0, streak: 2 }, input, opts).action, 'none', 'capped');
+  assert.equal(
+    wallClockNudge({ lastAt: 0, streak: 2 }, input, { ...opts, maxStreak: 0 }).action,
+    'remind',
+    '0 = uncapped'
+  );
+});
+
+test('relay hint: detects long commands, skips relays and quick commands', () => {
+  assert.equal(relayHintFor('npm test'), 'npm test');
+  assert.equal(relayHintFor('npx vite build'), 'npx vite build');
+  assert.equal(relayHintFor('pytest -q'), 'pytest -q');
+  assert.equal(relayHintFor('cargo test --release'), 'cargo test --release');
+  assert.equal(relayHintFor('npm test | progress-relay --id t1'), null, 'already relayed');
+  assert.equal(relayHintFor('progress-relay --id b1 -- make'), null, 'already relayed');
+  assert.equal(relayHintFor('git status'), null);
+  assert.equal(relayHintFor('ls -la'), null);
+  assert.equal(relayHintFor(''), null);
+
+  assert.match(relayHintMessage('npm test'), /progress-relay --id <id> -- npm test/);
+  assert.match(relayHintMessage('npm test'), /exit code to done\/error/);
+});
+
 test('normalizers and message texts', () => {
   assert.equal(normalizeStrictMode({ strictMode: 'force' }), 'force');
   assert.equal(normalizeStrictMode({ strictMode: 'off' }), 'off');
@@ -239,38 +297,51 @@ test('idle reminder: same signature is throttled and capped; changed signature r
 test('wall-clock: fires only with open tasks, after the threshold, with cooldown', () => {
   const now = 1_000_000_000;
   const lastProgressAt = now - 20 * 60 * 1000;
+  const active = { lastToolCallAt: now - 60_000 };
   const opts = { thresholdMs: 120_000 };
 
   assert.equal(
-    wallClockNudge({ lastAt: 0 }, { hasActive: false, lastProgressAt, now }, opts).action,
+    wallClockNudge({ lastAt: 0 }, { hasActive: false, lastProgressAt, ...active, now }, opts).action,
     'none'
   );
   assert.equal(
-    wallClockNudge({ lastAt: 0 }, { hasActive: true, lastProgressAt: now - 60_000, now }, opts).action,
-    'none'
+    wallClockNudge(
+      { lastAt: 0 },
+      { hasActive: true, lastProgressAt: now - 60_000, ...active, now },
+      opts
+    ).action,
+    'none',
+    'fresh progress → no nudge'
   );
 
-  let decision = wallClockNudge({ lastAt: 0 }, { hasActive: true, lastProgressAt, now }, opts);
+  const decision = wallClockNudge(
+    { lastAt: 0 },
+    { hasActive: true, lastProgressAt, ...active, now },
+    opts
+  );
   assert.equal(decision.action, 'remind');
   assert.match(decision.message, /~20 minutes/);
   assert.match(decision.message, /progress-relay --id <id>/);
 
   assert.equal(
-    wallClockNudge({ lastAt: decision.lastAt }, { hasActive: true, lastProgressAt, now: now + 60_000 }, opts).action,
+    wallClockNudge(
+      { lastAt: decision.lastAt },
+      { hasActive: true, lastProgressAt, ...active, now: now + 60_000 },
+      opts
+    ).action,
     'none',
     'cooldown suppresses repeats'
   );
   assert.equal(
     wallClockNudge(
       { lastAt: decision.lastAt },
-      { hasActive: true, lastProgressAt, now: now + 3 * 60 * 1000 },
+      { hasActive: true, lastProgressAt, ...active, now: now + 3 * 60 * 1000 },
       opts
     ).action,
     'remind',
     'reminds again after the cooldown'
   );
 });
-
 test('wall-clock: threshold 0 disables; normalizer defaults to 120s and floors at 60s', () => {
   assert.equal(
     wallClockNudge({ lastAt: 0 }, { hasActive: true, lastProgressAt: 0, now: 10 ** 12 }, { thresholdMs: 0 }).action,

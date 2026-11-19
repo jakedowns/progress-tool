@@ -19,7 +19,7 @@ execFileSync(
   [path.join(ROOT, 'src', 'telemetry.ts'), '--bundle', '--format=cjs', '--platform=node', `--outfile=${path.join(OUT, 'telemetry.cjs')}`],
   { stdio: 'pipe' }
 );
-const { logNudge, nudgeLogPath, nudgeLoggingEnabled } = require(path.join(OUT, 'telemetry.cjs'));
+const { logNudge, nudgeLogPath, nudgeLoggingEnabled, diffStatuses } = require(path.join(OUT, 'telemetry.cjs'));
 
 test('disabled by default; enabled by option or env', () => {
   const saved = process.env.PROGRESS_NUDGE_LOG;
@@ -56,6 +56,23 @@ test('logNudge appends one JSON line per event with a timestamp', () => {
   } finally {
     delete process.env.PROGRESS_NUDGE_LOG;
   }
+});
+
+test('diffStatuses reports lifecycle transitions and a fresh snapshot', () => {
+  const prev = { a: 'running', b: 'waiting' };
+  const { transitions, next } = diffStatuses(prev, [
+    { id: 'a', status: 'done' },      // running → done
+    { id: 'b', status: 'waiting' },   // unchanged → no event
+    { id: 'c', status: 'running' },   // null → running (start)
+  ]);
+  assert.deepEqual(
+    transitions.sort((x, y) => x.id.localeCompare(y.id)),
+    [
+      { id: 'a', from: 'running', to: 'done' },
+      { id: 'c', from: null, to: 'running' },
+    ]
+  );
+  assert.deepEqual(next, { a: 'done', b: 'waiting', c: 'running' });
 });
 
 test('unwritable path never throws', () => {

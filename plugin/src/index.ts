@@ -22,11 +22,13 @@ import {
   staleProgressNudge,
   idleReminder,
   wallClockNudge,
+  relayHintFor,
+  relayHintMessage,
   type MonitorState,
   type IdleTracker,
   type WallClockState,
 } from "./monitor.js";
-import { logNudge, nudgeLoggingEnabled } from "./telemetry.js";
+import { logNudge, nudgeLoggingEnabled, diffStatuses, type StatusSnapshot } from "./telemetry.js";
 
 /**
  * The plugin's own version, read at runtime so a running server part can be
@@ -144,6 +146,30 @@ export default Plugin.define({
         : 3;
     const monitors = new Map<string, MonitorState>();
     const verbose = nudgeLoggingEnabled(ctx.options);
+
+    // Behaviour telemetry: compare every observed store snapshot against the
+    // previous one so we can measure how agents drive the lifecycle
+    // (null→running start, running→running repeat, running→done finish,
+    // done→running reopen, running→waiting pause).
+    const statusSnapshots = new Map<string, StatusSnapshot>();
+    const observeTransitions = (
+      sessionID: string,
+      entries: ReadonlyArray<{ id: string; status: string }>
+    ) => {
+      if (!verbose) return;
+      const prev = statusSnapshots.get(sessionID) ?? {};
+      const { transitions, next } = diffStatuses(prev, entries);
+      statusSnapshots.set(sessionID, next);
+      for (const transition of transitions) {
+        logNudge({
+          event: 'transition',
+          sessionID,
+          id: transition.id,
+          from: transition.from,
+          to: transition.to,
+        });
+      }
+    };
     const lastSeenProgress = new Map<string, number>();
     const NUDGE_KEY = 'progress-nudge';
     let promptReminderHook: Awaited<ReturnType<typeof ctx.session.hook>> | undefined;
@@ -167,6 +193,7 @@ export default Plugin.define({
           const previousSeen = lastSeenProgress.get(event.sessionID) ?? 0;
           const progressAdvanced = lastProgressAt > previousSeen;
           if (lastProgressAt > previousSeen) lastSeenProgress.set(event.sessionID, lastProgressAt);
+          observeTransitions(event.sessionID, entries);
 
           const monitor = monitors.get(event.sessionID) ?? {
             count: 0,
@@ -294,7 +321,44 @@ export default Plugin.define({
     // soon as progress resumes.
     const wallClockMs = normalizeWallClockMs(ctx.options);
     const wallTrackers = new Map<string, WallClockState>();
+    const lastToolCallAt = new Map<string, number>();
     const WALL_KEY = 'progress-wall-clock';
+
+    // Track per-session tool activity so the wall-clock nudge can tell a
+    // working-but-silent agent apart from a session stalled in a provider
+    // queue (or abandoned). Always registered, even with strict mode off.
+    const activityHook = await ctx.tool.hook('execute.after', (event) => {
+      lastToolCallAt.set(event.sessionID, Date.now());
+    });
+
+    // Pre-flight relay hint: see a long-running command BEFORE it runs and
+    // suggest wrapping it in the relay. Detection only — commands are never
+    // rewritten. Opt out with { options: { relayHints: false } }.
+    const relayHintCooldown = new Map<string, number>();
+    let relayHintHook: Awaited<ReturnType<typeof ctx.tool.hook>> | undefined;
+    if (ctx.options?.relayHints !== false) {
+      relayHintHook = await ctx.tool.hook('execute.before', (event) => {
+        try {
+          if (!/^(bash|shell)$/.test(event.tool)) return;
+          const input = event.input as { command?: string } | undefined;
+          const command = typeof input?.command === 'string' ? input.command : '';
+          const match = relayHintFor(command);
+          if (!match) return;
+          const now = Date.now();
+          if (now - (relayHintCooldown.get(event.sessionID) ?? 0) < 90_000) return;
+          relayHintCooldown.set(event.sessionID, now);
+          void ctx.session.instructions.entry
+            .put({ sessionID: event.sessionID, key: 'progress-relay-hint', value: relayHintMessage(match) })
+            .catch(() => {});
+          if (verbose) {
+            logNudge({ event: 'relay-hint', sessionID: event.sessionID, command: match.slice(0, 120) });
+          }
+        } catch (error) {
+          console.error('[opencode-progress] relay hint failed', String(error));
+        }
+      });
+    }
+
     let wallTimer: ReturnType<typeof setInterval> | undefined;
     if (wallClockMs > 0) {
       wallTimer = setInterval(() => {
@@ -306,6 +370,7 @@ export default Plugin.define({
           const now = Date.now();
           for (const sessionID of sessions) {
             const sessionEntries = entries.filter((entry) => entry?.sessionId === sessionID);
+            observeTransitions(sessionID, sessionEntries);
             const hasActive = sessionEntries.some(
               (entry) => entry.status === 'running' || entry.status === 'waiting'
             );
@@ -313,13 +378,22 @@ export default Plugin.define({
               (max, entry) => Math.max(max, entry.updatedAt ?? 0),
               0
             );
-            const tracker = wallTrackers.get(sessionID) ?? { lastAt: 0 };
+            // Progress changed since the last tick ⇒ reset the reminder streak.
+            const previousSeen = lastSeenProgress.get(sessionID) ?? 0;
+            if (lastProgressAt > previousSeen) lastSeenProgress.set(sessionID, lastProgressAt);
+            const tracker = wallTrackers.get(sessionID) ?? { lastAt: 0, streak: 0 };
+            if (lastProgressAt > previousSeen) tracker.streak = 0;
             const decision = wallClockNudge(
               tracker,
-              { hasActive, lastProgressAt, now },
+              {
+                hasActive,
+                lastProgressAt,
+                lastToolCallAt: lastToolCallAt.get(sessionID),
+                now,
+              },
               { thresholdMs: wallClockMs }
             );
-            wallTrackers.set(sessionID, { lastAt: decision.lastAt });
+            wallTrackers.set(sessionID, { lastAt: decision.lastAt, streak: decision.streak });
 
             if (decision.action === 'remind' && decision.message) {
               console.log(`[opencode-progress] v${pluginVersion} wall-clock nudge for ${sessionID}`);
@@ -351,6 +425,8 @@ export default Plugin.define({
       void toolHook?.dispose();
       void idleHook?.dispose();
       void promptReminderHook?.dispose();
+      void activityHook?.dispose();
+      void relayHintHook?.dispose();
     };
   },
 });

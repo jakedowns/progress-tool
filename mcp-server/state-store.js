@@ -23,7 +23,7 @@ const path = require('path');
 
 const STATE_VERSION = 2;
 const DEFAULT_TTL_MS = 60 * 60 * 1000;
-/** Running entries untouched for this long are orphans and get swept (§4.6). */
+/** Running entries untouched for this long are orphans (§4.6). Opt-in only. */
 const DEFAULT_STALE_MS = 60 * 60 * 1000;
 const LOCK_RETRY_MS = 10;
 const LOCK_TIMEOUT_MS = 5000;
@@ -255,24 +255,41 @@ function acquireLock(stateFile) {
 }
 
 function prune(state, now) {
-  const ttl = Number(process.env.PROGRESS_TTL_MS || DEFAULT_TTL_MS);
-  // Orphan sweep: a genuinely running task receives relay ticks (4Hz) or
-  // agent updates; a `running` entry untouched for an hour is abandoned.
-  // 0 disables. `waiting` entries are explicitly paused and never swept.
-  const staleMs = Number(process.env.PROGRESS_STALE_MS ?? DEFAULT_STALE_MS);
+  // Retention is OPT-IN. By default nothing is pruned: entries ride so the
+  // store stays useful for reporting/history. Enable with
+  //   PROGRESS_AUTO_PRUNE_S=<seconds>   (0 = drop completed entries on next write)
+  // PROGRESS_TTL_MS still works as a legacy millisecond override.
+  // The orphan sweep for `running` entries is also opt-in via
+  // PROGRESS_STALE_MS (milliseconds). `waiting` is never swept.
+  const legacyTtl =
+    process.env.PROGRESS_TTL_MS !== undefined ? Number(process.env.PROGRESS_TTL_MS) : undefined;
+  const configuredS =
+    process.env.PROGRESS_AUTO_PRUNE_S !== undefined
+      ? Number(process.env.PROGRESS_AUTO_PRUNE_S)
+      : undefined;
+  const ttlMs =
+    legacyTtl !== undefined
+      ? legacyTtl
+      : typeof configuredS === 'number' && Number.isFinite(configuredS) && configuredS >= 0
+      ? configuredS * 1000
+      : -1;
+  const staleMs =
+    process.env.PROGRESS_STALE_MS !== undefined ? Number(process.env.PROGRESS_STALE_MS) : -1;
+
   for (const [id, entry] of Object.entries(state.entries)) {
     if (!entry || typeof entry !== 'object') {
       delete state.entries[id];
       continue;
     }
     if (
+      ttlMs >= 0 &&
       (entry.status === 'done' || entry.status === 'error') &&
-      now - (entry.updatedAt || 0) > ttl
+      now - (entry.updatedAt || 0) > ttlMs
     ) {
       delete state.entries[id];
       continue;
     }
-    if (entry.status === 'running' && staleMs > 0 && now - (entry.updatedAt || 0) > staleMs) {
+    if (staleMs > 0 && entry.status === 'running' && now - (entry.updatedAt || 0) > staleMs) {
       delete state.entries[id];
     }
   }

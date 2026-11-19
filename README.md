@@ -2,11 +2,12 @@
 
 A non-blocking twin of `question` so coding agents can signal long-running work without looking dead, plus a **zero-token-burn out-of-band relay** so the agent never has to poll `stdout` just to keep the UI alive. (Also described as low-token-burn or token-minimizing progress: token cost scales with milestones, not with task duration.)
 
-**The tree is the glance-able layer above the transcript.** Thought traces, tool calls and command output are a wall of text; the rollup is the live, high-level view of what is happening, what is blocked, and what is next — so a user can read the pill instead of scrolling the log.
+Two tools back this: `progress` (write) and `list` (read-only companion: your session's trees as text,
+with user-dismissed entries hidden by default — useful before planning or when unsure what is tracked). **The tree is the glance-able layer above the transcript.** Thought traces, tool calls and command output are a wall of text; the rollup is the live, high-level view of what is happening, what is blocked, and what is next — so a user can read the pill instead of scrolling the log.
 
 Implements the [Agent Progress Tool proposal](https://gist.github.com/jakedowns/ddc4eb4817184a074c82c61dc6e7228c) for OpenCode 2, and is written as a portable reference implementation that any model, agent, or harness can copy, adapt, or train on.
 
-**Versions:** MCP server `2.6.2` · OpenCode plugin `2.11.0`
+**Versions:** MCP server `2.7.0` · OpenCode plugin `2.12.0`
 
 > [!IMPORTANT]
 > **No `AGENTS.md` edits required.** The bundled OpenCode plugin injects the progress & relay rules directly into every session's system instructions, and the MCP `progress` tool response reinforces them at the exact moment an agent starts a task — so agents know to wrap long-running commands with `progress-relay` *before* their first build, not after. Progress reporting works without any prompt engineering.
@@ -295,7 +296,7 @@ Both the MCP server and the relay share [`mcp-server/state-store.js`](./mcp-serv
 - **Atomic writes** — write to a temp file in the same directory, `fsync`, then `rename`. Readers never see partial JSON.
 - **Cross-process lock** — a `.lock` file serializes read-modify-write cycles, so concurrent child relays updating sibling `parentId` nodes do not lose updates or corrupt parent roll-ups.
 - **Stale-lock recovery** — a lock older than 15 seconds is broken rather than wedging the command.
-- **TTL cleanup** — completed entries older than 10 minutes are pruned on the next state write (`PROGRESS_TTL_MS`).
+- **TTL cleanup (opt-in)** — nothing is pruned by default; entries ride so the store doubles as a history/report. Enable completed-entry retention with `PROGRESS_AUTO_PRUNE_S=<seconds>` (legacy `PROGRESS_TTL_MS` also works), and the orphaned-`running` sweep with `PROGRESS_STALE_MS`.
 - **Session scoping** — when `sessionId` is resolved, keys are `${sessionId}:${id}` and entries carry `sessionId`; parent lookups stay within that namespace. With no session, keys remain flat (`build`) for backwards compatibility.
 - **Path override** — `PROGRESS_STATE_PATH` for tests, multiple harnesses, or fully isolated sessions.
 
@@ -468,7 +469,7 @@ The plugin at `plugin/` targets the OpenCode **V2** plugin API and exposes four 
      (default `8000`). Only applies when `autoHideDone` is enabled.
    - `autoHideDone`: set to `true` to hide completed tasks after `successHoldMs`,
      regardless of dismissal. **Default `false`**: done entries you never
-     dismissed stay visible until you dismiss them or the store prunes them —
+     dismissed stay visible indefinitely (retention is opt-in, see `PROGRESS_AUTO_PRUNE_S`) —
      including across plugin reloads.
    - `showDone`: set to `false` to drop completed tasks immediately.
    - `scope`: `"session"` (default) shows only the current chat's tasks; `"all"` shows every
@@ -498,8 +499,14 @@ The plugin at `plugin/` targets the OpenCode **V2** plugin API and exposes four 
      as JSONL in `~/.opencode-progress-nudges.log` (override the path with
      `PROGRESS_NUDGE_LOG`). Events: `config`, `strict` (silent-run / forced /
      stale-progress), `wall-clock`, `idle-reminder`, `child-list-error`
-     (detected from the tool result), `unhinged`. **Default `false`**.
-     Example: `grep -c '"event":"wall-clock"' ~/.opencode-progress-nudges.log`.
+     (detected from the tool result), `transition` (per-entry `from`/`to`
+     lifecycle changes — start, repeat, finish, reopen, pause), `unhinged`.
+     **Default `false`**. Example:
+     `grep -c '"event":"wall-clock"' ~/.opencode-progress-nudges.log`.
+     Wall-clock tuning: `wallClockMs` (threshold, default 120s), only fires
+     for sessions with a tool call in the last 10 minutes (a session stalled
+     in a provider queue is not neglectful), and caps at 3 reminders per
+     non-progress stretch.
 
    Running and waiting tasks stay visible. Errors stay visible until dismissed or updated on
    purpose, so a failure cannot silently scroll away. Completed tasks stay visible too unless
@@ -514,8 +521,8 @@ The plugin at `plugin/` targets the OpenCode **V2** plugin API and exposes four 
    done→running flip does not revive it); a child *failing* brings it back. With more than one
    root task, the pill shows `(N · agg%)` as a prefix — the number of roots and the mean of
    their progress. No extra agent hook is needed: report `status: "done"` once and the view
-   handles retention and hiding. Completed entries are pruned after 60 minutes by default
-   (`PROGRESS_TTL_MS`, e.g. `86400000` for a day).
+   handles retention and hiding. Entries are kept by default for reporting; opt into
+   pruning with `PROGRESS_AUTO_PRUNE_S=<seconds>` (and `PROGRESS_STALE_MS` for orphans).
 
 3. Verify:
 

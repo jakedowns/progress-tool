@@ -1,6 +1,6 @@
 {
   "name": "progress-mcp-server",
-  "version": "2.6.2",
+  "version": "2.7.0",
   "description": "MCP server and zero-token-burn out-of-band relay for agent progress reporting",
   "main": "index.js",
   "type": "commonjs",
