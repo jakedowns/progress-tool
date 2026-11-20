@@ -30,6 +30,7 @@ import {
   type WallClockState,
 } from "./monitor.js";
 import { logNudge, nudgeLoggingEnabled, diffStatuses, type StatusSnapshot } from "./telemetry.js";
+import { resolveMcpLaunch } from "./mcp.js";
 
 /**
  * The plugin's own version, read at runtime so a running server part can be
@@ -93,23 +94,60 @@ export default Plugin.define({
     // single `opencode plugin add` installs everything. A dev checkout that
     // loads this plugin by path won't resolve the package — skip silently.
     // Opt out with { options: { autoRegisterMcp: false } }.
+    //
+    // The interpreter must be a real JS runtime: `process.execPath` is the
+    // `opencode` binary under OpenCode Desktop, and handing it the MCP
+    // entrypoint makes it chdir into the `.js` file (ENOTDIR). Resolve
+    // node/bun/npx instead; see src/mcp.ts and issue #1.
     if (ctx.options?.autoRegisterMcp !== false) {
       try {
         const requireFromHere = createRequire(import.meta.url);
         const mcpEntry = requireFromHere.resolve("@jakedowns/progress-tool-mcp");
-        await ctx.mcp.transform((editor) => {
-          if (!editor.get("progress-server")) {
+        const launch = resolveMcpLaunch(mcpEntry, {
+          runtime: typeof ctx.options?.mcpRuntime === "string" ? ctx.options.mcpRuntime : undefined,
+        });
+        if (!launch) {
+          console.warn(
+            `[opencode-progress] v${pluginVersion} progress-server NOT registered: no node/bun/npx found. ` +
+              `Set { "options": { "mcpRuntime": "/absolute/path/to/node" } } or configure ` +
+              `mcp.servers.progress-server manually with command ["npx", "-y", "@jakedowns/progress-tool-mcp"]`
+          );
+        } else {
+          let registered = false;
+          await ctx.mcp.transform((editor) => {
+            if (editor.get("progress-server")) return;
             editor.set("progress-server", {
               type: "local",
-              command: [process.execPath, mcpEntry],
+              command: launch.command,
             });
+            registered = true;
+          });
+          if (registered) {
+            console.log(
+              `[opencode-progress] v${pluginVersion} registered progress-server (${launch.source}): ${launch.command.join(" ")}`
+            );
+          } else {
+            console.log(
+              `[opencode-progress] v${pluginVersion} progress-server already configured — leaving it as is`
+            );
           }
-        });
-        console.log(`[opencode-progress] registered MCP server from ${mcpEntry}`);
-      } catch {
+        }
+      } catch (error) {
         // Companion package not installed (local dev) — keep the existing config.
+        if ((error as { code?: string } | undefined)?.code !== "MODULE_NOT_FOUND") {
+          console.warn(`[opencode-progress] v${pluginVersion} progress-server auto-registration skipped: ${String(error)}`);
+        }
       }
     }
+
+    // Whether the `progress` tool is actually present in the outgoing request.
+    // A config entry is not proof the MCP server connected, and MCP connects
+    // asynchronously, so inspect the model's tool set on every context hook.
+    // This keeps guidance honest: no "call the progress tool" nudges when the
+    // tool is unavailable (issue #1, related UX).
+    const progressTool = { available: false, warned: false };
+    const hasProgressTool = (tools: Record<string, unknown> | undefined): boolean =>
+      Boolean(tools) && Object.keys(tools ?? {}).some((name) => /progress/i.test(name));
 
     let signature = JSON.stringify(readProgressState().entries ?? {});
 
@@ -138,12 +176,56 @@ export default Plugin.define({
     // instructions so agents know about the out-of-band relay BEFORE their
     // first long-running command, not only from the `progress` tool response.
     // Opt out per project with `{ "options": { "injectInstructions": false } }`.
+    //
+    // Rules are only injected while the `progress` tool is actually in the
+    // model's tool set: if the MCP server failed to start, telling the agent to
+    // call a tool that doesn't exist just produces phantom tool calls.
+    const strictMode = normalizeStrictMode(ctx.options);
+    const staleAfterMs = normalizeStaleAfterMs(ctx.options);
+    const strictThreshold =
+      typeof ctx.options?.strictThreshold === 'number' && ctx.options.strictThreshold >= 2
+        ? ctx.options.strictThreshold
+        : 3;
+    const verbose = nudgeLoggingEnabled(ctx.options);
+
     let rulesRegistration: Awaited<ReturnType<typeof ctx.session.hook>> | undefined;
-    if (instructionsEnabled(ctx.options)) {
-      rulesRegistration = await ctx.session.hook("context", (event) => {
+    if (instructionsEnabled(ctx.options) || strictMode !== 'off') {
+      const injectRules = instructionsEnabled(ctx.options);
+      rulesRegistration = await ctx.session.hook("context", async (event) => {
+        let available = hasProgressTool(
+          (event as unknown as { tools?: Record<string, unknown> }).tools
+        );
+
+        // Code Mode may expose MCP tools only through the `tools` namespace in
+        // the prompt instead of as direct entries. Fall back to the registry,
+        // which lists every registered tool regardless of how it is surfaced.
+        if (!available) {
+          try {
+            available = (await ctx.tool.list()).some((tool) => /progress/i.test(tool.id));
+          } catch {
+            // Registry unavailable — treat the request's tool set as truth.
+          }
+        }
+        progressTool.available = available;
+
+        if (!progressTool.available) {
+          if (!progressTool.warned) {
+            progressTool.warned = true;
+            console.warn(
+              `[opencode-progress] v${pluginVersion} progress tool not available — skipping rule injection and strict nudges until progress-server connects`
+            );
+          }
+          return;
+        }
+
+        if (progressTool.warned) {
+          progressTool.warned = false;
+          console.log(`[opencode-progress] v${pluginVersion} progress tool available — guidance enabled`);
+        }
+        if (!injectRules) return;
         event.system.push({ type: "text", text: PROGRESS_RULES });
       });
-      console.log("[opencode-progress] progress rules injected into system instructions");
+      if (injectRules) console.log("[opencode-progress] progress rules injected into system instructions");
     }
 
     // Ship the usage + demo skills with the package so installing the plugin
@@ -167,14 +249,7 @@ export default Plugin.define({
 
     // Strict mode: watch tool calls and nudge when the agent works silently
     // (no task entry) or leaves pending tasks' progress unchanged.
-    const strictMode = normalizeStrictMode(ctx.options);
-    const staleAfterMs = normalizeStaleAfterMs(ctx.options);
-    const strictThreshold =
-      typeof ctx.options?.strictThreshold === 'number' && ctx.options.strictThreshold >= 2
-        ? ctx.options.strictThreshold
-        : 3;
     const monitors = new Map<string, MonitorState>();
-    const verbose = nudgeLoggingEnabled(ctx.options);
 
     // Behaviour telemetry: compare every observed store snapshot against the
     // previous one so we can measure how agents drive the lifecycle
@@ -207,6 +282,9 @@ export default Plugin.define({
     if (strictMode !== 'off') {
       toolHook = await ctx.tool.hook('execute.after', (event) => {
         try {
+          // Guidance is only meaningful when the progress tool exists; the
+          // context hook flips this on once the MCP server has connected.
+          if (!progressTool.available) return;
           const isProgressCall = /(^|_)progress$/.test(event.tool);
           const entries = Object.values(readProgressState().entries ?? {}).filter(
             (entry) => entry && entry.sessionId === event.sessionID
@@ -293,7 +371,7 @@ export default Plugin.define({
           console.error('[opencode-progress] strict-mode monitor failed', String(error));
         }
       });
-      console.log(`[opencode-progress] v${pluginVersion} strict mode: ${strictMode} (threshold ${strictThreshold})`);
+      console.log(`[opencode-progress] v${pluginVersion} strict mode: ${strictMode} (threshold ${strictThreshold}, gated on progress tool availability)`);
     if (verbose) {
       logNudge({ event: "config", strictMode, strictThreshold, wallClockMs: normalizeWallClockMs(ctx.options), idleReminder: ctx.options?.idleReminder !== false, unhinged: ctx.options?.unhinged === true });
     }

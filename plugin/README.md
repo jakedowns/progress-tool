@@ -15,6 +15,15 @@ composer. The plugin also installs and registers the MCP server
 (`@jakedowns/progress-tool-mcp`) automatically, and ships four skills
 (`progress-tool`, `delegation`, `osc-demo`, `tree-demo`).
 
+The MCP entrypoint is spawned with a real JavaScript runtime (`node`, then
+`bun`, then `npx -y @jakedowns/progress-tool-mcp`). It deliberately never uses
+`process.execPath`, which is the `opencode` binary in OpenCode Desktop. If no
+runtime is found, auto-registration is skipped with a warning, and the progress
+rules / strict-mode nudges stay off until the `progress` tool is actually
+available to the model. Pin a runtime with
+`{ "options": { "mcpRuntime": "/absolute/path/to/node" } }` if detection picks
+the wrong one.
+
 Prefer manual configuration? Add to `opencode.json`:
 
 ```jsonc
@@ -54,6 +63,7 @@ Pass under the plugin entry's `options` in `opencode.json`:
 | `injectInstructions` | `true` | inject progress/relay rules into every session |
 | `registerSkills` | `true` | register the bundled skills |
 | `autoRegisterMcp` | `true` | register `@jakedowns/progress-tool-mcp` automatically |
+| `mcpRuntime` | auto | absolute path to the `node`/`bun` used to spawn the MCP server (auto-detected; set this if detection picks wrong) |
 | `strictMode` | `"nudge"` | `"nudge"` / `"force"` / `"off"` tool-call monitor |
 | `wallClockMs` | `120000` | wall-clock nudge threshold (`0` disables) |
 | `idleReminder` | `true` | turn-end nudge when open tasks remain |

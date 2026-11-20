@@ -7,7 +7,7 @@ with user-dismissed entries hidden by default — useful before planning or when
 
 Implements the [Agent Progress Tool proposal](https://gist.github.com/jakedowns/ddc4eb4817184a074c82c61dc6e7228c) for OpenCode 2, and is written as a portable reference implementation that any model, agent, or harness can copy, adapt, or train on.
 
-**Versions:** MCP server `2.8.0` · OpenCode plugin `2.14.0`
+**Versions:** MCP server `2.8.0` · OpenCode plugin `2.14.1`
 
 ## Install from npm
 
@@ -22,9 +22,16 @@ opencode plugin add @jakedowns/progress-tool-opencode-plugin
 
 The plugin depends on the MCP package and **registers `progress-server` for you**
 (`autoRegisterMcp: false` to opt out), so this one command is the whole install.
+It spawns the server with a detected `node`/`bun` runtime — never with
+`process.execPath`, which is the `opencode` binary under OpenCode Desktop. Pin
+one with `{ "options": { "mcpRuntime": "/absolute/path/to/node" } }` if needed.
 Restart the service or reload the window; the progress pill appears above the
 composer, and the MCP tools (`progress`, `list`) plus the `progress-relay` /
 `progress-emit` bins become available.
+
+> If the MCP server fails to start, the plugin withholds its injected progress
+> rules and strict-mode nudges until the `progress` tool actually shows up in the
+> model's tool set, so agents are never told to call a tool that isn't there.
 
 Manual configuration, if you prefer:
 
