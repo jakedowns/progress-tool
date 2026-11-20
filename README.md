@@ -9,6 +9,44 @@ Implements the [Agent Progress Tool proposal](https://gist.github.com/jakedowns/
 
 **Versions:** MCP server `2.8.0` · OpenCode plugin `2.14.0`
 
+## Install from npm
+
+Published packages:
+
+- Plugin — [`@jakedowns/progress-tool-opencode-plugin`](https://www.npmjs.com/package/@jakedowns/progress-tool-opencode-plugin)
+- MCP server + relay — [`@jakedowns/progress-tool-mcp`](https://www.npmjs.com/package/@jakedowns/progress-tool-mcp)
+
+```bash
+opencode plugin add @jakedowns/progress-tool-opencode-plugin
+```
+
+The plugin depends on the MCP package and **registers `progress-server` for you**
+(`autoRegisterMcp: false` to opt out), so this one command is the whole install.
+Restart the service or reload the window; the progress pill appears above the
+composer, and the MCP tools (`progress`, `list`) plus the `progress-relay` /
+`progress-emit` bins become available.
+
+Manual configuration, if you prefer:
+
+```jsonc
+{
+  "plugins": ["@jakedowns/progress-tool-opencode-plugin"],
+  "mcp": {
+    "servers": {
+      "progress-server": {
+        "type": "local",
+        "command": ["npx", "-y", "@jakedowns/progress-tool-mcp"]
+      }
+    }
+  }
+}
+```
+
+Running from a source checkout instead? Point both entries at this repo's
+`plugin/` directory and `mcp-server/index.js` — see Option A below.
+
+---
+
 > [!IMPORTANT]
 > **No `AGENTS.md` edits required.** The bundled OpenCode plugin injects the progress & relay rules directly into every session's system instructions, and the MCP `progress` tool response reinforces them at the exact moment an agent starts a task — so agents know to wrap long-running commands with `progress-relay` *before* their first build, not after. Progress reporting works without any prompt engineering.
 >
