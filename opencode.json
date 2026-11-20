@@ -3,9 +3,7 @@
     "servers": {
       "progress-server": {
         "type": "local",
-        "command": [
-          "/media/share/progress-tool/mcp-server/index.js"
-        ]
+        "command": ["node", "mcp-server/index.js"]
       }
     }
   }
