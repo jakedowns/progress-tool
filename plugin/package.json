@@ -1,7 +1,7 @@
 {
-  "name": "opencode-progress-plugin",
-  "version": "2.13.5",
-  "description": "OpenCode plugin: native progress indicators for the TUI and desktop GUI (progress tool + out-of-band relay)",
+  "name": "@jakedowns/progress-tool-opencode-plugin",
+  "version": "2.14.0",
+  "description": "OpenCode plugin: native progress indicators for the TUI and desktop GUI, with an out-of-band relay for zero-token long-running command telemetry",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
@@ -12,14 +12,17 @@
   "files": [
     "src",
     "dist",
-    "skills"
+    "skills",
+    "README.md"
   ],
   "scripts": {
     "build": "vite build",
     "dev": "vite build --watch",
-    "test": "node --test test/"
+    "test": "node --test test/",
+    "prepublishOnly": "npm test && npm run build"
   },
   "dependencies": {
+    "@jakedowns/progress-tool-mcp": "^2.8.0",
     "@opencode/plugin": "^2.3.0"
   },
   "devDependencies": {
@@ -34,5 +37,29 @@
   },
   "engines": {
     "node": ">=18"
-  }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "MIT",
+  "author": "Jake Downs <mail@jakedowns.com>",
+  "homepage": "https://github.com/jakedowns/progress-tool#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jakedowns/progress-tool.git",
+    "directory": "plugin"
+  },
+  "bugs": {
+    "url": "https://github.com/jakedowns/progress-tool/issues"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "progress",
+    "progress-bar",
+    "mcp",
+    "relay",
+    "telemetry",
+    "osc-9-4"
+  ]
 }

@@ -7,6 +7,7 @@
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { Plugin, Skill } from "@opencode/plugin";
 import { ProgressRpc } from "./rpc.js";
@@ -88,6 +89,28 @@ function loadPackagedSkillBody(id: string): string {
 export default Plugin.define({
   id: "opencode-progress",
   async setup(ctx) {
+    // Auto-register the MCP server from the published companion package so a
+    // single `opencode plugin add` installs everything. A dev checkout that
+    // loads this plugin by path won't resolve the package — skip silently.
+    // Opt out with { options: { autoRegisterMcp: false } }.
+    if (ctx.options?.autoRegisterMcp !== false) {
+      try {
+        const requireFromHere = createRequire(import.meta.url);
+        const mcpEntry = requireFromHere.resolve("@jakedowns/progress-tool-mcp");
+        await ctx.mcp.transform((editor) => {
+          if (!editor.get("progress-server")) {
+            editor.set("progress-server", {
+              type: "local",
+              command: [process.execPath, mcpEntry],
+            });
+          }
+        });
+        console.log(`[opencode-progress] registered MCP server from ${mcpEntry}`);
+      } catch {
+        // Companion package not installed (local dev) — keep the existing config.
+      }
+    }
+
     let signature = JSON.stringify(readProgressState().entries ?? {});
 
     const registration = await ctx.rpc.register(ProgressRpc, {

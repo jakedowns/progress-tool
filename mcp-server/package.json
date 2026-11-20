@@ -1,7 +1,7 @@
 {
-  "name": "progress-mcp-server",
-  "version": "2.7.1",
-  "description": "MCP server and zero-token-burn out-of-band relay for agent progress reporting",
+  "name": "@jakedowns/progress-tool-mcp",
+  "version": "2.8.0",
+  "description": "MCP server and zero-token-burn out-of-band relay for agent progress reporting (progress, list, progress-relay, progress-emit)",
   "main": "index.js",
   "type": "commonjs",
   "bin": {
@@ -13,13 +13,39 @@
     "index.js",
     "state-store.js",
     "relay.js",
+    "report.js",
     "progress-relay.js",
-    "progress-emit.js"
+    "progress-emit.js",
+    "README.md"
   ],
   "scripts": {
-    "test": "node --test test/smoke.test.js"
+    "test": "node --test test/smoke.test.js",
+    "prepublishOnly": "npm test"
   },
   "engines": {
     "node": ">=18"
-  }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "MIT",
+  "author": "Jake Downs <mail@jakedowns.com>",
+  "homepage": "https://github.com/jakedowns/progress-tool#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jakedowns/progress-tool.git",
+    "directory": "mcp-server"
+  },
+  "bugs": {
+    "url": "https://github.com/jakedowns/progress-tool/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "progress",
+    "progress-relay",
+    "telemetry",
+    "osc-9-4",
+    "agents"
+  ]
 }
