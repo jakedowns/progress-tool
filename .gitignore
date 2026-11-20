@@ -17,3 +17,6 @@ npm-debug.log*
 # Environment
 .env
 .env.local
+
+# Symlinked dependency tree (see README dev notes)
+node_modules
