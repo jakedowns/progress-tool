@@ -108,6 +108,8 @@ function MenuRow(props: {
   depth: number;
   options: BarOptions;
   onDismiss?: () => void;
+  leaving?: boolean;
+  leaveDelayMs?: number;
   hasChildren?: boolean;
   collapsed?: boolean;
   onToggle?: () => void;
@@ -118,7 +120,7 @@ function MenuRow(props: {
   return (
     <div
       onClick={(event: MouseEvent) => {
-        if (!props.hasChildren) return;
+        if (!props.hasChildren || props.leaving) return;
         // Do not hijack text selection drags.
         const selected = window.getSelection?.()?.toString();
         if (selected) return;
@@ -132,7 +134,11 @@ function MenuRow(props: {
         "padding-left": `${props.depth * 14}px`,
         "padding-top": "5px",
         "padding-bottom": "5px",
-        cursor: props.hasChildren ? "pointer" : "default",
+        cursor: props.hasChildren && !props.leaving ? "pointer" : "default",
+        transform: props.leaving ? "translateX(120%)" : "translateX(0)",
+        opacity: props.leaving ? "0" : "1",
+        transition: "transform 0.35s ease-in, opacity 0.3s ease-in",
+        "transition-delay": `${props.leaveDelayMs ?? 0}ms`,
       }}
     >
       <Show when={props.hasChildren}>
@@ -391,6 +397,23 @@ export default Plugin.define({
         collapsedRootMap(visibleRoots(), expandByDefault, expandedOverrides());
       const rows = () => visibleRows(visibleRoots(), collapsedMap());
 
+      // Slide-away dismissal: mark the root as leaving (still rendered),
+      // animate, then actually dismiss so the filter removes it. Dismiss-all
+      // staggers the rows slightly.
+      const [leaving, setLeaving] = createSignal<Record<string, number>>({});
+      const dismissAnimated = (root: TreeNode, delayMs = 0) => {
+        if (leaving()[root.key] !== undefined) return;
+        setLeaving((prev) => ({ ...prev, [root.key]: delayMs }));
+        setTimeout(() => {
+          dismissKey(props.session, root.key, root.status ?? "");
+          setLeaving((prev) => {
+            const next = { ...prev };
+            delete next[root.key];
+            return next;
+          });
+        }, delayMs + 380);
+      };
+
       // Our own scroll container: <For> rebuilds row DOM when the tree
       // changes (e.g. after a dismiss), which resets scrollTop. Track the
       // user's position and restore it after each re-render.
@@ -447,13 +470,18 @@ export default Plugin.define({
                           [root.key]: !(prev[root.key] ?? expandByDefault),
                         }))
                       }
-                      onDismiss={() => dismissKey(props.session, root.key, root.status ?? "")}
+                      onDismiss={() => dismissAnimated(root)}
+                      leaving={leaving()[root.key] !== undefined}
+                      leaveDelayMs={leaving()[root.key] ?? 0}
                     />
                     <div
                       style={{
                         display: "grid",
                         "grid-template-rows": isCollapsed() ? "0fr" : "1fr",
-                        transition: "grid-template-rows 0.5s ease-in-out",
+                        transition: "grid-template-rows 0.5s ease-in-out, transform 0.35s ease-in, opacity 0.3s ease-in",
+                        transform: leaving()[root.key] !== undefined ? "translateX(120%)" : "translateX(0)",
+                        opacity: leaving()[root.key] !== undefined ? "0" : "1",
+                        "transition-delay": `${leaving()[root.key] ?? 0}ms`,
                       }}
                     >
                       <div style={{ overflow: "hidden", "min-height": "0" }}>
@@ -471,9 +499,9 @@ export default Plugin.define({
             <button
               type="button"
               onClick={() => {
-                for (const root of visibleRoots()) {
-                  dismissKey(props.session, root.key, root.status ?? "");
-                }
+                visibleRoots().forEach((root, index) =>
+                  dismissAnimated(root, Math.min(index, 10) * 45)
+                );
               }}
               style={{
                 "margin-top": "6px",
