@@ -40,6 +40,7 @@ import {
 } from "./monitor.js";
 import { logNudge, nudgeLoggingEnabled, diffStatuses, type StatusSnapshot } from "./telemetry.js";
 import { resolveMcpLaunch } from "./mcp.js";
+import { injectParentSession, isSubagentTool } from "./subagent.js";
 import {
   PACKAGED_SKILLS,
   enabledSkills,
@@ -363,52 +364,67 @@ export default Plugin.define({
     }
     }
 
+    // Subagent attribution, part 1: `session.created` carries parentID the
+    // moment a child session exists, so map (and adopt) before the child's
+    // first progress call. Consumed in the background; the stream ends when
+    // the plugin unloads.
+    if (ctx.event?.subscribe) void (async () => {
+      try {
+        for await (const event of ctx.event.subscribe({ types: ['session.created'] })) {
+          if (event.type !== 'session.created') continue;
+          const child = event.data.sessionID;
+          const parent = event.data.parentID;
+          if (!child || !parent) continue;
+          if (recordChildSession(child, parent)) adoptChildEntries(child, parent);
+        }
+      } catch (error) {
+        console.error('[opencode-progress] session.created subscription failed', String(error));
+      }
+    })();
+
+    // Subagent attribution, part 2 (fallback): stamp the parent session id
+    // into the child's task prompt. Even a child whose map link is missing
+    // then reports under the session the user is watching. The injected
+    // attribution rules explain that a prompt-supplied id wins.
+    await ctx.tool.hook('execute.before', (event) => {
+      if (!isSubagentTool(event.tool)) return;
+      if (!progressTool.available) return;
+      injectParentSession(event.input, event.sessionID);
+    });
+
     // Idle reminder: at turn end (session about to go idle) with open,
     // non-dismissed entries, admit ONE synthetic message — it runs in the
     // same execution instead of the session going idle, so the model gets a
     // turn-end reminder ("you have a tree of todos pending"). Debounced by
     // entry signature + cooldown + per-run cap (monitor.ts).
-    //
-    // The same hook records subagent children (the idle event carries
-    // `background[].childSessionID`), so it is registered even when the
-    // reminder itself is disabled.
     const idleTrackers = new Map<string, IdleTracker>();
     const idleReminderEnabled = ctx.options?.idleReminder !== false;
     let idleHook: Awaited<ReturnType<typeof ctx.session.hook>> | undefined;
-    idleHook = await ctx.session.hook('experimental.idle', async (event) => {
-      try {
-        for (const work of event.background ?? []) {
-          if (work && work.kind === 'subagent') {
-            if (recordChildSession(work.childSessionID, work.sessionID)) {
-              adoptChildEntries(work.childSessionID, work.sessionID);
-            }
+    if (idleReminderEnabled) {
+      idleHook = await ctx.session.hook('experimental.idle', async (event) => {
+        try {
+          const entries = Object.values(readProgressState().entries ?? {}).filter(
+            (entry) => entry && entry.sessionId === event.sessionID
+          );
+          const tracker = idleTrackers.get(event.sessionID) ?? { signature: '', lastAt: 0, count: 0 };
+          const decision = idleReminder(tracker, entries, { now: Date.now() });
+          idleTrackers.set(event.sessionID, {
+            signature: decision.signature,
+            lastAt: decision.lastAt,
+            count: decision.count,
+          });
+          if (decision.action !== 'remind' || !decision.message) return;
+          console.log(`[opencode-progress] v${pluginVersion} idle reminder (${decision.count}) for ${event.sessionID}`);
+          if (verbose) {
+            logNudge({ event: 'idle-reminder', sessionID: event.sessionID, count: decision.count, openEntries: decision.signature.split(' | ').filter(Boolean).length });
           }
+          await ctx.session.synthetic({ sessionID: event.sessionID, text: decision.message });
+        } catch (error) {
+          console.error('[opencode-progress] idle reminder failed', String(error));
         }
-      } catch (error) {
-        console.error('[opencode-progress] session map update failed', String(error));
-      }
-      if (!idleReminderEnabled) return;
-      try {
-        const entries = Object.values(readProgressState().entries ?? {}).filter(
-          (entry) => entry && entry.sessionId === event.sessionID
-        );
-        const tracker = idleTrackers.get(event.sessionID) ?? { signature: '', lastAt: 0, count: 0 };
-        const decision = idleReminder(tracker, entries, { now: Date.now() });
-        idleTrackers.set(event.sessionID, {
-          signature: decision.signature,
-          lastAt: decision.lastAt,
-          count: decision.count,
-        });
-        if (decision.action !== 'remind' || !decision.message) return;
-        console.log(`[opencode-progress] v${pluginVersion} idle reminder (${decision.count}) for ${event.sessionID}`);
-        if (verbose) {
-          logNudge({ event: 'idle-reminder', sessionID: event.sessionID, count: decision.count, openEntries: decision.signature.split(' | ').filter(Boolean).length });
-        }
-        await ctx.session.synthetic({ sessionID: event.sessionID, text: decision.message });
-      } catch (error) {
-        console.error('[opencode-progress] idle reminder failed', String(error));
-      }
-    });
+
+      });
+    }
 
     // "Unhinged" mode (opt-in): append a progress reminder to every user
     // message so the agent re-checks its task list whenever the workload

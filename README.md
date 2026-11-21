@@ -256,8 +256,8 @@ With no session flag and no session environment variables, keys stay flat (`buil
 
 A subagent runs in its own child session, so its tool calls carry the child session id. Without help, its progress would land in a scope the parent's pill never shows. Two layers close that gap:
 
-1. **Automatic (plugin):** when a subagent starts, the plugin's idle hook sees `background[].childSessionID` and records `child → parent` in `~/.opencode-progress-sessions.json` (override with `PROGRESS_SESSION_MAP_PATH`). The MCP server and relay resolve that map before writing — following chains for nested subagents — and re-key any entries the child wrote before the link existed. The work appears in the parent's pill, not an orphaned child scope.
-2. **Instruction fallback:** every session's injected rules state its own session id and ask it to put `progress sessionId: <id>` in subagent prompts. A child that sees that line passes `sessionId` to `progress` and `--session` to `progress-relay`, so attribution still works if the map write lags or the plugin is unavailable.
+1. **Automatic (plugin):** the plugin subscribes to `session.created`, where OpenCode exposes `parentID` the moment a child session exists, and records `child → parent` in `~/.opencode-progress-sessions.json` (override with `PROGRESS_SESSION_MAP_PATH`). The MCP server and relay resolve that map before writing — following chains for nested subagents — and re-key any entries the child wrote before the link existed.
+2. **Prompt stamping (fallback):** the plugin's `execute.before` hook also appends `progress sessionId: <parent>` (plus the `progress`/`progress-relay` forms) to the `subagent`/`task` prompt. That covers a child whose very first progress call beats the map write, and older engines without the event. Every session's injected rules explain that a prompt-supplied id wins.
 
 The map is merge-written under a lock, pruned after 30 days, bounded to 8 hops (cycle-safe), and unknown sessions resolve to themselves. The parent still mirrors the workstream as its own child task, per the delegation guidance.
 
