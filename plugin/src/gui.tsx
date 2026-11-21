@@ -396,6 +396,7 @@ export default Plugin.define({
       const collapsedMap = () =>
         collapsedRootMap(visibleRoots(), expandByDefault, expandedOverrides());
       const rows = () => visibleRows(visibleRoots(), collapsedMap());
+      const doneRoots = () => visibleRoots().filter((root) => root.status === "done");
 
       // Slide-away dismissal: mark the root as leaving (still rendered) and
       // slide it out sideways; once it has cleared the right edge, collapse
@@ -438,6 +439,34 @@ export default Plugin.define({
           if (listEl && listEl.scrollTop !== target) listEl.scrollTop = target;
         });
       });
+
+      // Scroll the list so a root sits at the top of the viewport before its
+      // exit animation starts.
+      const scrollToRoot = (key: string) => {
+        if (!listEl) return;
+        const el = listEl.querySelector<HTMLElement>(
+          `[data-root-key="${key.replace(/"/g, '\\"')}"]`
+        );
+        if (!el) return;
+        const top =
+          el.getBoundingClientRect().top -
+          listEl.getBoundingClientRect().top +
+          listEl.scrollTop;
+        const next = Math.max(0, top - 2);
+        listEl.scrollTop = next;
+        scrollTop = next;
+      };
+
+      // Dismiss a batch (done / all): first bring the first row that will
+      // animate into view, then stagger the rows.
+      const dismissMany = (roots: TreeNode[]) => {
+        const pending = roots.filter((root) => leaving()[root.key] === undefined);
+        if (pending.length === 0) return;
+        scrollToRoot(pending[0].key);
+        pending.forEach((root, index) =>
+          dismissAnimated(root, Math.min(index, 10) * 45)
+        );
+      };
 
       const footerButtonStyle = {
         flex: "1 1 auto",
@@ -492,6 +521,7 @@ export default Plugin.define({
                   // Outer wrapper collapses vertically once the row has slid
                   // fully past the right edge.
                   <div
+                    data-root-key={root.key}
                     style={{
                       display: "grid",
                       "grid-template-rows": leavingCollapsed()[root.key] ? "0fr" : "1fr",
@@ -554,31 +584,21 @@ export default Plugin.define({
                 "flex": "0 0 auto",
               }}
             >
-              <Show when={visibleRoots().some((root) => root.status === "done")}>
+              <Show when={doneRoots().length > 0}>
                 <button
                   type="button"
-                  onClick={() => {
-                    visibleRoots()
-                      .filter((root) => root.status === "done")
-                      .forEach((root, index) =>
-                        dismissAnimated(root, Math.min(index, 10) * 45)
-                      );
-                  }}
+                  onClick={() => dismissMany(doneRoots())}
                   style={footerButtonStyle}
                 >
-                  ✓ Dismiss done
+                  ✓ Dismiss done ({doneRoots().length})
                 </button>
               </Show>
               <button
                 type="button"
-                onClick={() => {
-                  visibleRoots().forEach((root, index) =>
-                    dismissAnimated(root, Math.min(index, 10) * 45)
-                  );
-                }}
+                onClick={() => dismissMany(visibleRoots())}
                 style={footerButtonStyle}
               >
-                ✕ Dismiss all
+                ✕ Dismiss all ({visibleRoots().length})
               </button>
             </div>
           </Show>
