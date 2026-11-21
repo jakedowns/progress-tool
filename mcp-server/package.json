@@ -1,6 +1,6 @@
 {
   "name": "@jakedowns/progress-tool-mcp",
-  "version": "2.9.0",
+  "version": "2.10.0",
   "description": "MCP server and zero-token-burn out-of-band relay for agent progress reporting (progress, list, progress-relay, progress-emit)",
   "main": "index.js",
   "type": "commonjs",
