@@ -1,9 +1,9 @@
 ---
-name: Delegation (Subagents)
+name: [progress-tool] Delegation (Subagents)
 description: Use subagents well — fan out independent research and verification in parallel, pick explore vs general, inherit the session's model, and avoid parallel-edit conflicts
 ---
 
-# Delegating work to subagents
+# [progress-tool] Delegation (Subagents)
 
 OpenCode runs subagents in their own **child sessions** with fresh context. They
 work in the background; you get a report when each goes idle, and again after

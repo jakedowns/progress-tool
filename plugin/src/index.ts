@@ -65,25 +65,25 @@ const PLUGIN_DIR = path.dirname(fileURLToPath(new URL("../package.json", import.
 const PACKAGED_SKILLS = [
   {
     id: "progress-tool",
-    name: "Progress Tool Usage",
+    name: "[progress-tool] Progress Tool Usage",
     description:
       "Use the progress-tool MCP correctly — report long-horizon work (research, planning, exploration, refactors, docs) with the fire-and-forget progress tool, structure multi-step plans as a parentId tree, keep entries current between tool calls, and wrap long-running commands with the out-of-band progress-relay at zero token cost",
   },
   {
     id: "osc-demo",
-    name: "OSC 9;4 Demo",
+    name: "[progress-tool] OSC 9;4 Demo",
     description:
       "Demo OSC 9;4 terminal progress support in progress-tool — run a fake build that streams native OSC 9;4 progress sequences through the out-of-band relay (progress-relay), zero agent tokens",
   },
   {
     id: "tree-demo",
-    name: "Task Tree Demo",
+    name: "[progress-tool] Task Tree Demo",
     description:
       "Demo nested task trees (parentId roll-up) in progress-tool — run a fake release pipeline with parent, child, and grandchild tasks streaming through the out-of-band relay at zero agent tokens, with an optional failure mode that rolls an error up the tree",
   },
   {
     id: "delegation",
-    name: "Delegation (Subagents)",
+    name: "[progress-tool] Delegation (Subagents)",
     description:
       "Use subagents well — fan out independent research and verification in parallel, pick explore vs general, inherit the session's model, and avoid parallel-edit conflicts",
   },
