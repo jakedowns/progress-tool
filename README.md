@@ -19,8 +19,13 @@ Published packages:
 - MCP server + relay — [`@jakedowns/progress-tool-mcp`](https://www.npmjs.com/package/@jakedowns/progress-tool-mcp)
 
 ```bash
-opencode plugin add @jakedowns/progress-tool-opencode-plugin
+opencode plugin add @jakedowns/progress-tool-opencode-plugin@latest
 ```
+
+`@latest` makes OpenCode check for and install new versions automatically
+(startup and every 24h). Use `@^2.18.0` instead if you want the same automatic
+updates but capped to major 2; a bare package name stays on whichever version
+was installed and only updates when you run `opencode plugin update`.
 
 The plugin depends on the MCP package and **registers `progress-server` for you**
 (`autoRegisterMcp: false` to opt out), so this one command is the whole install.
@@ -39,7 +44,7 @@ Manual configuration, if you prefer:
 
 ```jsonc
 {
-  "plugins": ["@jakedowns/progress-tool-opencode-plugin"],
+  "plugins": ["@jakedowns/progress-tool-opencode-plugin@latest"],
   "mcp": {
     "servers": {
       "progress-server": {

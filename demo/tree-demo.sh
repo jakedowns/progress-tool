@@ -36,26 +36,24 @@ EMIT=("${BIN[@]}" emit)
 RELAY=("${BIN[@]}" relay)
 PARENT="${PROGRESS_TREE_DEMO_ID:-tree-demo}"
 
-STATE_ARGS=()
-if [ -n "${PROGRESS_STATE_PATH:-}" ]; then
-  STATE_ARGS+=(--state-path "$PROGRESS_STATE_PATH")
-fi
+# Child processes inherit PROGRESS_STATE_PATH from the environment when set,
+# so there is no need to pass --state-path explicitly.
 
 echo "demo: building a nested task tree under id \"$PARENT\""
 echo "demo: run ./launch-gui.sh in another terminal to watch the roll-up live"
 
-"${EMIT[@]}" --id "$PARENT" --status running --title "Release pipeline demo" --detail "build · test-unit · test-e2e" "${STATE_ARGS[@]}"
+"${EMIT[@]}" --id "$PARENT" --status running --title "Release pipeline demo" --detail "build · test-unit · test-e2e"
 
 # --- build (child), with compile + link as grandchildren ------------------
-"${RELAY[@]}" --id build --parent "$PARENT" --title "Build" --detail "compile + link running" "${STATE_ARGS[@]}" -- sleep 1.4 &
+"${RELAY[@]}" --id build --parent "$PARENT" --title "Build" --detail "compile + link running" -- sleep 1.4 &
 BUILD_PID=$!
-"${RELAY[@]}" --id compile --parent build --title "Compile" -- bash -c 'for i in 1 2 3; do echo "compiling unit_$i"; sleep 0.3; done' "${STATE_ARGS[@]}" &
+"${RELAY[@]}" --id compile --parent build --title "Compile" -- bash -c 'for i in 1 2 3; do echo "compiling unit_$i"; sleep 0.3; done' &
 COMPILE_PID=$!
-"${RELAY[@]}" --id link --parent build --title "Link" -- bash -c 'echo "linking binaries"; sleep 0.7; echo "linked"' "${STATE_ARGS[@]}" &
+"${RELAY[@]}" --id link --parent build --title "Link" -- bash -c 'echo "linking binaries"; sleep 0.7; echo "linked"' &
 LINK_PID=$!
 
 # --- test-unit (child) -----------------------------------------------------
-"${RELAY[@]}" --id test-unit --parent "$PARENT" --title "Unit tests" -- bash -c 'echo "unit: auth"; sleep 0.4; echo "unit: billing 6/10"; sleep 0.4; echo "unit: 12/12 passed"' "${STATE_ARGS[@]}" &
+"${RELAY[@]}" --id test-unit --parent "$PARENT" --title "Unit tests" -- bash -c 'echo "unit: auth"; sleep 0.4; echo "unit: billing 6/10"; sleep 0.4; echo "unit: 12/12 passed"' &
 UNIT_PID=$!
 
 # --- test-e2e (child; optionally fails to demo error roll-up) --------------
@@ -63,7 +61,7 @@ E2E_BODY="echo 'e2e: login flow'; sleep 0.5; echo 'e2e: checkout 50%'; sleep 0.5
 if [ -n "${PROGRESS_TREE_DEMO_FAIL:-}" ]; then
   E2E_BODY="echo 'e2e: login flow'; sleep 0.5; echo 'e2e: checkout 50%'; sleep 0.4; echo 'e2e: payment regression'; exit 3"
 fi
-"${RELAY[@]}" --id test-e2e --parent "$PARENT" --title "E2E tests" -- bash -c "$E2E_BODY" "${STATE_ARGS[@]}" &
+"${RELAY[@]}" --id test-e2e --parent "$PARENT" --title "E2E tests" -- bash -c "$E2E_BODY" &
 E2E_PID=$!
 
 FAILED=0
@@ -72,12 +70,12 @@ for pid in "$BUILD_PID" "$COMPILE_PID" "$LINK_PID" "$UNIT_PID" "$E2E_PID"; do
 done
 
 if [ "$FAILED" -ne 0 ]; then
-  "${EMIT[@]}" --id "$PARENT" --status error --detail "a child failed — roll-up already showed it" "${STATE_ARGS[@]}"
+  "${EMIT[@]}" --id "$PARENT" --status error --detail "a child failed — roll-up already showed it"
   echo "demo: pipeline FAILED — the error rolled up to \"$PARENT\""
   echo "demo: inspect with: cat \${PROGRESS_STATE_PATH:-$HOME/.opencode-progress-state.json}"
   exit 1
 fi
 
-"${EMIT[@]}" --id "$PARENT" --status done --detail "all subtasks green" "${STATE_ARGS[@]}"
+"${EMIT[@]}" --id "$PARENT" --status done --detail "all subtasks green"
 echo "demo: pipeline done — \"$PARENT\" rolled up from its children"
 echo "demo: inspect with: cat \${PROGRESS_STATE_PATH:-$HOME/.opencode-progress-state.json}"

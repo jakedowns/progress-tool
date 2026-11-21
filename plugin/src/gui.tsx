@@ -593,7 +593,7 @@ export default Plugin.define({
                 "flex": "0 0 auto",
               }}
             >
-              <Show when={doneRoots().length > 0}>
+              <Show when={doneRoots().length > 0 && doneRoots().length < visibleRoots().length}>
                 <button
                   type="button"
                   class="progress-pill-button"
