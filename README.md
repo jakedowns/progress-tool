@@ -1,5 +1,7 @@
 # common progress tree mcp : opencode demo implementation (tui + desktop/web)
 
+<img src="https://raw.githubusercontent.com/jakedowns/progress-tool/master/screenshots/1.png" width="300" alt="Progress pill showing a live task tree">
+
 A non-blocking twin of `question` so coding agents can signal long-running work without looking dead, plus a **zero-token-burn out-of-band relay** so the agent never has to poll `stdout` just to keep the UI alive. (Also described as low-token-burn or token-minimizing progress: token cost scales with milestones, not with task duration.)
 
 Two tools back this: `progress` (write) and `list` (read-only companion: your session's trees as text,
