@@ -40,6 +40,12 @@ import {
 } from "./monitor.js";
 import { logNudge, nudgeLoggingEnabled, diffStatuses, type StatusSnapshot } from "./telemetry.js";
 import { resolveMcpLaunch } from "./mcp.js";
+import {
+  PACKAGED_SKILLS,
+  enabledSkills,
+  loadPackagedSkillBody,
+  skillPath,
+} from "./skills.js";
 
 /**
  * The plugin's own version, read at runtime so a running server part can be
@@ -59,42 +65,6 @@ const pluginVersion = (() => {
     return "unknown";
   }
 })();
-
-/** Skills shipped in the package and registered at setup (see plugin/skills/). */
-const PLUGIN_DIR = path.dirname(fileURLToPath(new URL("../package.json", import.meta.url)));
-const PACKAGED_SKILLS = [
-  {
-    id: "progress-tool",
-    name: "[progress-tool] Progress Tool Usage",
-    description:
-      "Use the progress-tool MCP correctly — report long-horizon work (research, planning, exploration, refactors, docs) with the fire-and-forget progress tool, structure multi-step plans as a parentId tree, keep entries current between tool calls, and wrap long-running commands with the out-of-band progress-relay at zero token cost",
-  },
-  {
-    id: "osc-demo",
-    name: "[progress-tool] OSC 9;4 Demo",
-    description:
-      "Demo OSC 9;4 terminal progress support in progress-tool — run a fake build that streams native OSC 9;4 progress sequences through the out-of-band relay (progress-relay), zero agent tokens",
-  },
-  {
-    id: "tree-demo",
-    name: "[progress-tool] Task Tree Demo",
-    description:
-      "Demo nested task trees (parentId roll-up) in progress-tool — run a fake release pipeline with parent, child, and grandchild tasks streaming through the out-of-band relay at zero agent tokens, with an optional failure mode that rolls an error up the tree",
-  },
-  {
-    id: "delegation",
-    name: "[progress-tool] Delegation (Subagents)",
-    description:
-      "Use subagents well — fan out independent research and verification in parallel, pick explore vs general, inherit the session's model, and avoid parallel-edit conflicts",
-  },
-];
-
-function loadPackagedSkillBody(id: string): string {
-  // Strip frontmatter: the skill tool adds the Markdown body, and the
-  // directory copies keep frontmatter for repo-local discovery.
-  const raw = readFileSync(path.join(PLUGIN_DIR, "skills", id, "SKILL.md"), "utf8");
-  return raw.replace(/^---\n[\s\S]*?\n---\n/, "").trimStart();
-}
 
 export default Plugin.define({
   id: "opencode-progress",
@@ -241,23 +211,26 @@ export default Plugin.define({
       if (injectRules) console.log("[opencode-progress] progress rules injected into system instructions");
     }
 
-    // Ship the usage + demo skills with the package so installing the plugin
-    // installs the skills. Opt out per project with
-    // `{ "options": { "registerSkills": false } }`.
+    // Register the usage + delegation skills by default; the demos are
+    // dev-only and opt in with `{ "options": { "demoSkills": true } }`.
+    // Disable everything with `{ "options": { "registerSkills": false } }`.
     if (ctx.options?.registerSkills !== false) {
+      const enabled = enabledSkills(ctx.options ?? {});
       await ctx.skill.transform((editor) => {
-        for (const skill of PACKAGED_SKILLS) {
+        for (const skill of enabled) {
           editor.add({
             id: Skill.ID.make(skill.id),
             name: Skill.Name.make(skill.name),
             description: skill.description,
-            path: Skill.Info.fields.path.make(path.join(PLUGIN_DIR, "skills", skill.id, "SKILL.md")),
-            content: loadPackagedSkillBody(skill.id),
+            path: Skill.Info.fields.path.make(skillPath(skill)),
+            content: loadPackagedSkillBody(skill),
             autoinvoke: true,
           });
         }
       });
-      console.log(`[opencode-progress] v${pluginVersion} registered ${PACKAGED_SKILLS.length} packaged skills`);
+      console.log(
+        `[opencode-progress] v${pluginVersion} registered ${enabled.length}/${PACKAGED_SKILLS.length} packaged skills${ctx.options?.demoSkills === true ? " (demos on)" : ""}`
+      );
     }
 
     // Strict mode: watch tool calls and nudge when the agent works silently

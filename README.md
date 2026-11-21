@@ -9,7 +9,7 @@ with user-dismissed entries hidden by default — useful before planning or when
 
 Implements the [Agent Progress Tool proposal](https://gist.github.com/jakedowns/ddc4eb4817184a074c82c61dc6e7228c) for OpenCode 2, and is written as a portable reference implementation that any model, agent, or harness can copy, adapt, or train on.
 
-**Versions:** MCP server `2.10.0` · OpenCode plugin `2.18.0`
+**Versions:** MCP server `2.10.0` · OpenCode plugin `2.18.1`
 
 ## Install from npm
 
@@ -76,7 +76,7 @@ Running from a source checkout instead? Point both entries at this repo's
 >
 > Want to see it live? Ask your agent to **"demo OSC 9;4 support"** (`.opencode/skills/osc-demo`) or **"demo the task tree"** (`.opencode/skills/tree-demo`) — both ship with this repo — or run them yourself: `bash demo/osc-demo.sh` streams native `OSC 9;4` progress sequences through `progress-relay`, and `bash demo/tree-demo.sh` builds a nested parent/child task tree that rolls up live (`PROGRESS_TREE_DEMO_FAIL=1` shows error roll-up).
 >
-> When installed from npm, the plugin **registers all three skills automatically** (usage, OSC demo, tree demo) via the skill registry — no separate skill install. Opt out with `{ "options": { "registerSkills": false } }`.
+> When installed from npm, the plugin **registers the usage and delegation skills automatically** via the skill registry — no separate skill install. The two demo skills ship in `optional-skills/` and stay unregistered unless you opt in with `{ "options": { "demoSkills": true } }`. Disable the default pair with `{ "options": { "registerSkills": false } }`.
 
 ---
 
@@ -562,6 +562,11 @@ The plugin at `plugin/` targets the OpenCode **V2** plugin API and exposes four 
    - `expandRootsByDefault`: tree roots with children are **collapsed by default**
      in the pill menu (chevron + "N descendants" hint). Set to `true` to expand
      them by default; per-root toggles still work either way.
+   - `registerSkills`: set to `false` to skip skill registration entirely.
+     Default: the usage and delegation skills register automatically.
+   - `demoSkills`: set to `true` to also register the two demo skills
+     (`osc-demo`, `tree-demo`) shipped in `optional-skills/`. **Default `false`** —
+     they are developer content, not part of normal use.
    - `verboseLogging`: set to `true` to record every nudge the plugin injects
      as JSONL in `~/.opencode-progress-nudges.log` (override the path with
      `PROGRESS_NUDGE_LOG`). Events: `config`, `strict` (silent-run / forced /
