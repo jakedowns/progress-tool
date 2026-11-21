@@ -236,6 +236,7 @@ function MenuRow(props: {
       <Show when={props.onDismiss}>
         <button
           type="button"
+          class="progress-pill-button"
           title="Dismiss"
           aria-label="Dismiss"
           onClick={(event: MouseEvent) => {
@@ -480,7 +481,7 @@ export default Plugin.define({
         opacity: "0.65",
         cursor: "pointer",
         "text-align": "left",
-        padding: "6px 8px",
+        padding: "3px 4px",
         "font-size": "12px",
       };
 
@@ -493,6 +494,10 @@ export default Plugin.define({
             "max-width": "520px",
           }}
         >
+          <style>{`
+            .progress-pill-button { cursor: pointer !important; }
+            .progress-pill-button:hover { background: rgba(127,127,127,0.18) !important; }
+          `}</style>
           <div
             ref={(el) => (listEl = el)}
             onScroll={(event) => {
@@ -582,8 +587,8 @@ export default Plugin.define({
               style={{
                 display: "flex",
                 gap: "2px",
-                "margin-top": "4px",
-                "padding-top": "4px",
+                "margin-top": "2px",
+                "padding-top": "2px",
                 "border-top": "1px solid rgba(127,127,127,0.2)",
                 "flex": "0 0 auto",
               }}
@@ -591,6 +596,7 @@ export default Plugin.define({
               <Show when={doneRoots().length > 0}>
                 <button
                   type="button"
+                  class="progress-pill-button"
                   onClick={() => dismissMany(doneRoots())}
                   style={footerButtonStyle}
                 >
@@ -599,6 +605,7 @@ export default Plugin.define({
               </Show>
               <button
                 type="button"
+                class="progress-pill-button"
                 onClick={() => dismissMany(visibleRoots())}
                 style={footerButtonStyle}
               >
@@ -610,8 +617,8 @@ export default Plugin.define({
             style={{
               display: "flex",
               "align-items": "center",
-              gap: "6px",
-              "padding": "2px 8px 4px",
+              gap: "4px",
+              "padding": "1px 4px 2px",
               "font-size": "10px",
               opacity: "0.45",
               "user-select": "none",
@@ -620,6 +627,7 @@ export default Plugin.define({
             <span>progress plugin desktop v{pkg.version}</span>
             <button
               type="button"
+              class="progress-pill-button"
               onClick={() => ctx.system.openExternal(feedbackIssueUrl(pkg.version))}
               style={{
                 ...footerButtonStyle,
