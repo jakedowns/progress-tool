@@ -1,4 +1,7 @@
 {
+  "experimental": {
+    "plugin_gui_web": ["opencode-progress"]
+  },
   "mcp": {
     "servers": {
       "progress-server": {

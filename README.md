@@ -622,17 +622,23 @@ the tee, so use it only when the log truly isn't needed afterwards.
    TUI: the composer footer shows `N active · <title> <percent>` and the tree renders above
    the composer.
 
-   > **Web tabs:** the native composer pill currently loads only in the desktop app. A plain
-   > browser tab receives GUI plugin bundles through the Electron bridge, which it does not
-   > have, so the web client does not mount `./gui-experimental`. Use the desktop app, the TUI,
-   > or the standalone overlay in Option B. The plugin's RPC is reachable from a web session,
-   > so a small browser shim can render the same data if needed.
+   > **Web tabs:** on an OpenCode build with web GUI plugin support (PRs
+   > [#62608](https://github.com/anomalyco/opencode/pull/62608) /
+   > [#61950](https://github.com/anomalyco/opencode/pull/61950)), the pill loads in a browser
+   > tab when the server allows it. Set `experimental.plugin_gui_web` in the config that
+   > applies to the directory the tab opens:
    >
-   > Upstream this is tracked in [anomalyco/opencode#60976](https://github.com/anomalyco/opencode/issues/60976)
-   > ("Load configured ./gui-experimental plugins in the web app"), with working PRs
-   > [#62608](https://github.com/anomalyco/opencode/pull/62608) and
-   > [#61950](https://github.com/anomalyco/opencode/pull/61950). Once one lands, the pill
-   > works in the web app with no plugin changes.
+   > ```json
+   > { "experimental": { "plugin_gui_web": ["opencode-progress"] } }
+   > ```
+   >
+   > The value is the plugin id, not the package name; `true` also works but loads every GUI
+   > plugin on that server. Only the window `setup` runs on the web (no `main`, no `Ipc`), and a
+   > plugin that declares `os` is skipped. On builds without this support, use the desktop app,
+   > the TUI, or the standalone overlay in Option B. The plugin's RPC is reachable from a web
+   > session, so a small browser shim can render the same data if needed.
+   >
+   > Upstream tracking: [anomalyco/opencode#60976](https://github.com/anomalyco/opencode/issues/60976).
 
 #### Option B: Standalone desktop GUI (works immediately)
 
