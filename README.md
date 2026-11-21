@@ -580,8 +580,11 @@ The plugin at `plugin/` targets the OpenCode **V2** plugin API and exposes four 
    waiting) does. A done-dismissed tree stays hidden even when new children are appended under it (the
    done→running flip does not revive it); a child *failing* brings it back. With more than one
    root task, the pill shows `(N · agg%)` as a prefix — the number of roots and the mean of
-   their progress. No extra agent hook is needed: report `status: "done"` once and the view
-   handles retention and hiding. Entries are kept by default for reporting; opt into
+   their progress. A `done` tree always rolls up to 100% (descendants auto-close at full
+   progress); if a descendant failed it stays `error` with its real progress, so the root
+   shows red at a partial bar instead of hiding the failure. No extra agent hook is needed:
+   report `status: "done"` once and the view handles retention and hiding. Entries are kept
+   by default for reporting; opt into
    pruning with `PROGRESS_AUTO_PRUNE_S=<seconds>` (and `PROGRESS_STALE_MS` for orphans).
 
 3. Verify:

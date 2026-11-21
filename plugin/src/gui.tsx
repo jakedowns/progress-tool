@@ -9,6 +9,7 @@
 import { ComposerPill, Plugin } from "@opencode/plugin/gui";
 import { For, Index, Show, createEffect, createSignal } from "solid-js";
 import pkg from "../package.json";
+import { feedbackIssueUrl } from "./feedback.js";
 import { ProgressRpc } from "./rpc.js";
 import {
   buildTree,
@@ -214,20 +215,23 @@ function MenuRow(props: {
             <span>{pct()}</span>
           </Show>
           <Show when={props.collapsed && props.node.children.length > 0}>
-            <span>
-              {countDescendants(props.node)} descendant
-              {countDescendants(props.node) === 1 ? "" : "s"}
-            </span>
-          </Show>
-          <Show when={props.node.startedAt}>
-            <span
-              title={`Last updated ${formatRelative(props.node.updatedAt)} (${formatDateTime(props.node.updatedAt)})`}
-              style={{ "white-space": "nowrap", cursor: "default" }}
-            >
-              started {formatDateTime(props.node.startedAt)}
-            </span>
+            <span>&amp; {countDescendants(props.node)} more...</span>
           </Show>
         </div>
+        <Show when={props.node.startedAt}>
+          <div
+            title={`Last updated ${formatRelative(props.node.updatedAt)} (${formatDateTime(props.node.updatedAt)})`}
+            style={{
+              "margin-top": "2px",
+              "font-size": "11px",
+              opacity: "0.58",
+              "white-space": "nowrap",
+              cursor: "default",
+            }}
+          >
+            started {formatDateTime(props.node.startedAt)}
+          </div>
+        </Show>
       </div>
       <Show when={props.onDismiss}>
         <button
@@ -604,13 +608,30 @@ export default Plugin.define({
           </Show>
           <div
             style={{
+              display: "flex",
+              "align-items": "center",
+              gap: "6px",
               "padding": "2px 8px 4px",
               "font-size": "10px",
               opacity: "0.45",
               "user-select": "none",
             }}
           >
-            progress plugin desktop v{pkg.version}
+            <span>progress plugin desktop v{pkg.version}</span>
+            <button
+              type="button"
+              onClick={() => ctx.system.openExternal(feedbackIssueUrl(pkg.version))}
+              style={{
+                ...footerButtonStyle,
+                flex: "0 0 auto",
+                padding: "0",
+                opacity: "1",
+                "font-size": "10px",
+                "text-decoration": "underline",
+              }}
+            >
+              [Feedback]
+            </button>
           </div>
         </div>
       );

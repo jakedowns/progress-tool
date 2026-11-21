@@ -21,7 +21,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const STATE_VERSION = 2;
+const STATE_VERSION = 3;
 const DEFAULT_TTL_MS = 60 * 60 * 1000;
 /** Running entries untouched for this long are orphans (§4.6). Opt-in only. */
 const DEFAULT_STALE_MS = 60 * 60 * 1000;
@@ -464,6 +464,13 @@ function applyUpsert(state, input, now) {
     progress:
       input.progress !== undefined
         ? input.progress
+        : status === 'done'
+        // Done is a terminal declaration: keep the store (and the root
+        // aggregate) consistent with the relay's finish() mapping, which
+        // also forces a completed entry to 100%. Without this, an agent
+        // marking a parent done without an explicit progress leaves a stale
+        // partial value (or null) that the tree rollup would happily display.
+        ? 1
         : isRestart
         ? null
         : prev?.progress ?? null,
@@ -532,10 +539,17 @@ function clearAncestorDismissals(state, parentId, sessionId) {
  * Rationale: an explicit parent-done is the agent declaring the whole phase
  * finished; children left running/waiting after that are orphans the user
  * has to dismiss by hand (and which outlive the pruned parent, floating
- * parentless in the rollup). Auto-closed children are marked done with a
- * note, not deleted, so the success-hold aging and 10-minute retention
- * apply to them like any other finished entry. Scoped to the same session:
- * parentId is a clean id and MUST NOT cross session boundaries (§4.8).
+ * parentless in the rollup). Auto-closed children are marked done at 100%
+ * with a note, not deleted, so the success-hold aging and 10-minute retention
+ * apply to them like any other finished entry — and so a fully done tree
+ * rolls up to a full bar instead of a "done" root at 40%.
+ *
+ * Errors are deliberately excluded (§5.6.1): a failure is not "everything
+ * underneath is finished". Errored descendants keep their status and their
+ * real progress, and their subtrees are left for the agent to resolve, so
+ * the failure surfaces as a red root in the rollup instead of being silently
+ * rewritten into a green 100%. Scoped to the same session: parentId is a
+ * clean id and MUST NOT cross session boundaries (§4.8).
  */
 function cascadeCloseDescendants(state, parentId, sessionId, now) {
   const sameScope = (entry) =>
@@ -545,9 +559,11 @@ function cascadeCloseDescendants(state, parentId, sessionId, now) {
     const next = [];
     for (const [key, entry] of Object.entries(state.entries)) {
       if (!entry || !frontier.includes(entry.parentId) || !sameScope(entry)) continue;
-      if (entry.status === 'done') continue;
+      // Already-done entries are left alone (their own history stands); an
+      // error stops the cascade for its whole subtree.
+      if (entry.status === 'done' || entry.status === 'error') continue;
       entry.status = 'done';
-      entry.progress = entry.progress ?? 1;
+      entry.progress = 1;
       entry.detail = entry.detail
         ? `${normalizeProgressText(entry.detail)} (auto-closed: parent ${parentId} completed)`
         : `auto-closed: parent ${parentId} completed`;
@@ -677,7 +693,9 @@ function buildTree(entries) {
 
 /**
  * Recursively roll up a parent entry's status and progress from its children.
- * A parent with no explicit progress of its own derives it from children.
+ * Mirrors the plugin's tree.ts projection: done always reads 100%, and when a
+ * descendant failed the children's progress wins over a (likely stale) value
+ * stored on the parent so a red root keeps an honest partial bar.
  */
 function rollUp(id, entries, childrenMap, cache = new Map()) {
   if (cache.has(id)) return cache.get(id);
@@ -686,12 +704,16 @@ function rollUp(id, entries, childrenMap, cache = new Map()) {
 
   const childIds = childrenMap.get(id) || [];
   const result = { ...entry };
+  let errorFromChild = false;
 
   if (childIds.length > 0) {
     const childResults = childIds.map((cid) => rollUp(cid, entries, childrenMap, cache));
 
     const childStatuses = childResults.map((r) => r.status);
-    if (childStatuses.includes('error')) {
+    errorFromChild = childStatuses.includes('error');
+    // A failure on this entry is as severe as one below it: an errored parent
+    // with a still-running child must not display as merely "running".
+    if (errorFromChild || entry.status === 'error') {
       result.status = 'error';
     } else if (childStatuses.includes('running')) {
       result.status = 'running';
@@ -702,9 +724,12 @@ function rollUp(id, entries, childrenMap, cache = new Map()) {
     }
 
     const childProgresses = childResults.map((r) => r.progress).filter((p) => p != null);
-    if (childProgresses.length > 0 && entry.progress == null) {
-      result.progress =
-        childProgresses.reduce((a, b) => a + b, 0) / childProgresses.length;
+    const childMean =
+      childProgresses.length > 0
+        ? childProgresses.reduce((a, b) => a + b, 0) / childProgresses.length
+        : null;
+    if (childMean != null && (entry.progress == null || (result.status === 'error' && errorFromChild))) {
+      result.progress = childMean;
     }
 
     const latestChild = childResults.reduce(
@@ -717,6 +742,8 @@ function rollUp(id, entries, childrenMap, cache = new Map()) {
 
     result.children = childResults;
   }
+
+  if (result.status === 'done') result.progress = 1;
 
   cache.set(id, result);
   return result;

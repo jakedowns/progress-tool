@@ -610,10 +610,10 @@ test('bulk entries[] lands a whole tree in one atomic, all-or-nothing write', as
   assert.match(bothForms.result.content[0].text, /not both/);
 });
 
-test('closing a parent cascades done to all descendants in the same session', () => {
+test('closing a parent cascades done at 100% to all descendants in the same session', () => {
   const { file } = tempState();
   run(['emit', '--id', 'casc-parent', '--status', 'running', '--title', 'Parent'], { state: file });
-  run(['emit', '--id', 'casc-child', '--status', 'running', '--title', 'Child', '--parent', 'casc-parent'], { state: file });
+  run(['emit', '--id', 'casc-child', '--status', 'running', '--title', 'Child', '--progress', '0.4', '--parent', 'casc-parent'], { state: file });
   run(['emit', '--id', 'casc-grand', '--status', 'waiting', '--title', 'Grandchild', '--parent', 'casc-child'], { state: file });
   run(['emit', '--id', 'casc-other', '--status', 'running', '--title', 'Unrelated'], { state: file });
 
@@ -622,9 +622,61 @@ test('closing a parent cascades done to all descendants in the same session', ()
   const state = readState(file).entries;
   assert.equal(state['casc-parent'].status, 'done');
   assert.equal(state['casc-child'].status, 'done', 'child auto-closed');
+  assert.equal(state['casc-child'].progress, 1, 'partial child jumps to 100% when auto-closed');
   assert.match(state['casc-child'].detail, /auto-closed: parent casc-parent completed/);
   assert.equal(state['casc-grand'].status, 'done', 'grandchild cascades recursively');
+  assert.equal(state['casc-grand'].progress, 1, 'null progress becomes 100% when auto-closed');
   assert.equal(state['casc-other'].status, 'running', 'unrelated entries are untouched');
+});
+
+test('a done parent normalizes stale progress to 100% on a plain MCP-style upsert', () => {
+  const { file } = tempState();
+  const { upsertProgress } = require(path.join(ROOT, 'state-store'));
+
+  // This test calls the store in-process, so strip the harness session env
+  // the way stateEnv() does for subprocesses.
+  const envKeys = ['PROGRESS_SESSION_ID', 'OPENCODE_SESSION_ID'];
+  const savedEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+  envKeys.forEach((key) => delete process.env[key]);
+  let entry;
+  try {
+    upsertProgress({ id: 'plain', status: 'running', title: 'Plain', progress: 0.6 }, file);
+    // The MCP tool forwards status without a progress field — this is the path
+    // that used to leave a "done" root showing 60% in the pill.
+    entry = upsertProgress({ id: 'plain', status: 'done' }, file);
+  } finally {
+    for (const key of envKeys) {
+      if (savedEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = savedEnv[key];
+    }
+  }
+
+  assert.equal(entry.status, 'done');
+  assert.equal(entry.progress, 1);
+  assert.equal(readState(file).entries['plain'].progress, 1);
+});
+
+test('closing a parent leaves errored descendants (and their subtree) unresolved', () => {
+  const { file } = tempState();
+  run(['emit', '--id', 'err-parent', '--status', 'running', '--title', 'Parent'], { state: file });
+  run(['emit', '--id', 'err-child', '--status', 'error', '--title', 'Failed child', '--progress', '0.3', '--parent', 'err-parent'], { state: file });
+  run(['emit', '--id', 'err-grand', '--status', 'running', '--title', 'Child of failure', '--parent', 'err-child'], { state: file });
+  run(['emit', '--id', 'err-sibling', '--status', 'running', '--title', 'Healthy child', '--progress', '0.7', '--parent', 'err-parent'], { state: file });
+
+  run(['emit', '--id', 'err-parent', '--status', 'done'], { state: file });
+
+  const state = readState(file).entries;
+  assert.equal(state['err-parent'].progress, 1, 'parent itself still reads 100%');
+  assert.equal(state['err-child'].status, 'error', 'failure is not silently closed');
+  assert.equal(state['err-child'].progress, 0.3, 'failure keeps its real progress');
+  assert.equal(state['err-grand'].status, 'running', 'error subtree is left for the agent');
+  assert.equal(state['err-sibling'].status, 'done');
+  assert.equal(state['err-sibling'].progress, 1, 'healthy sibling auto-closes at 100%');
+
+  const { tree } = getTree(readState(file));
+  const root = tree.find((n) => n.id === 'err-parent');
+  assert.equal(root.status, 'error', 'rolled-up root surfaces the failure');
+  assert.ok(root.progress < 1, 'error root keeps an honest partial bar');
 });
 
 test('retention is opt-in: nothing pruned by default; both knobs enable it', () => {

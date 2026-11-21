@@ -366,11 +366,13 @@ See the drop-in definition in `README.md`.
 Roll-up is a read-time projection. Given flat entries with `parentId`:
 
 - A parent with children derives status as:
-  - `error` if any descendant is `error`;
+  - `error` if the entry itself or any descendant is `error` (a local failure is as severe as a descendant failure, even when a child is still `running`);
   - otherwise `running` if any descendant is `running`;
   - otherwise `waiting` if any descendant is `waiting`;
   - otherwise `done` if all children are `done`.
 - Parent progress is the mean of child `progress` values that are not `null`, unless the parent has its own explicit `progress`.
+- A node whose rolled-up status is `done` MUST display `progress = 1`. `done` is a terminal declaration that the whole tree is finished; a green "done" root at 40% looks broken. Implementations SHOULD also normalize `status: "done"` to `progress = 1` at write time (the relay's exit mapping does this), so raw state and the aggregate agree.
+- Nuance: when the rolled-up `error` comes from a **descendant**, the child mean wins over the parent's explicit `progress` — an error subtree keeps an honest partial bar instead of inheriting a stale (or cascade-forced) 100%. An entry that is itself `error` keeps its own progress when its children all succeeded.
 - The parent's `updatedAt` may be projected as the latest descendant `updatedAt`.
 
 Cycles MUST NOT crash the renderer. A cycle SHOULD be broken by treating a node whose parent chain revisits it as a root, or by ignoring the cyclic edge.
@@ -381,15 +383,18 @@ When a progress call sets a parent's status to `done`, implementations MUST
 close all of its descendants (recursively, within the same session scope,
 §4.8) as `done`:
 
-- Auto-closed children are marked `done` with a note
-  (`auto-closed: parent <id> completed`), preserving any `progress` they
-  already had. They are NOT deleted, so success-hold aging (§3.3) and
-  retention (§4.6) apply to them like any other finished entry.
+- Auto-closed children are marked `done` at `progress = 1` with a note
+  (`auto-closed: parent <id> completed`), so a fully done tree rolls up to a
+  full bar. They are NOT deleted, so success-hold aging (§3.3) and retention
+  (§4.6) apply to them like any other finished entry.
 - The relay's exit mapping (§6.6) counts: a wrapped command finishing
   `done` cascades the same way.
-- `error` MUST NOT cascade silently. Children under an errored parent are
-  left for the agent to resolve or for a stale sweep to collect — a failure
-  is not the same as "everything underneath is finished".
+- `error` MUST NOT cascade silently, in either direction: descendants that
+  are already `error` (and their subtrees) are left untouched by a `done`
+  cascade, keeping their status and real progress; children under an
+  errored parent are left for the agent to resolve or for a stale sweep to
+  collect. A failure is not the same as "everything underneath is finished",
+  and the §5.6 roll-up surfaces it as a red root at a partial bar.
 - Rationale: a forgotten child outlives its pruned parent and floats
   parentless in the rollup; closing the parent declares the whole phase
   finished, and the store should make the state consistent with that
@@ -772,7 +777,7 @@ Implementation versions:
 
 ## 12. Versioning
 
-- `version: 2` is the current state document version.
+- `version: 3` is the current state document version (v3: `done` implies 100% and error-subtree roll-up prefers child progress; v2 readers tolerate the newer field).
 - Adding an optional field (for example `sessionId`) is backward compatible.
 - Changing field meaning, removing fields, or changing roll-up semantics requires a version bump.
 - Readers MUST tolerate a newer `version` field and unknown fields.

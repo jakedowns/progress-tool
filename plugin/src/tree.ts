@@ -112,10 +112,14 @@ export function buildTree(entries: Record<string, ProgressEntry>): TreeNode[] {
     let status = entry.status;
     let progress = entry.progress;
     let updatedAt = entry.updatedAt;
+    let errorFromChild = false;
 
     if (children.length > 0) {
       const statuses = children.map((child) => child.status);
-      if (statuses.includes("error")) status = "error";
+      errorFromChild = statuses.includes("error");
+      // A failure on this node is as severe as one below it; without this,
+      // an errored parent with a still-running child would display as running.
+      if (errorFromChild || entry.status === "error") status = "error";
       else if (statuses.includes("running")) status = "running";
       else if (statuses.includes("waiting")) status = "waiting";
       else if (statuses.every((child) => child === "done")) status = "done";
@@ -123,13 +127,26 @@ export function buildTree(entries: Record<string, ProgressEntry>): TreeNode[] {
       const childProgresses = children
         .map((child) => child.progress)
         .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
-      if (progress == null && childProgresses.length > 0) {
-        progress = childProgresses.reduce((a, b) => a + b, 0) / childProgresses.length;
+      const childMean =
+        childProgresses.length > 0
+          ? childProgresses.reduce((a, b) => a + b, 0) / childProgresses.length
+          : null;
+      // An explicit parent progress normally wins over its children. When a
+      // descendant failed, that number is likely stale (or was forced to
+      // 100% by a done-cascade), so prefer what the children actually
+      // reported: a failed tree keeps an honest partial bar and a red root.
+      if (childMean != null && (progress == null || (status === "error" && errorFromChild))) {
+        progress = childMean;
       }
 
       const latestChild = children.reduce((latest, child) => Math.max(latest, child.updatedAt ?? 0), 0);
       if (latestChild > (updatedAt ?? 0)) updatedAt = latestChild;
     }
+
+    // "done" is a terminal declaration that the whole tree is finished, so
+    // never render a done node at less than a full bar. An error descendant
+    // wins above — this only applies when the rolled-up status is done.
+    if (status === "done") progress = 1;
 
     return { ...entry, key, children, status, progress, updatedAt, reportedAt: entry.updatedAt };
   };
