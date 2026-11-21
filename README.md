@@ -450,6 +450,9 @@ The plugin at `plugin/` targets the OpenCode **V2** plugin API and exposes four 
    ```
 
    `dist/gui-experimental.cjs` is committed, so a fresh checkout already has a bundle.
+   `npm run build` stages the sources in `/tmp/opencode/build/progress-gui`, builds
+   there, and copies only the bundle back, which keeps slow network/VM mounts out of
+   the build path (override with `PROGRESS_BUILD_DIR`).
 
 2. Register the plugin. Desktop and browsers only read the **global** config, so add it to
    `~/.config/opencode/opencode.json`:

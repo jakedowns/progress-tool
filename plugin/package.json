@@ -16,7 +16,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "vite build",
+    "build": "../scripts/build-gui.sh",
     "dev": "vite build --watch",
     "test": "node --test test/dismissal.test.cjs test/instructions.test.cjs test/mcp.test.cjs test/monitor.test.cjs test/skills.test.cjs test/telemetry.test.cjs",
     "prepublishOnly": "npm test && npm run build"

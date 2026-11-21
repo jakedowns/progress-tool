@@ -20,3 +20,4 @@ npm-debug.log*
 
 # Symlinked dependency tree (see README dev notes)
 node_modules
+plugin/node_modules.darwin*
