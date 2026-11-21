@@ -397,21 +397,33 @@ export default Plugin.define({
         collapsedRootMap(visibleRoots(), expandByDefault, expandedOverrides());
       const rows = () => visibleRows(visibleRoots(), collapsedMap());
 
-      // Slide-away dismissal: mark the root as leaving (still rendered),
-      // animate, then actually dismiss so the filter removes it. Dismiss-all
-      // staggers the rows slightly.
+      // Slide-away dismissal: mark the root as leaving (still rendered) and
+      // slide it out sideways; once it has cleared the right edge, collapse
+      // its container vertically, then actually dismiss so the filter removes
+      // it. Dismiss-all staggers the rows slightly.
+      const SLIDE_MS = 380;
+      const COLLAPSE_MS = 300;
       const [leaving, setLeaving] = createSignal<Record<string, number>>({});
+      const [leavingCollapsed, setLeavingCollapsed] = createSignal<Record<string, boolean>>({});
       const dismissAnimated = (root: TreeNode, delayMs = 0) => {
         if (leaving()[root.key] !== undefined) return;
         setLeaving((prev) => ({ ...prev, [root.key]: delayMs }));
         setTimeout(() => {
-          dismissKey(props.session, root.key, root.status ?? "");
-          setLeaving((prev) => {
-            const next = { ...prev };
-            delete next[root.key];
-            return next;
-          });
-        }, delayMs + 380);
+          setLeavingCollapsed((prev) => ({ ...prev, [root.key]: true }));
+          setTimeout(() => {
+            dismissKey(props.session, root.key, root.status ?? "");
+            setLeaving((prev) => {
+              const next = { ...prev };
+              delete next[root.key];
+              return next;
+            });
+            setLeavingCollapsed((prev) => {
+              const next = { ...prev };
+              delete next[root.key];
+              return next;
+            });
+          }, COLLAPSE_MS + 20);
+        }, delayMs + SLIDE_MS);
       };
 
       // Our own scroll container: <For> rebuilds row DOM when the tree
@@ -427,24 +439,44 @@ export default Plugin.define({
         });
       });
 
+      const footerButtonStyle = {
+        flex: "1 1 auto",
+        border: "none",
+        background: "transparent",
+        color: "inherit",
+        opacity: "0.65",
+        cursor: "pointer",
+        "text-align": "left",
+        padding: "6px 8px",
+        "font-size": "12px",
+      };
+
       return (
         <div
-          ref={(el) => (listEl = el)}
-          onScroll={(event) => {
-            scrollTop = event.currentTarget.scrollTop;
-          }}
           style={{
             display: "flex",
             "flex-direction": "column",
-            gap: "2px",
-            "max-height": "min(60vh, 520px)",
-            "overflow-y": "auto",
-            "overflow-x": "hidden",
             "min-width": "320px",
             "max-width": "520px",
-            "padding-right": "4px",
           }}
         >
+          <div
+            ref={(el) => (listEl = el)}
+            onScroll={(event) => {
+              scrollTop = event.currentTarget.scrollTop;
+            }}
+            style={{
+              display: "flex",
+              "flex-direction": "column",
+              gap: "2px",
+              "flex": "0 1 auto",
+              "min-height": "0",
+              "max-height": "min(60vh, 520px)",
+              "overflow-y": "auto",
+              "overflow-x": "hidden",
+              "padding-right": "4px",
+            }}
+          >
           <Show
             when={rows().length > 0}
             fallback={
@@ -457,71 +489,102 @@ export default Plugin.define({
               {(root) => {
                 const isCollapsed = () => collapsedMap()[root.key] ?? false;
                 return (
-                  <>
-                    <MenuRow
-                      node={root}
-                      depth={0}
-                      options={options}
-                      hasChildren={root.children.length > 0}
-                      collapsed={isCollapsed()}
-                      onToggle={() =>
-                        setExpandedOverrides((prev) => ({
-                          ...prev,
-                          [root.key]: !(prev[root.key] ?? expandByDefault),
-                        }))
-                      }
-                      onDismiss={() => dismissAnimated(root)}
-                      leaving={leaving()[root.key] !== undefined}
-                      leaveDelayMs={leaving()[root.key] ?? 0}
-                    />
-                    <div
-                      style={{
-                        display: "grid",
-                        "grid-template-rows": isCollapsed() ? "0fr" : "1fr",
-                        transition: "grid-template-rows 0.5s ease-in-out, transform 0.35s ease-in, opacity 0.3s ease-in",
-                        transform: leaving()[root.key] !== undefined ? "translateX(120%)" : "translateX(0)",
-                        opacity: leaving()[root.key] !== undefined ? "0" : "1",
-                        "transition-delay": `${leaving()[root.key] ?? 0}ms`,
-                      }}
-                    >
-                      <div style={{ overflow: "hidden", "min-height": "0" }}>
-                        <For each={flattenTreeWithDepth(root.children, 1)}>
-                          {({ node, depth }) => (
-                            <MenuRow node={node} depth={depth} options={options} />
-                          )}
-                        </For>
+                  // Outer wrapper collapses vertically once the row has slid
+                  // fully past the right edge.
+                  <div
+                    style={{
+                      display: "grid",
+                      "grid-template-rows": leavingCollapsed()[root.key] ? "0fr" : "1fr",
+                      transition: "grid-template-rows 0.3s ease-in",
+                    }}
+                  >
+                    <div style={{ overflow: "hidden", "min-height": "0" }}>
+                      <MenuRow
+                        node={root}
+                        depth={0}
+                        options={options}
+                        hasChildren={root.children.length > 0}
+                        collapsed={isCollapsed()}
+                        onToggle={() =>
+                          setExpandedOverrides((prev) => ({
+                            ...prev,
+                            [root.key]: !(prev[root.key] ?? expandByDefault),
+                          }))
+                        }
+                        onDismiss={() => dismissAnimated(root)}
+                        leaving={leaving()[root.key] !== undefined}
+                        leaveDelayMs={leaving()[root.key] ?? 0}
+                      />
+                      <div
+                        style={{
+                          display: "grid",
+                          "grid-template-rows": isCollapsed() ? "0fr" : "1fr",
+                          transition: "grid-template-rows 0.5s ease-in-out, transform 0.35s ease-in, opacity 0.3s ease-in",
+                          transform:
+                            leaving()[root.key] !== undefined
+                              ? "translateX(120%)"
+                              : "translateX(0)",
+                          opacity: leaving()[root.key] !== undefined ? "0" : "1",
+                          "transition-delay": `${leaving()[root.key] ?? 0}ms`,
+                        }}
+                      >
+                        <div style={{ overflow: "hidden", "min-height": "0" }}>
+                          <For each={flattenTreeWithDepth(root.children, 1)}>
+                            {({ node, depth }) => (
+                              <MenuRow node={node} depth={depth} options={options} />
+                            )}
+                          </For>
+                        </div>
                       </div>
                     </div>
-                  </>
+                  </div>
                 );
               }}
             </For>
-            <button
-              type="button"
-              onClick={() => {
-                visibleRoots().forEach((root, index) =>
-                  dismissAnimated(root, Math.min(index, 10) * 45)
-                );
-              }}
+          </Show>
+          </div>
+          <Show when={rows().length > 0}>
+            <div
               style={{
-                "margin-top": "6px",
-                border: "none",
-                background: "transparent",
-                color: "inherit",
-                opacity: "0.65",
-                cursor: "pointer",
-                "text-align": "left",
-                padding: "6px 8px",
-                "font-size": "12px",
+                display: "flex",
+                gap: "2px",
+                "margin-top": "4px",
+                "padding-top": "4px",
+                "border-top": "1px solid rgba(127,127,127,0.2)",
+                "flex": "0 0 auto",
               }}
             >
-              ✕ Dismiss all
-            </button>
+              <Show when={visibleRoots().some((root) => root.status === "done")}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    visibleRoots()
+                      .filter((root) => root.status === "done")
+                      .forEach((root, index) =>
+                        dismissAnimated(root, Math.min(index, 10) * 45)
+                      );
+                  }}
+                  style={footerButtonStyle}
+                >
+                  ✓ Dismiss done
+                </button>
+              </Show>
+              <button
+                type="button"
+                onClick={() => {
+                  visibleRoots().forEach((root, index) =>
+                    dismissAnimated(root, Math.min(index, 10) * 45)
+                  );
+                }}
+                style={footerButtonStyle}
+              >
+                ✕ Dismiss all
+              </button>
+            </div>
           </Show>
           <div
             style={{
-              "margin-top": "4px",
-              padding: "4px 8px 6px",
+              "padding": "2px 8px 4px",
               "font-size": "10px",
               opacity: "0.45",
               "user-select": "none",
