@@ -7,7 +7,7 @@ with user-dismissed entries hidden by default — useful before planning or when
 
 Implements the [Agent Progress Tool proposal](https://gist.github.com/jakedowns/ddc4eb4817184a074c82c61dc6e7228c) for OpenCode 2, and is written as a portable reference implementation that any model, agent, or harness can copy, adapt, or train on.
 
-**Versions:** MCP server `2.8.0` · OpenCode plugin `2.16.1`
+**Versions:** MCP server `2.9.0` · OpenCode plugin `2.17.0`
 
 ## Install from npm
 
@@ -153,7 +153,7 @@ progress({
 - **Never requires a human reply**
 - **Tree-like dependencies** — pass `parentId` to nest a task under a parent; parent status rolls up from children, and parent progress is the mean of child progress when the parent has no explicit progress (bootvine-inspired)
 - **Multi-line titles/details** — `title` and `detail` accept real newlines, escaped `\n` / `\r\n`, extra-escaped `\\n`, or `<br>` / `<br/>` tags. Writers normalize these to plain newlines; viewers wrap long lines and scroll long details. Prefer a short title line plus a few detail lines over one huge single-line string.
-- **Session isolation** — `sessionId` resolves from an explicit input, then `PROGRESS_SESSION_ID`, then `OPENCODE_SESSION_ID`. When present, entries are namespaced internally as `${sessionId}:${id}` so identical task IDs in concurrent sessions never collide. When absent, the original flat `id` keying is preserved for 100% backwards compatibility. Keep task IDs clean (`"build-1"`); do not manually prefix them.
+- **Session isolation** — `sessionId` resolves from an explicit input, then `PROGRESS_SESSION_ID`, then `OPENCODE_SESSION_ID`. When present, entries are namespaced internally as `${sessionId}:${id}` so identical task IDs in concurrent sessions never collide. Subagent (child) session ids resolve to their parent via `~/.opencode-progress-sessions.json`, so their progress rolls up where you can see it. When absent, the original flat `id` keying is preserved for 100% backwards compatibility. Keep task IDs clean (`"build-1"`); do not manually prefix them.
 - Renders in the TUI above the composer and as a composer pill in desktop/web; the optional standalone GUI uses a floating top-right overlay. The TUI word-wraps, desktop/web wrap titles and scroll long details, and both expose the full text on hover where the host supports it.
 
 ### Drop-in tool definition (harness-agnostic)
@@ -244,6 +244,15 @@ progress-relay --id build-1 --session ses_abc123 -- npm run build
 ```
 
 With no session flag and no session environment variables, keys stay flat (`build-1`) exactly as in previous versions.
+
+### Subagent sessions
+
+A subagent runs in its own child session, so its tool calls carry the child session id. Without help, its progress would land in a scope the parent's pill never shows. Two layers close that gap:
+
+1. **Automatic (plugin):** when a subagent starts, the plugin's idle hook sees `background[].childSessionID` and records `child → parent` in `~/.opencode-progress-sessions.json` (override with `PROGRESS_SESSION_MAP_PATH`). The MCP server and relay resolve that map before writing — following chains for nested subagents — and re-key any entries the child wrote before the link existed. The work appears in the parent's pill, not an orphaned child scope.
+2. **Instruction fallback:** every session's injected rules state its own session id and ask it to put `progress sessionId: <id>` in subagent prompts. A child that sees that line passes `sessionId` to `progress` and `--session` to `progress-relay`, so attribution still works if the map write lags or the plugin is unavailable.
+
+The map is merge-written under a lock, pruned after 30 days, bounded to 8 hops (cycle-safe), and unknown sessions resolve to themselves. The parent still mirrors the workstream as its own child task, per the delegation guidance.
 
 ### Options
 

@@ -26,7 +26,7 @@ const { spawn } = require('child_process');
 const {
   readState,
   resolveStatePath,
-  resolveSessionId,
+  resolveSessionScope,
   storageKey,
   upsertProgress,
 } = require('./state-store');
@@ -268,7 +268,7 @@ function parseArgs(argv) {
     id: process.env.PROGRESS_ID || null,
     title: process.env.PROGRESS_TITLE || null,
     parentId: process.env.PROGRESS_PARENT || null,
-    sessionId: resolveSessionId(),
+    sessionId: resolveSessionScope(),
     detail: null,
     progress: null,
     status: null,
@@ -354,7 +354,7 @@ function parseArgs(argv) {
   if (opts.title === '') opts.title = null;
   if (opts.detail === '') opts.detail = null;
   if (opts.command && opts.command.length === 0) opts.command = null;
-  opts.sessionId = resolveSessionId(opts.sessionId);
+  opts.sessionId = resolveSessionScope(opts.sessionId);
 
   return opts;
 }

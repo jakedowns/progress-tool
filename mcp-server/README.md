@@ -37,6 +37,14 @@ The relay parses `NN%` / `N/M` and native `OSC 9;4` progress sequences,
 throttles state writes (default 4/s), renders `done`/`error` from the exit
 status, and tees output. Zero model tokens for telemetry.
 
+## Subagent attribution
+
+Subagents report with their own child session id. Before writing, the server
+resolves that id through `~/.opencode-progress-sessions.json` (written by the
+plugin's idle hook, override with `PROGRESS_SESSION_MAP_PATH`), following chains
+for nested subagents, and re-keys any entries the child wrote earlier. Pass an
+explicit parent `sessionId` / `--session` when known — that always wins.
+
 ## Reports
 
 ```bash
@@ -52,6 +60,7 @@ Reads the local OpenCode database read-only (requires `python3`) and prints the
 |---|---|---|
 | `PROGRESS_STATE_PATH` | `~/.opencode-progress-state.json` | shared state file |
 | `PROGRESS_SESSION_ID` | `$OPENCODE_SESSION_ID` | session scope |
+| `PROGRESS_SESSION_MAP_PATH` | `~/.opencode-progress-sessions.json` | child→parent map used to roll subagent progress up under the parent |
 | `PROGRESS_TTL_MS` | — | legacy completed-entry retention |
 | `PROGRESS_AUTO_PRUNE_S` | off | completed-entry retention in seconds |
 | `PROGRESS_STALE_MS` | off | sweep `running` entries untouched this long |

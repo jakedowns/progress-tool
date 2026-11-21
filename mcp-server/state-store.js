@@ -88,6 +88,111 @@ function resolveSessionId(explicit) {
 }
 
 /**
+ * Path of the child→parent session attribution map.
+ *
+ * The desktop plugin writes it when it sees a subagent start (the V2 idle
+ * hook's `background[].childSessionID`); the MCP server and relay read it so a
+ * subagent's progress lands under the session the user is actually watching
+ * instead of in an orphaned child scope. Lives next to the state file so both
+ * halves of the tool share one directory.
+ */
+function resolveSessionMapPath(explicit) {
+  return (
+    explicit ||
+    process.env.PROGRESS_SESSION_MAP_PATH ||
+    path.join(
+      path.dirname(resolveStatePath()),
+      '.opencode-progress-sessions.json'
+    )
+  );
+}
+
+const SESSION_MAP_MAX_HOPS = 8;
+
+/**
+ * Read the session attribution map.
+ *
+ * Accepted shapes: `{ "<child>": "<parent>" }`, `{ "<child>": { parentId } }`,
+ * or `{ links: { ... } }`. Unknown entries are ignored, so a corrupt map can
+ * never redirect traffic.
+ */
+function readSessionMap(explicit) {
+  const map = {};
+  try {
+    const raw = JSON.parse(fs.readFileSync(resolveSessionMapPath(explicit), 'utf8'));
+    const links =
+      raw && typeof raw === 'object' && raw.links && typeof raw.links === 'object'
+        ? raw.links
+        : raw;
+    if (!links || typeof links !== 'object') return map;
+    for (const [child, value] of Object.entries(links)) {
+      if (typeof value === 'string' && value) {
+        map[child] = { parentId: value, at: 0 };
+      } else if (value && typeof value === 'object' && typeof value.parentId === 'string' && value.parentId) {
+        map[child] = { parentId: value.parentId, at: Number(value.at) || 0 };
+      }
+    }
+  } catch {
+    // Missing or mid-write map: no attribution until the next call.
+  }
+  return map;
+}
+
+/**
+ * Follow the attribution map from a session to its top-most ancestor.
+ * Bounded and cycle-safe; unknown sessions resolve to themselves.
+ */
+function resolveParentSession(sessionId, map) {
+  if (!sessionId) return sessionId;
+  const links = map || readSessionMap();
+  let current = sessionId;
+  const seen = new Set([current]);
+  for (let hop = 0; hop < SESSION_MAP_MAX_HOPS; hop++) {
+    const link = links[current];
+    if (!link || !link.parentId || seen.has(link.parentId)) break;
+    current = link.parentId;
+    seen.add(current);
+  }
+  return current;
+}
+
+/** Resolve the effective session scope: explicit/env first, then the map. */
+function resolveSessionScope(explicit) {
+  return resolveParentSession(resolveSessionId(explicit));
+}
+
+/**
+ * Re-key a child session's existing entries onto its parent. Runs inside the
+ * same locked mutation as the upsert that first discovers the mapping, so the
+ * catch-up migration cannot race a concurrent writer. Collisions keep the
+ * newer entry and preserve a dismissal the newer copy does not carry.
+ */
+function adoptChildEntries(state, childId, parentId, now) {
+  if (!childId || !parentId || childId === parentId) return 0;
+  let moved = 0;
+  for (const [key, entry] of Object.entries(state.entries)) {
+    if (!entry || typeof entry !== 'object' || entry.sessionId !== childId) continue;
+    entry.sessionId = parentId;
+    if (entry.updatedAt === undefined) entry.updatedAt = now;
+    const targetKey = storageKey(entry.id, parentId);
+    const existing = state.entries[targetKey];
+    if (existing && existing !== entry) {
+      if ((entry.updatedAt || 0) >= (existing.updatedAt || 0)) {
+        entry.dismissed = entry.dismissed ?? existing.dismissed;
+        state.entries[targetKey] = entry;
+      } else {
+        existing.dismissed = existing.dismissed ?? entry.dismissed;
+      }
+    } else {
+      state.entries[targetKey] = entry;
+    }
+    if (key !== targetKey) delete state.entries[key];
+    moved++;
+  }
+  return moved;
+}
+
+/**
  * Internal storage key. Entries are keyed by `${sessionId}:${id}` when a
  * session is active, while the public `entry.id` stays clean (`build-1`).
  */
@@ -323,7 +428,13 @@ function mutateState(mutator, stateFile = DEFAULT_STATE_FILE) {
 function applyUpsert(state, input, now) {
   if (!input || !input.id) throw new Error('upsertProgress requires an id');
 
-  const sessionId = resolveSessionId(input.sessionId);
+  const rawSessionId = resolveSessionId(input.sessionId);
+  const sessionId = resolveParentSession(rawSessionId);
+  if (sessionId && rawSessionId && sessionId !== rawSessionId) {
+    // A subagent reported before the plugin's child→parent map caught up:
+    // adopt whatever it already wrote, then continue under the parent.
+    adoptChildEntries(state, rawSessionId, sessionId, now);
+  }
   const key = storageKey(input.id, sessionId);
   // Transport marker, never persisted: relay telemetry ticks must not clear
   // a user's dismissal (that would resurrect dismissed running tasks at
@@ -490,7 +601,7 @@ function upsertManyProgress(inputs, stateFile = DEFAULT_STATE_FILE) {
 }
 
 function clearProgress(id, stateFile = DEFAULT_STATE_FILE, sessionId) {
-  const resolvedSessionId = resolveSessionId(sessionId);
+  const resolvedSessionId = resolveSessionScope(sessionId);
   const key = storageKey(id, resolvedSessionId);
   return mutateState((state) => {
     delete state.entries[key];
@@ -623,6 +734,11 @@ module.exports = {
   DEFAULT_STATE_FILE,
   resolveStatePath,
   resolveSessionId,
+  resolveSessionMapPath,
+  resolveSessionScope,
+  resolveParentSession,
+  readSessionMap,
+  adoptChildEntries,
   storageKey,
   normalizeProgressText,
   ensureStateFile,

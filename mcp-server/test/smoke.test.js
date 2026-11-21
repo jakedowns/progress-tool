@@ -980,3 +980,138 @@ test('concurrent sessions using the same task IDs stay isolated', async () => {
   assert.equal(rootB.status, 'error');
   assert.deepEqual(rootB.children.map((child) => child.id), ['test-1']);
 });
+
+// --- Subagent session attribution -------------------------------------------
+
+async function mcpSession(stateFile, env, requests) {
+  const child = spawn(process.execPath, [INDEX], {
+    env: stateEnv(stateFile, env),
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', (chunk) => (stdout += chunk));
+  child.stderr.on('data', (chunk) => (stderr += chunk));
+  for (const request of requests) child.stdin.write(JSON.stringify(request) + '\n');
+  child.stdin.end();
+  await new Promise((resolve, reject) => {
+    child.on('error', reject);
+    child.on('close', resolve);
+  });
+  assert.equal(stderr, '');
+  return stdout
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+}
+
+function writeSessionMap(dir, links) {
+  const file = path.join(dir, 'sessions.json');
+  const map = {};
+  for (const [child, parentId] of Object.entries(links)) {
+    map[child] = { parentId, at: Date.now() };
+  }
+  fs.writeFileSync(file, JSON.stringify({ links: map }));
+  return file;
+}
+
+test('resolveParentSession follows chains, stops at cycles, and ignores unknowns', () => {
+  const { resolveParentSession } = require(path.join(ROOT, 'state-store'));
+  const map = {
+    'child-b': { parentId: 'child-a' },
+    'child-a': { parentId: 'parent' },
+  };
+  assert.equal(resolveParentSession('child-b', map), 'parent');
+  assert.equal(resolveParentSession('child-a', map), 'parent');
+  assert.equal(resolveParentSession('root', map), 'root');
+
+  const cyclic = { x: { parentId: 'y' }, y: { parentId: 'x' } };
+  const resolved = resolveParentSession('x', cyclic);
+  assert.ok(resolved === 'x' || resolved === 'y');
+  assert.equal(resolveParentSession(null, map), null);
+});
+
+test('a subagent MCP call writes under the parent and adopts earlier child entries', async () => {
+  const { dir, file } = tempState();
+  const mapFile = writeSessionMap(dir, { child: 'parent' });
+
+  const now = Date.now();
+  fs.writeFileSync(
+    file,
+    JSON.stringify({
+      version: 2,
+      entries: {
+        'child:early': {
+          id: 'early',
+          sessionId: 'child',
+          status: 'running',
+          title: 'Early child milestone',
+          createdAt: now,
+          updatedAt: now,
+        },
+      },
+    })
+  );
+
+  const responses = await mcpSession(
+    file,
+    { PROGRESS_SESSION_MAP_PATH: mapFile },
+    [
+      { jsonrpc: '2.0', id: 1, method: 'initialize', params: {} },
+      {
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: {
+          name: 'progress',
+          arguments: { id: 'late', status: 'done', title: 'Late child milestone' },
+          _meta: { 'ai.opencode/sessionID': 'child' },
+        },
+      },
+    ]
+  );
+
+  assert.ok(responses.find((response) => response.id === 2).result);
+  const state = readState(file);
+  assert.deepEqual(Object.keys(state.entries).sort(), ['parent:early', 'parent:late']);
+  assert.equal(state.entries['parent:early'].sessionId, 'parent');
+  assert.equal(state.entries['parent:late'].sessionId, 'parent');
+  assert.equal(state.entries['parent:late'].status, 'done');
+});
+
+test('list called from a mapped child session shows the parent scope', async () => {
+  const { dir, file } = tempState();
+  const mapFile = writeSessionMap(dir, { child: 'parent' });
+
+  await mcpSession(file, { PROGRESS_SESSION_MAP_PATH: mapFile }, [
+    { jsonrpc: '2.0', id: 1, method: 'initialize', params: {} },
+    {
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'tools/call',
+      params: {
+        name: 'progress',
+        arguments: { id: 'shared', status: 'running', title: 'Shared work' },
+        _meta: { 'ai.opencode/sessionID': 'parent' },
+      },
+    },
+  ]);
+
+  const responses = await mcpSession(file, { PROGRESS_SESSION_MAP_PATH: mapFile }, [
+    { jsonrpc: '2.0', id: 1, method: 'initialize', params: {} },
+    {
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'tools/call',
+      params: {
+        name: 'list',
+        arguments: {},
+        _meta: { 'ai.opencode/sessionID': 'child' },
+      },
+    },
+  ]);
+
+  const text = responses.find((response) => response.id === 2).result.content[0].text;
+  assert.match(text, /\[shared\]/);
+  assert.doesNotMatch(text, /No progress entries/);
+});

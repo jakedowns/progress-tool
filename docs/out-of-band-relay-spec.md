@@ -245,6 +245,16 @@ Implementations MAY support multiple concurrent sessions sharing one state file.
 
 A shared global view can group entries by `sessionId`; harnesses that need complete isolation MAY use a separate `PROGRESS_STATE_PATH` per session instead.
 
+#### 4.8.1 Subagent attribution
+
+Harnesses that run subagents in child sessions (OpenCode does) SHOULD attribute a child's progress to its parent, because the UI only surfaces the session the user is looking at:
+
+- MAY keep a small child→parent map beside the state file: `~/.opencode-progress-sessions.json` (`PROGRESS_SESSION_MAP_PATH` overrides). Shape: `{ "links": { "<childSessionId>": { "parentId": "...", "at": <ms> } } }`; a bare `"<child>": "<parent>"` is also accepted.
+- Before writing, resolve the session through the map, following chains (bounded, cycle-safe) so nested subagents land on the top-most ancestor. Explicit `sessionId` / `--session` values are resolved the same way.
+- Entries already written under the child scope SHOULD be re-keyed onto the parent on first resolution (newer entry wins on collision); this catches a subagent that reports before the link exists.
+- The map is advisory and local: a missing or corrupt file MUST resolve every session to itself.
+- Agents SHOULD additionally pass the parent session explicitly (`progress({ sessionId })`, `progress-relay --session`) when their prompt names it, so attribution does not depend on map timing.
+
 ---
 
 ## 5. Control-plane contract (progress tool)

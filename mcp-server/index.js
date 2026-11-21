@@ -40,6 +40,7 @@ const {
   readState,
   resolveStatePath,
   resolveSessionId,
+  resolveSessionScope,
 } = require('./state-store');
 
 // First-offense tracking for the anti-pattern error result. The MCP server
@@ -122,7 +123,7 @@ const TOOL_DESCRIPTION = [
   '- Parent status and progress automatically roll up from children (any child "error" -> parent "error"; any child "running"/"waiting" -> parent "running"/"waiting"; parent progress = mean of child progress).',
   '',
   'SESSION ISOLATION:',
-  '- Concurrent sessions are isolated automatically via OPENCODE_SESSION_ID / PROGRESS_SESSION_ID (or an explicit `sessionId` override).',
+  '- Concurrent sessions are isolated automatically via OPENCODE_SESSION_ID / PROGRESS_SESSION_ID (or an explicit `sessionId` override). Subagents should report under the parent session: the plugin records child→parent automatically, and an explicit parent `sessionId` always wins.',
   '- Keep using clean task IDs like `build-1`; do NOT manually prefix them with a session ID.',
   '',
   'LINE BREAKS & LONG TEXT:',
@@ -584,7 +585,7 @@ function handleListCall(id, args) {
   const limit = Number.isInteger(options.limit)
     ? Math.min(500, Math.max(1, options.limit))
     : 200;
-  const sessionId = resolveSessionId(options.sessionId);
+  const sessionId = resolveSessionScope(options.sessionId);
 
   let selected = Object.entries(readState(resolveStatePath()).entries || {}).map(
     ([key, entry]) => ({ key, entry })

@@ -53,6 +53,10 @@ Prefer manual configuration? Add to `opencode.json`:
 - **Guidance that adapts** — injected rules, skill playbooks, pre-flight relay
   hints, strict-mode nudges (silent runs, stale progress), a turn-end idle
   reminder, and an optional 2-minute wall-clock nudge.
+- **Subagent attribution** — a subagent's progress rolls up under the parent
+  session (map in `~/.opencode-progress-sessions.json`, override
+  `PROGRESS_SESSION_MAP_PATH`), so child work is visible in the parent's pill
+  instead of an orphaned child scope.
 
 ## Options
 

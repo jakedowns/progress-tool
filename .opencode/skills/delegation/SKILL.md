@@ -57,6 +57,11 @@ Rule of thumb: **`explore` for questions, `general` for work**.
 
 - Mirror delegation in the progress tree: one child `progress` entry per
   delegated workstream (`parentId` = the phase), updated when the subagent reports.
+- **Attribute the child.** Child sessions are separate progress scopes. Put
+  `progress sessionId: <your session id>` in the subagent prompt and tell it to
+  pass `sessionId` to `progress` and `--session` to `progress-relay`. The plugin
+  also records child→parent automatically (idle hook → session map), but the
+  prompt line covers the child's first call, before that link exists.
 - The completion notification is your cue — do not poll the child.
 
 ## Related community plugins

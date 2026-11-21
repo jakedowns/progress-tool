@@ -23,7 +23,11 @@ execFileSync(
   [path.join(ROOT, 'src', 'instructions.ts'), '--bundle', '--format=cjs', '--platform=node', `--outfile=${path.join(OUT, 'instructions.cjs')}`],
   { stdio: 'pipe' }
 );
-const { PROGRESS_RULES, instructionsEnabled } = require(path.join(OUT, 'instructions.cjs'));
+const {
+  PROGRESS_RULES,
+  instructionsEnabled,
+  sessionAttributionRules,
+} = require(path.join(OUT, 'instructions.cjs'));
 
 test('PROGRESS_RULES is a single non-empty string (no stray template delimiters)', () => {
   assert.equal(typeof PROGRESS_RULES, 'string');
@@ -44,4 +48,19 @@ test('rules keep the core contracts', () => {
 test('instructionsEnabled defaults on and can be disabled', () => {
   assert.equal(instructionsEnabled({}), true);
   assert.equal(instructionsEnabled({ injectInstructions: false }), false);
+});
+
+test('session attribution names the session and the subagent hand-off', () => {
+  const text = sessionAttributionRules('ses_parent123');
+  assert.match(text, /ses_parent123/);
+  assert.match(text, /progress sessionId: ses_parent123/);
+  assert.match(text, /sessionId: "ses_parent123"/);
+  assert.match(text, /--session ses_parent123/);
+  assert.match(text, /wins over the id above/);
+  assert.doesNotMatch(text, /undefined/);
+});
+
+test('the delegation rule points subagents at the prompt session', () => {
+  assert.match(PROGRESS_RULES, /session named in their prompt/);
+  assert.match(PROGRESS_RULES, /orphaned/);
 });
