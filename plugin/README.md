@@ -7,7 +7,7 @@ the transcript, at zero model tokens for telemetry.
 ## Install
 
 ```bash
-opencode plugin add @jakedowns/progress-tool-opencode-plugin
+opencode plugin add @jakedowns/progress-tool-opencode-plugin@latest
 ```
 
 Restart the service (or reload the window) and a progress pill appears above the
