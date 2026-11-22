@@ -39,6 +39,7 @@ import {
   buildTuiView,
   nextTuiLayout,
   normalizeMaxRoots,
+  normalizeSidebarRows,
   normalizeTuiLayout,
   rootDetailLines,
   type TuiRow,
@@ -56,6 +57,7 @@ let timer: ReturnType<typeof setInterval> | undefined;
 let barOptions: BarOptions = {};
 let visibilityOptions: VisibilityOptions = {};
 let maxRows = 8;
+let sidebarRows = 24;
 let expandRootsByDefault = false;
 /** Runtime root cap; seeded from `tuiMaxRoots` and adjustable from the palette. */
 let rootCapState: { value: number } = { value: 3 };
@@ -231,8 +233,9 @@ function ProgressRow(props: { row: TuiRow; sessionID: string }) {
   );
 }
 
-function ProgressTree(props: { sessionID: string }) {
+function ProgressTree(props: { sessionID: string; capacity?: number }) {
   const ctx = usePlugin();
+  const capacity = props.capacity ?? maxRows;
   const roots = () => rootsForSession(props.sessionID);
   const doneRoots = () => roots().filter((root) => root.status === "done");
   const view = () =>
@@ -248,8 +251,8 @@ function ProgressTree(props: { sessionID: string }) {
   const lineCount = (rows: readonly TuiRow[]) =>
     rows.reduce((total, row) => total + 1 + (row.node.detail ? 1 : 0), 0);
 
-  const viewportHeight = () => Math.max(1, Math.min(maxRows, lineCount(view().rows)));
-  const overflowLines = () => Math.max(0, lineCount(view().rows) - maxRows);
+  const viewportHeight = () => Math.max(1, Math.min(capacity, lineCount(view().rows)));
+  const overflowLines = () => Math.max(0, lineCount(view().rows) - capacity);
 
   const onDismissDone = (event: TuiMouseEvent) => {
     if (!leftClick(event)) return;
@@ -498,6 +501,8 @@ export default Plugin.define({
         ? Math.min(50, Math.floor(configuredRows))
         : 8;
 
+    sidebarRows = normalizeSidebarRows(context.options?.tuiSidebarRows);
+
     const [capStore, updateCap] = context.storage.memory("tuiMaxRoots", {
       initial: { value: normalizeMaxRoots(context.options?.tuiMaxRoots) },
     });
@@ -557,7 +562,7 @@ export default Plugin.define({
       append: "session.composer.top",
       render: ({ sessionID }) => (
         <Show when={layoutState.mode === "composer"}>
-          <ProgressTree sessionID={sessionID} />
+          <ProgressTree sessionID={sessionID} capacity={maxRows} />
         </Show>
       ),
     });
@@ -565,7 +570,7 @@ export default Plugin.define({
       append: "sidebar.content",
       render: ({ sessionID }) => (
         <Show when={layoutState.mode === "sidebar"}>
-          <ProgressTree sessionID={sessionID} />
+          <ProgressTree sessionID={sessionID} capacity={sidebarRows} />
         </Show>
       ),
     });

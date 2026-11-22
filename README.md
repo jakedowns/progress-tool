@@ -149,6 +149,7 @@ Multi-line titles and details accept real newlines, `\n` / `\r\n`, or `<br>`.
 | `tuiMaxRows` | TUI tree row cap (default 8, max 50) |
 | `tuiMaxRoots` | TUI root cap before the full-tree summary (default 3, max 50) |
 | `tuiLayout` | TUI placement: `"composer"` (default) or `"sidebar"` |
+| `tuiSidebarRows` | Sidebar viewport height in rows (default 24, max 100) |
 | `expandRootsByDefault` | Expand trees by default (default collapsed) |
 | `strictMode` | `"nudge"` / `"force"` / `"off"` silent-work nudges |
 | `idleReminder` | Turn-end nudge when tasks remain (default on) |

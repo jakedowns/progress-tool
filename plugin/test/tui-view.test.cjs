@@ -31,6 +31,7 @@ const {
   buildTuiView,
   nextTuiLayout,
   normalizeMaxRoots,
+  normalizeSidebarRows,
   normalizeTuiLayout,
   rootDetailLines,
   sortRootsByUrgency,
@@ -129,6 +130,13 @@ test('layout normalizes and swaps between composer and sidebar', () => {
   assert.equal(normalizeTuiLayout(undefined), 'composer');
   assert.equal(nextTuiLayout('composer'), 'sidebar');
   assert.equal(nextTuiLayout('sidebar'), 'composer');
+});
+
+test('normalizeSidebarRows defaults to 24 and clamps to 1..100', () => {
+  assert.equal(normalizeSidebarRows(undefined), 24);
+  assert.equal(normalizeSidebarRows(0), 1);
+  assert.equal(normalizeSidebarRows(200), 100);
+  assert.equal(normalizeSidebarRows(30), 30);
 });
 
 test('expandByDefault opens roots unless the budget says otherwise', () => {

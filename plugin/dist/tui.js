@@ -324,6 +324,10 @@ function normalizeMaxRoots(value) {
   const numeric = typeof value === "number" && Number.isFinite(value) ? Math.floor(value) : 3;
   return Math.max(1, Math.min(50, numeric));
 }
+function normalizeSidebarRows(value) {
+  const numeric = typeof value === "number" && Number.isFinite(value) ? Math.floor(value) : 24;
+  return Math.max(1, Math.min(100, numeric));
+}
 function normalizeTuiLayout(value) {
   return value === "sidebar" ? "sidebar" : "composer";
 }
@@ -339,6 +343,7 @@ var timer;
 var barOptions = {};
 var visibilityOptions = {};
 var maxRows = 8;
+var sidebarRows = 24;
 var expandRootsByDefault = false;
 var rootCapState = {
   value: 3
@@ -511,6 +516,7 @@ function ProgressRow(props) {
 }
 function ProgressTree(props) {
   const ctx = usePlugin();
+  const capacity = props.capacity ?? maxRows;
   const roots = () => rootsForSession(props.sessionID);
   const doneRoots = () => roots().filter((root) => root.status === "done");
   const view = () => buildTuiView(roots(), {
@@ -521,8 +527,8 @@ function ProgressTree(props) {
     expandByDefault: expandRootsByDefault
   });
   const lineCount = (rows) => rows.reduce((total, row) => total + 1 + (row.node.detail ? 1 : 0), 0);
-  const viewportHeight = () => Math.max(1, Math.min(maxRows, lineCount(view().rows)));
-  const overflowLines = () => Math.max(0, lineCount(view().rows) - maxRows);
+  const viewportHeight = () => Math.max(1, Math.min(capacity, lineCount(view().rows)));
+  const overflowLines = () => Math.max(0, lineCount(view().rows) - capacity);
   const onDismissDone = (event) => {
     if (!leftClick(event)) return;
     event.stopPropagation();
@@ -802,6 +808,7 @@ var tui_default = Plugin.define({
     expandRootsByDefault = context.options?.expandRootsByDefault === true;
     const configuredRows = context.options?.tuiMaxRows;
     maxRows = typeof configuredRows === "number" && configuredRows >= 1 ? Math.min(50, Math.floor(configuredRows)) : 8;
+    sidebarRows = normalizeSidebarRows(context.options?.tuiSidebarRows);
     const [capStore, updateCap] = context.storage.memory("tuiMaxRoots", {
       initial: {
         value: normalizeMaxRoots(context.options?.tuiMaxRoots)
@@ -869,7 +876,8 @@ var tui_default = Plugin.define({
         },
         get children() {
           return _$createComponent(ProgressTree, {
-            sessionID
+            sessionID,
+            capacity: maxRows
           });
         }
       })
@@ -884,7 +892,8 @@ var tui_default = Plugin.define({
         },
         get children() {
           return _$createComponent(ProgressTree, {
-            sessionID
+            sessionID,
+            capacity: sidebarRows
           });
         }
       })

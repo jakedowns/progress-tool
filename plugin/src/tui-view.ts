@@ -115,6 +115,12 @@ export function normalizeMaxRoots(value: unknown): number {
   return Math.max(1, Math.min(50, numeric));
 }
 
+/** Sidebar viewport height in terminal rows; defaults to 24. */
+export function normalizeSidebarRows(value: unknown): number {
+  const numeric = typeof value === "number" && Number.isFinite(value) ? Math.floor(value) : 24;
+  return Math.max(1, Math.min(100, numeric));
+}
+
 export type TuiLayout = "composer" | "sidebar";
 
 /** Normalize the configured placement; anything but `sidebar` means the composer. */
