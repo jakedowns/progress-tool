@@ -129,7 +129,11 @@ function readSessionMap(explicit) {
       if (typeof value === 'string' && value) {
         map[child] = { parentId: value, at: 0 };
       } else if (value && typeof value === 'object' && typeof value.parentId === 'string' && value.parentId) {
-        map[child] = { parentId: value.parentId, at: Number(value.at) || 0 };
+        map[child] = {
+          parentId: value.parentId,
+          at: Number(value.at) || 0,
+          agent: typeof value.agent === 'string' && value.agent ? value.agent : undefined,
+        };
       }
     }
   } catch {
@@ -167,13 +171,16 @@ function resolveSessionScope(explicit) {
  * catch-up migration cannot race a concurrent writer. Collisions keep the
  * newer entry and preserve a dismissal the newer copy does not carry.
  */
-function adoptChildEntries(state, childId, parentId, now) {
+function adoptChildEntries(state, childId, parentId, now, agent) {
   if (!childId || !parentId || childId === parentId) return 0;
   let moved = 0;
   for (const [key, entry] of Object.entries(state.entries)) {
     if (!entry || typeof entry !== 'object' || entry.sessionId !== childId) continue;
     entry.sessionId = parentId;
     if (entry.updatedAt === undefined) entry.updatedAt = now;
+    // Work written before the link existed is still subagent-authored.
+    if (entry.subagent === undefined) entry.subagent = true;
+    if (agent && !entry.subagentAgent) entry.subagentAgent = agent;
     const targetKey = storageKey(entry.id, parentId);
     const existing = state.entries[targetKey];
     if (existing && existing !== entry) {
@@ -428,12 +435,20 @@ function mutateState(mutator, stateFile = DEFAULT_STATE_FILE) {
 function applyUpsert(state, input, now) {
   if (!input || !input.id) throw new Error('upsertProgress requires an id');
 
+  const sessionMap = readSessionMap();
   const rawSessionId = resolveSessionId(input.sessionId);
-  const sessionId = resolveParentSession(rawSessionId);
+  const sessionId = resolveParentSession(rawSessionId, sessionMap);
+  const callerSessionId = input.callerSessionId
+    ? String(input.callerSessionId)
+    : rawSessionId;
+  const callerLink = callerSessionId ? sessionMap[callerSessionId] : null;
+  const fromSubagent = Boolean(
+    callerSessionId && sessionId && callerSessionId !== sessionId
+  );
   if (sessionId && rawSessionId && sessionId !== rawSessionId) {
     // A subagent reported before the plugin's child→parent map caught up:
     // adopt whatever it already wrote, then continue under the parent.
-    adoptChildEntries(state, rawSessionId, sessionId, now);
+    adoptChildEntries(state, rawSessionId, sessionId, now, callerLink && callerLink.agent);
   }
   const key = storageKey(input.id, sessionId);
   // Transport marker, never persisted: relay telemetry ticks must not clear
@@ -503,6 +518,13 @@ function applyUpsert(state, input, now) {
     clearAncestorDismissals(state, entry.parentId, sessionId);
   } else if (isRestart) {
     entry.dismissed = undefined;
+  }
+
+  // View-plane marker: the row was created by a subagent, with its agent
+  // type when the session map recorded one. Preserved on later updates.
+  if (!prev && fromSubagent) {
+    entry.subagent = true;
+    if (callerLink && callerLink.agent) entry.subagentAgent = callerLink.agent;
   }
 
   state.entries[key] = entry;

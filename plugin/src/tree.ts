@@ -375,6 +375,19 @@ export function normalizeVisibilityOptions(raw: unknown): VisibilityOptions {
 }
 
 /**
+ * Root-row prefix for subagent-authored work: `[Subagent (Explore)]: `.
+ * The type comes from `session.created.data.agent` via the child→parent map;
+ * when it is unknown the prefix falls back to `[Subagent]: `.
+ */
+export function subagentPrefix(entry: ProgressEntry): string {
+  if (!entry.subagent) return "";
+  const raw = typeof entry.subagentAgent === "string" ? entry.subagentAgent.trim() : "";
+  if (!raw) return "[Subagent]: ";
+  const label = raw.charAt(0).toUpperCase() + raw.slice(1);
+  return `[Subagent (${label})]: `;
+}
+
+/**
  * Keep entries belonging to one session. Entries without a session are hidden
  * by default, so a global/legacy report cannot leak into every chat.
  */

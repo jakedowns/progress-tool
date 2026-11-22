@@ -28,6 +28,7 @@ import {
   oneLineText,
   progressLabel,
   scopeEntries,
+  subagentPrefix,
   visibleEntries,
   type BarOptions,
 } from "./tree.js";
@@ -179,9 +180,13 @@ function MenuRow(props: {
             "overflow-wrap": "anywhere",
             "word-break": "break-word",
           }}
-          title={`${props.node.status}: ${oneLineText(props.node.title)}`}
+          title={`${props.node.status}: ${oneLineText(
+            `${props.depth === 0 ? subagentPrefix(props.node) : ""}${props.node.title}`
+          )}`}
         >
-          <Multiline text={props.node.title} />
+          <Multiline
+            text={`${props.depth === 0 ? subagentPrefix(props.node) : ""}${props.node.title}`}
+          />
         </div>
         <Show when={props.node.detail}>
           <div

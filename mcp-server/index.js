@@ -388,6 +388,7 @@ function handleProgressCall(id, args) {
     progress,
     parentId,
     sessionId,
+    callerSessionId,
   } = args;
 
   if (!progressId || typeof progressId !== 'string') {
@@ -429,6 +430,7 @@ function handleProgressCall(id, args) {
   const entry = upsertProgress({
     id: progressId,
     sessionId,
+    callerSessionId,
     status,
     title,
     detail: detail === undefined ? undefined : detail,
@@ -497,7 +499,7 @@ function handleProgressCall(id, args) {
  * agent pays one round trip instead of N.
  */
 function handleBulkProgress(id, args) {
-  const { entries, sessionId } = args;
+  const { entries, sessionId, callerSessionId } = args;
 
   if (entries.length === 0) {
     toolError(id, 'entries[] must be a non-empty array.');
@@ -550,6 +552,7 @@ function handleBulkProgress(id, args) {
         progress: entry.progress,
         parentId: entry.parentId === '' ? null : entry.parentId,
         sessionId,
+        callerSessionId,
       })),
       resolveStatePath()
     );
@@ -708,12 +711,11 @@ function handleRequest(req) {
         }
         const callArgs = { ...(args && typeof args === 'object' ? args : {}) };
         const metaSession = params?._meta?.['ai.opencode/sessionID'];
-        if (
-          callArgs.sessionId === undefined &&
-          typeof metaSession === 'string' &&
-          metaSession
-        ) {
-          callArgs.sessionId = metaSession;
+        if (typeof metaSession === 'string' && metaSession) {
+          // The caller is always the session that invoked the tool, even when
+          // the agent passes another session explicitly (subagent stamping).
+          callArgs.callerSessionId = metaSession;
+          if (callArgs.sessionId === undefined) callArgs.sessionId = metaSession;
         }
         if (name === 'list') {
           handleListCall(id, callArgs);

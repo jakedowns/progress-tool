@@ -1060,8 +1060,11 @@ async function mcpSession(stateFile, env, requests) {
 function writeSessionMap(dir, links) {
   const file = path.join(dir, 'sessions.json');
   const map = {};
-  for (const [child, parentId] of Object.entries(links)) {
-    map[child] = { parentId, at: Date.now() };
+  for (const [child, spec] of Object.entries(links)) {
+    map[child] =
+      typeof spec === 'string'
+        ? { parentId: spec, at: Date.now() }
+        : { at: Date.now(), ...spec };
   }
   fs.writeFileSync(file, JSON.stringify({ links: map }));
   return file;
@@ -1085,7 +1088,9 @@ test('resolveParentSession follows chains, stops at cycles, and ignores unknowns
 
 test('a subagent MCP call writes under the parent and adopts earlier child entries', async () => {
   const { dir, file } = tempState();
-  const mapFile = writeSessionMap(dir, { child: 'parent' });
+  const mapFile = writeSessionMap(dir, {
+    child: { parentId: 'parent', agent: 'explore' },
+  });
 
   const now = Date.now();
   fs.writeFileSync(
@@ -1129,6 +1134,54 @@ test('a subagent MCP call writes under the parent and adopts earlier child entri
   assert.equal(state.entries['parent:early'].sessionId, 'parent');
   assert.equal(state.entries['parent:late'].sessionId, 'parent');
   assert.equal(state.entries['parent:late'].status, 'done');
+  // Both the pre-map entry and the new one are flagged as subagent work.
+  assert.equal(state.entries['parent:early'].subagent, true);
+  assert.equal(state.entries['parent:early'].subagentAgent, 'explore');
+  assert.equal(state.entries['parent:late'].subagent, true);
+  assert.equal(state.entries['parent:late'].subagentAgent, 'explore');
+});
+
+test('a stamped child (explicit parent session) is still flagged as subagent', async () => {
+  const { dir, file } = tempState();
+  const mapFile = writeSessionMap(dir, {
+    child: { parentId: 'parent', agent: 'general' },
+  });
+
+  await mcpSession(file, { PROGRESS_SESSION_MAP_PATH: mapFile }, [
+    { jsonrpc: '2.0', id: 1, method: 'initialize', params: {} },
+    {
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'tools/call',
+      params: {
+        name: 'progress',
+        arguments: {
+          id: 'stamped',
+          status: 'running',
+          title: 'Stamped child work',
+          sessionId: 'parent',
+        },
+        _meta: { 'ai.opencode/sessionID': 'child' },
+      },
+    },
+    {
+      jsonrpc: '2.0',
+      id: 3,
+      method: 'tools/call',
+      params: {
+        name: 'progress',
+        arguments: { id: 'own', status: 'running', title: 'Parent work' },
+        _meta: { 'ai.opencode/sessionID': 'parent' },
+      },
+    },
+  ]);
+
+  const state = readState(file);
+  const stamped = state.entries['parent:stamped'];
+  assert.equal(stamped.subagent, true);
+  assert.equal(stamped.subagentAgent, 'general');
+  // The parent's own row stays unflagged even though it shares the scope.
+  assert.equal(state.entries['parent:own'].subagent, undefined);
 });
 
 test('list called from a mapped child session shows the parent scope', async () => {

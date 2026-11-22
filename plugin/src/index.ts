@@ -374,8 +374,11 @@ export default Plugin.define({
           if (event.type !== 'session.created') continue;
           const child = event.data.sessionID;
           const parent = event.data.parentID;
+          const agent = event.data.agent;
           if (!child || !parent) continue;
-          if (recordChildSession(child, parent)) adoptChildEntries(child, parent);
+          if (recordChildSession(child, parent, agent)) {
+            adoptChildEntries(child, parent, agent);
+          }
         }
       } catch (error) {
         console.error('[opencode-progress] session.created subscription failed', String(error));
