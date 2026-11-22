@@ -9,7 +9,7 @@ with user-dismissed entries hidden by default — useful before planning or when
 
 Implements the [Agent Progress Tool proposal](https://gist.github.com/jakedowns/ddc4eb4817184a074c82c61dc6e7228c) for OpenCode 2, and is written as a portable reference implementation that any model, agent, or harness can copy, adapt, or train on.
 
-**Versions:** MCP server `2.10.0` · OpenCode plugin `2.18.1`
+**Versions:** MCP server `2.10.1` · OpenCode plugin `2.18.1`
 
 ## Install from npm
 

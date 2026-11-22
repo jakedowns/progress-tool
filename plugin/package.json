@@ -23,7 +23,7 @@
     "prepublishOnly": "npm test && npm run build"
   },
   "dependencies": {
-    "@jakedowns/progress-tool-mcp": "^2.8.0",
+    "@jakedowns/progress-tool-mcp": "^2.10.1",
     "@opencode/plugin": "^2.3.0"
   },
   "devDependencies": {
