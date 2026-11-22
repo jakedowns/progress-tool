@@ -11,8 +11,8 @@
 # No NPM_TOKEN secret is used; npm exchanges the GitHub OIDC token directly.
 #
 # Trigger a release by pushing a tag that matches the package version:
-#   git tag -a plugin@2.18.8 -m "progress-tool plugin 2.18.8" && git push origin plugin@2.18.8
-#   git tag -a mcp-server@2.11.0 -m "progress-tool mcp 2.11.0" && git push origin mcp-server@2.11.0
+#   git tag -a plugin@2.18.9 -m "progress-tool plugin 2.18.9" && git push origin plugin@2.18.9
+#   git tag -a mcp-server@2.10.2 -m "progress-tool mcp 2.10.2" && git push origin mcp-server@2.10.2
 #
 # workflow_dispatch exists so an already-pushed tag (for example plugin@2.18.7)
 # can be published after trusted publishing is configured.
