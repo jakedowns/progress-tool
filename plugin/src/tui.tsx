@@ -18,6 +18,7 @@ import {
   normalizeVisibilityOptions,
   progressLabel,
   scopeEntries,
+  subagentPrefix,
   visibleEntries,
   type BarOptions,
   type VisibilityOptions,
@@ -59,15 +60,18 @@ function ProgressNode(props: { node: TreeNode; depth: number }) {
   const indent = () => (props.depth === 0 ? "" : "└─ ");
   const detailIndent = () => "  · ";
 
+  const title = () =>
+    `${props.depth === 0 ? subagentPrefix(props.node) : ""}${props.node.title}`;
+
   const label = () => {
     const parts = barParts(props.node.progress, barOptions);
     if (parts.style === "emoji") {
       const suffix =
         props.node.status === "done" ? " ✓" : props.node.status === "error" ? " ✗" : "";
-      return `${props.node.title}: ${parts.bar}${parts.fraction}${suffix}`;
+      return `${title()}: ${parts.bar}${parts.fraction}${suffix}`;
     }
     const pct = progressLabel(props.node.progress);
-    return `${glyph(props.node.status)} [${parts.bar}] ${props.node.title}${pct ? ` ${pct}` : ""}`;
+    return `${glyph(props.node.status)} [${parts.bar}] ${title()}${pct ? ` ${pct}` : ""}`;
   };
 
   return (

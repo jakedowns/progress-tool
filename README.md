@@ -9,7 +9,7 @@ with user-dismissed entries hidden by default — useful before planning or when
 
 Implements the [Agent Progress Tool proposal](https://gist.github.com/jakedowns/ddc4eb4817184a074c82c61dc6e7228c) for OpenCode 2, and is written as a portable reference implementation that any model, agent, or harness can copy, adapt, or train on.
 
-**Versions:** MCP server `2.10.1` · OpenCode plugin `2.18.1`
+**Versions:** MCP server `2.10.1` · OpenCode plugin `2.18.3`
 
 ## Install from npm
 
@@ -259,7 +259,7 @@ A subagent runs in its own child session, so its tool calls carry the child sess
 1. **Automatic (plugin):** the plugin subscribes to `session.created`, where OpenCode exposes `parentID` the moment a child session exists, and records `child → parent` in `~/.opencode-progress-sessions.json` (override with `PROGRESS_SESSION_MAP_PATH`). The MCP server and relay resolve that map before writing — following chains for nested subagents — and re-key any entries the child wrote before the link existed.
 2. **Prompt stamping (fallback):** the plugin's `execute.before` hook also appends `progress sessionId: <parent>` (plus the `progress`/`progress-relay` forms) to the `subagent`/`task` prompt. That covers a child whose very first progress call beats the map write, and older engines without the event. Every session's injected rules explain that a prompt-supplied id wins.
 
-The map is merge-written under a lock, pruned after 30 days, bounded to 8 hops (cycle-safe), and unknown sessions resolve to themselves. The parent still mirrors the workstream as its own child task, per the delegation guidance.
+The map is merge-written under a lock, pruned after 30 days, bounded to 8 hops (cycle-safe), and unknown sessions resolve to themselves. `session.created` also carries the subagent type, so rows created by a child are marked and render in the pill as `[Subagent (Explore)]: Title` (or `[Subagent]: Title` when the type is unknown). The parent still mirrors the workstream as its own child task, per the delegation guidance.
 
 ### Options
 

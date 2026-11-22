@@ -152,7 +152,7 @@ Implementations MUST support an override:
 `<storage-key>` is `<id>` for legacy unscoped entries, or `<sessionId>:<id>` when a session is active. `entry.id` and `entry.parentId` remain clean task IDs even when the storage key is composite.
 
 Required per entry: `id`, `status`, `title`, `updatedAt`.
-Optional per entry: `sessionId`, `detail`, `progress`, `parentId`, `startedAt`, `createdAt`, `dismissed` (§4.9).
+Optional per entry: `sessionId`, `detail`, `progress`, `parentId`, `startedAt`, `createdAt`, `dismissed` (§4.9), `subagent` (boolean) and `subagentAgent` (string) for view attribution.
 
 Readers MUST ignore unknown fields and MUST tolerate missing optional fields.
 
@@ -254,6 +254,7 @@ Harnesses that run subagents in child sessions (OpenCode does) SHOULD attribute 
 - Before writing, resolve the session through the map, following chains (bounded, cycle-safe) so nested subagents land on the top-most ancestor. Explicit `sessionId` / `--session` values are resolved the same way.
 - Entries already written under the child scope SHOULD be re-keyed onto the parent on first resolution (newer entry wins on collision); this catches a subagent that reports before the link exists.
 - The map is advisory and local: a missing or corrupt file MUST resolve every session to itself.
+- An implementation that can distinguish the invoking session from the resolved target SHOULD persist `subagent: true` on entries first created by a child, and `subagentAgent` when the child's agent type is known. Views MAY prefix such root rows (`[Subagent (Explore)]: Title`).
 - Agents SHOULD additionally pass the parent session explicitly (`progress({ sessionId })`, `progress-relay --session`) when their prompt names it, so attribution does not depend on map timing.
 
 ---

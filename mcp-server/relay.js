@@ -26,6 +26,7 @@ const { spawn } = require('child_process');
 const {
   readState,
   resolveStatePath,
+  resolveSessionId,
   resolveSessionScope,
   storageKey,
   upsertProgress,
@@ -264,11 +265,15 @@ function makeOsc94Filter(onOsc, onText) {
 }
 
 function parseArgs(argv) {
+  const envSessionId = resolveSessionId();
   const opts = {
     id: process.env.PROGRESS_ID || null,
     title: process.env.PROGRESS_TITLE || null,
     parentId: process.env.PROGRESS_PARENT || null,
-    sessionId: resolveSessionScope(),
+    // The true caller (env), kept separately so a subagent passing the
+    // parent via --session can still be flagged.
+    callerSessionId: envSessionId,
+    sessionId: envSessionId,
     detail: null,
     progress: null,
     status: null,
@@ -398,6 +403,7 @@ function baseEntry(opts) {
         ? null
         : prev?.progress ?? null,
     parentId: opts.parentId !== null ? opts.parentId : prev?.parentId ?? null,
+    callerSessionId: opts.callerSessionId || null,
     startedAt: prev?.startedAt,
   };
 }
@@ -582,6 +588,7 @@ function runEmit(opts) {
     {
       id: opts.id,
       sessionId: opts.sessionId,
+      callerSessionId: opts.callerSessionId || null,
       status,
       title: opts.title !== null ? opts.title : prev?.title,
       detail,

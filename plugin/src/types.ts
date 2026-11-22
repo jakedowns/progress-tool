@@ -28,6 +28,10 @@ export interface ProgressEntry {
    * restart. Revival semantics live in tree.ts `isDismissed`.
    */
   dismissed?: { status: string; at: number } | null;
+  /** View-plane marker: created by a subagent session. */
+  subagent?: boolean;
+  /** Subagent type when known (`explore`, `general`, …). */
+  subagentAgent?: string | null;
 }
 
 export interface ProgressState {

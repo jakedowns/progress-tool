@@ -42,6 +42,8 @@ export function readProgressState(): ProgressState {
 export interface SessionLink {
   parentId: string;
   at: number;
+  /** Subagent type from session.created (`explore`, `general`, …). */
+  agent?: string;
 }
 
 /** Drop links older than this; session IDs are never reused, so stale rows are just noise. */
@@ -71,8 +73,12 @@ export function readSessionMap(): Record<string, SessionLink> {
         typeof value === "object" &&
         typeof (value as { parentId?: unknown }).parentId === "string"
       ) {
-        const link = value as { parentId: string; at?: unknown };
-        map[child] = { parentId: link.parentId, at: Number(link.at) || 0 };
+        const link = value as { parentId: string; at?: unknown; agent?: unknown };
+        map[child] = {
+          parentId: link.parentId,
+          at: Number(link.at) || 0,
+          agent: typeof link.agent === "string" && link.agent ? link.agent : undefined,
+        };
       }
     }
     return map;
@@ -85,7 +91,11 @@ export function readSessionMap(): Record<string, SessionLink> {
  * Record that `childID` is a subagent of `parentID`. Merge-write under a lock
  * so two parents finishing at once cannot drop each other's links.
  */
-export function recordChildSession(childID: string, parentID: string): boolean {
+export function recordChildSession(
+  childID: string,
+  parentID: string,
+  agent?: string
+): boolean {
   if (!childID || !parentID || childID === parentID) return false;
   const file = sessionMapFilePath();
   const lock = `${file}.lock`;
@@ -112,8 +122,14 @@ export function recordChildSession(childID: string, parentID: string): boolean {
 
   try {
     const map = readSessionMap();
-    if (map[childID]?.parentId === parentID) return true;
-    map[childID] = { parentId: parentID, at: Date.now() };
+    if (map[childID]?.parentId === parentID && (!agent || map[childID]?.agent === agent)) {
+      return true;
+    }
+    map[childID] = {
+      parentId: parentID,
+      at: Date.now(),
+      agent: agent || map[childID]?.agent,
+    };
     const cutoff = Date.now() - SESSION_LINK_TTL_MS;
     for (const [child, link] of Object.entries(map)) {
       if (link.at && link.at < cutoff) delete map[child];
@@ -142,7 +158,11 @@ export function recordChildSession(childID: string, parentID: string): boolean {
  * surfaces in the parent's pill. Mirrors the MCP server's adoption rules:
  * newer entry wins a collision, and a dismissal the newer copy lacks survives.
  */
-export function adoptChildEntries(childID: string, parentID: string): number {
+export function adoptChildEntries(
+  childID: string,
+  parentID: string,
+  agent?: string
+): number {
   if (!childID || !parentID || childID === parentID) return 0;
   const file = stateFilePath();
   const lock = `${file}.lock`;
@@ -175,6 +195,8 @@ export function adoptChildEntries(childID: string, parentID: string): number {
       if (!entry || typeof entry !== "object" || entry.sessionId !== childID) continue;
       entry.sessionId = parentID;
       if (entry.updatedAt === undefined) entry.updatedAt = now;
+      if (entry.subagent === undefined) entry.subagent = true;
+      if (agent && !entry.subagentAgent) entry.subagentAgent = agent;
       const targetKey = `${parentID}:${entry.id}`;
       const existing = state.entries[targetKey];
       if (existing && existing !== entry) {

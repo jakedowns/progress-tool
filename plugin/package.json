@@ -1,6 +1,6 @@
 {
   "name": "@jakedowns/progress-tool-opencode-plugin",
-  "version": "2.18.1",
+  "version": "2.18.3",
   "description": "OpenCode plugin: native progress indicators for the TUI and desktop GUI, with an out-of-band relay for zero-token long-running command telemetry",
   "type": "module",
   "exports": {
@@ -19,7 +19,7 @@
   "scripts": {
     "build": "../scripts/build-gui.sh",
     "dev": "vite build --watch",
-    "test": "node --test test/dismissal.test.cjs test/feedback.test.cjs test/instructions.test.cjs test/mcp.test.cjs test/monitor.test.cjs test/rollup.test.cjs test/session-map.test.cjs test/skills-registry.test.cjs test/subagent.test.cjs test/skills.test.cjs test/telemetry.test.cjs",
+    "test": "node --test test/dismissal.test.cjs test/feedback.test.cjs test/instructions.test.cjs test/mcp.test.cjs test/monitor.test.cjs test/rollup.test.cjs test/session-map.test.cjs test/skills-registry.test.cjs test/subagent.test.cjs test/subagent-label.test.cjs test/skills.test.cjs test/telemetry.test.cjs",
     "prepublishOnly": "npm test && npm run build"
   },
   "dependencies": {
