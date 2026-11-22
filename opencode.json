@@ -1,6 +1,7 @@
 {
   "experimental": {
-    "plugin_gui_web": ["opencode-progress"]
+    "plugin_gui_web": ["opencode-progress"],
+    "todo": true
   },
   "mcp": {
     "servers": {
