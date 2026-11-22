@@ -101,10 +101,33 @@ function rootsForSession(sessionID: string): TreeNode[] {
   ).filter((root) => !isDismissed(root, dismissedMap(entries)));
 }
 
-function ProgressRow(props: { row: TuiRow }) {
+type TuiMouseEvent = { button?: number; stopPropagation(): void };
+
+/** Treat a bare mouse event (no button reported) as a left click. */
+function leftClick(event: TuiMouseEvent): boolean {
+  return event.button === undefined || event.button === 0;
+}
+
+function ProgressRow(props: { row: TuiRow; sessionID: string }) {
   const ctx = usePlugin();
   const indent = () => (props.row.depth === 0 ? "" : "└─ ");
   const detailIndent = () => (props.row.depth === 0 ? "  · " : "    · ");
+
+  const isRoot = () => props.row.depth === 0;
+  const hasChildren = () => (props.row.node.children?.length ?? 0) > 0;
+
+  /** Row click mirrors the keyboard/dialog toggle: expand or collapse a root. */
+  const onToggle = (event: TuiMouseEvent) => {
+    if (!leftClick(event) || !isRoot() || !hasChildren()) return;
+    toggleExpanded(props.sessionID, props.row.node.key);
+  };
+
+  /** The trailing ✕ is the click-to-dismiss redundancy for `Dismiss a task…`. */
+  const onDismiss = (event: TuiMouseEvent) => {
+    if (!leftClick(event)) return;
+    event.stopPropagation();
+    dismissRoots(ctx, [props.row.node]);
+  };
 
   const title = () =>
     `${props.row.depth === 0 ? subagentPrefix(props.row.node) : ""}${props.row.node.title}`;
@@ -137,10 +160,23 @@ function ProgressRow(props: { row: TuiRow }) {
 
   return (
     <box flexDirection="column" paddingLeft={props.row.depth === 0 ? 0 : 2}>
-      <text fg={ctx.theme.text.base} wrapMode="word">
-        <span fg={ctx.theme.text.muted}>{indent()}</span>
-        {label()}
-      </text>
+      <box flexDirection="row" alignItems="flex-start">
+        <text
+          fg={ctx.theme.text.base}
+          wrapMode="word"
+          flexGrow={1}
+          flexShrink={1}
+          onMouseDown={onToggle}
+        >
+          <span fg={ctx.theme.text.muted}>{indent()}</span>
+          {label()}
+        </text>
+        <Show when={isRoot()}>
+          <text fg={ctx.theme.text.muted} onMouseDown={onDismiss}>
+            {"  ✕"}
+          </text>
+        </Show>
+      </box>
       <Show when={props.row.node.detail}>
         <text fg={ctx.theme.text.muted} wrapMode="word">
           {`${detailIndent()}${oneLineText(props.row.node.detail ?? "").slice(0, 120)}`}
@@ -152,20 +188,51 @@ function ProgressRow(props: { row: TuiRow }) {
 
 function ProgressTree(props: { sessionID: string }) {
   const ctx = usePlugin();
+  const roots = () => rootsForSession(props.sessionID);
+  const doneRoots = () => roots().filter((root) => root.status === "done");
   const view = () =>
-    buildTuiView(rootsForSession(props.sessionID), {
+    buildTuiView(roots(), {
       maxRows,
       expanded: expandedFor(props.sessionID),
       expandByDefault: expandRootsByDefault,
     });
 
+  const onDismissDone = (event: TuiMouseEvent) => {
+    if (!leftClick(event)) return;
+    event.stopPropagation();
+    dismissRoots(ctx, doneRoots());
+  };
+
+  const onDismissAll = (event: TuiMouseEvent) => {
+    if (!leftClick(event)) return;
+    event.stopPropagation();
+    void confirmDismissAll(ctx, roots());
+  };
+
   return (
     <Show when={view().rows.length > 0}>
       <box flexDirection="column" paddingLeft={1} paddingRight={1} paddingTop={1}>
-        <text fg={ctx.theme.text.muted}>progress</text>
-        <For each={view().rows}>{(row) => <ProgressRow row={row} />}</For>
+        <box flexDirection="row" justifyContent="space-between">
+          <text fg={ctx.theme.text.muted} onMouseDown={() => openProgressDialog(ctx)}>
+            progress
+          </text>
+          <box flexDirection="row">
+            <Show when={doneRoots().length > 0}>
+              <text fg={ctx.theme.text.base} onMouseDown={onDismissDone}>
+                {`dismiss done (${doneRoots().length})`}
+              </text>
+              <text fg={ctx.theme.text.muted}>{"  ·  "}</text>
+            </Show>
+            <text fg={ctx.theme.text.base} onMouseDown={onDismissAll}>
+              {`dismiss all (${roots().length})`}
+            </text>
+          </box>
+        </box>
+        <For each={view().rows}>
+          {(row) => <ProgressRow row={row} sessionID={props.sessionID} />}
+        </For>
         <Show when={view().hidden > 0}>
-          <text fg={ctx.theme.text.muted}>
+          <text fg={ctx.theme.text.muted} onMouseDown={() => openProgressDialog(ctx)}>
             {`… +${view().hidden} more · /progress`}
           </text>
         </Show>
@@ -198,6 +265,16 @@ function dismissRoots(context: TuiContext, roots: TreeNode[]): void {
         : `Dismissed ${count} progress task${count === 1 ? "" : "s"}`,
     variant: count === 0 ? "info" : "success",
   });
+}
+
+async function confirmDismissAll(context: TuiContext, roots: TreeNode[]): Promise<void> {
+  if (roots.length === 0) return;
+  const confirmed = await context.ui.dialog.confirm({
+    title: "Dismiss all progress?",
+    message: `${roots.length} task${roots.length === 1 ? "" : "s"} will be hidden. Agent updates bring them back.`,
+    label: { confirm: "Dismiss all" },
+  });
+  if (confirmed) dismissRoots(context, roots);
 }
 
 async function openProgressDialog(context: TuiContext): Promise<void> {
@@ -248,12 +325,7 @@ async function openProgressDialog(context: TuiContext): Promise<void> {
     return;
   }
   if (choice.kind === "all") {
-    const confirmed = await context.ui.dialog.confirm({
-      title: "Dismiss all progress?",
-      message: `${roots.length} task${roots.length === 1 ? "" : "s"} will be hidden. Agent updates bring them back.`,
-      label: { confirm: "Dismiss all" },
-    });
-    if (confirmed) dismissRoots(context, roots);
+    await confirmDismissAll(context, roots);
     return;
   }
   if (choice.kind === "pick-dismiss") {
@@ -318,7 +390,7 @@ export default Plugin.define({
           title: "Progress: expand or dismiss",
           description: "Browse progress roots; expand a tree or dismiss tasks",
           group: "progress",
-          bind: false,
+          bind: "alt+p",
           palette: true,
           slash: { name: "progress" },
           run: () => openProgressDialog(context),

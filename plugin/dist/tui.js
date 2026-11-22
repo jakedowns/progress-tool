@@ -1,7 +1,7 @@
 // src/tui.js
-import { createTextNode as _$createTextNode } from "@opentui/solid";
 import { createComponent as _$createComponent } from "@opentui/solid";
 import { effect as _$effect } from "@opentui/solid";
+import { createTextNode as _$createTextNode } from "@opentui/solid";
 import { insertNode as _$insertNode } from "@opentui/solid";
 import { insert as _$insert } from "@opentui/solid";
 import { setProp as _$setProp } from "@opentui/solid";
@@ -353,10 +353,24 @@ function rootsForSession(sessionID) {
   const entries = state().entries ?? {};
   return buildTree(visibleEntries(scopeEntries(entries, sessionID, visibilityOptions), Date.now(), visibilityOptions)).filter((root) => !isDismissed(root, dismissedMap(entries)));
 }
+function leftClick(event) {
+  return event.button === void 0 || event.button === 0;
+}
 function ProgressRow(props) {
   const ctx = usePlugin();
   const indent = () => props.row.depth === 0 ? "" : "\u2514\u2500 ";
   const detailIndent = () => props.row.depth === 0 ? "  \xB7 " : "    \xB7 ";
+  const isRoot = () => props.row.depth === 0;
+  const hasChildren = () => (props.row.node.children?.length ?? 0) > 0;
+  const onToggle = (event) => {
+    if (!leftClick(event) || !isRoot() || !hasChildren()) return;
+    toggleExpanded(props.sessionID, props.row.node.key);
+  };
+  const onDismiss = (event) => {
+    if (!leftClick(event)) return;
+    event.stopPropagation();
+    dismissRoots(ctx, [props.row.node]);
+  };
   const title = () => `${props.row.depth === 0 ? subagentPrefix(props.row.node) : ""}${props.row.node.title}`;
   const marker = () => {
     if (props.row.depth !== 0) return "";
@@ -374,30 +388,48 @@ function ProgressRow(props) {
     return `${glyph(props.row.node.status)} [${parts.bar}] ${marker()}${title()}${pct ? ` ${pct}` : ""}${suffix()}`;
   };
   return (() => {
-    var _el$ = _$createElement("box"), _el$2 = _$createElement("text"), _el$3 = _$createElement("span");
+    var _el$ = _$createElement("box"), _el$2 = _$createElement("box"), _el$3 = _$createElement("text"), _el$4 = _$createElement("span");
     _$insertNode(_el$, _el$2);
     _$setProp(_el$, "flexDirection", "column");
     _$insertNode(_el$2, _el$3);
-    _$setProp(_el$2, "wrapMode", "word");
-    _$insert(_el$3, indent);
-    _$insert(_el$2, label, null);
+    _$setProp(_el$2, "flexDirection", "row");
+    _$setProp(_el$2, "alignItems", "flex-start");
+    _$insertNode(_el$3, _el$4);
+    _$setProp(_el$3, "wrapMode", "word");
+    _$setProp(_el$3, "flexGrow", 1);
+    _$setProp(_el$3, "flexShrink", 1);
+    _$setProp(_el$3, "onMouseDown", onToggle);
+    _$insert(_el$4, indent);
+    _$insert(_el$3, label, null);
+    _$insert(_el$2, _$createComponent(Show, {
+      get when() {
+        return isRoot();
+      },
+      get children() {
+        var _el$5 = _$createElement("text");
+        _$insertNode(_el$5, _$createTextNode(`  \u2715`));
+        _$setProp(_el$5, "onMouseDown", onDismiss);
+        _$effect((_$p) => _$setProp(_el$5, "fg", ctx.theme.text.muted, _$p));
+        return _el$5;
+      }
+    }), null);
     _$insert(_el$, _$createComponent(Show, {
       get when() {
         return props.row.node.detail;
       },
       get children() {
-        var _el$4 = _$createElement("text");
-        _$setProp(_el$4, "wrapMode", "word");
-        _$insert(_el$4, () => `${detailIndent()}${oneLineText(props.row.node.detail ?? "").slice(0, 120)}`);
-        _$effect((_$p) => _$setProp(_el$4, "fg", ctx.theme.text.muted, _$p));
-        return _el$4;
+        var _el$7 = _$createElement("text");
+        _$setProp(_el$7, "wrapMode", "word");
+        _$insert(_el$7, () => `${detailIndent()}${oneLineText(props.row.node.detail ?? "").slice(0, 120)}`);
+        _$effect((_$p) => _$setProp(_el$7, "fg", ctx.theme.text.muted, _$p));
+        return _el$7;
       }
     }), null);
     _$effect((_p$) => {
       var _v$ = props.row.depth === 0 ? 0 : 2, _v$2 = ctx.theme.text.base, _v$3 = ctx.theme.text.muted;
       _v$ !== _p$.e && (_p$.e = _$setProp(_el$, "paddingLeft", _v$, _p$.e));
-      _v$2 !== _p$.t && (_p$.t = _$setProp(_el$2, "fg", _v$2, _p$.t));
-      _v$3 !== _p$.a && (_p$.a = _$setProp(_el$3, "fg", _v$3, _p$.a));
+      _v$2 !== _p$.t && (_p$.t = _$setProp(_el$3, "fg", _v$2, _p$.t));
+      _v$3 !== _p$.a && (_p$.a = _$setProp(_el$4, "fg", _v$3, _p$.a));
       return _p$;
     }, {
       e: void 0,
@@ -409,44 +441,96 @@ function ProgressRow(props) {
 }
 function ProgressTree(props) {
   const ctx = usePlugin();
-  const view = () => buildTuiView(rootsForSession(props.sessionID), {
+  const roots = () => rootsForSession(props.sessionID);
+  const doneRoots = () => roots().filter((root) => root.status === "done");
+  const view = () => buildTuiView(roots(), {
     maxRows,
     expanded: expandedFor(props.sessionID),
     expandByDefault: expandRootsByDefault
   });
+  const onDismissDone = (event) => {
+    if (!leftClick(event)) return;
+    event.stopPropagation();
+    dismissRoots(ctx, doneRoots());
+  };
+  const onDismissAll = (event) => {
+    if (!leftClick(event)) return;
+    event.stopPropagation();
+    void confirmDismissAll(ctx, roots());
+  };
   return _$createComponent(Show, {
     get when() {
       return view().rows.length > 0;
     },
     get children() {
-      var _el$5 = _$createElement("box"), _el$6 = _$createElement("text");
-      _$insertNode(_el$5, _el$6);
-      _$setProp(_el$5, "flexDirection", "column");
-      _$setProp(_el$5, "paddingLeft", 1);
-      _$setProp(_el$5, "paddingRight", 1);
-      _$setProp(_el$5, "paddingTop", 1);
-      _$insertNode(_el$6, _$createTextNode(`progress`));
-      _$insert(_el$5, _$createComponent(For, {
+      var _el$8 = _$createElement("box"), _el$9 = _$createElement("box"), _el$0 = _$createElement("text"), _el$10 = _$createElement("box"), _el$14 = _$createElement("text");
+      _$insertNode(_el$8, _el$9);
+      _$setProp(_el$8, "flexDirection", "column");
+      _$setProp(_el$8, "paddingLeft", 1);
+      _$setProp(_el$8, "paddingRight", 1);
+      _$setProp(_el$8, "paddingTop", 1);
+      _$insertNode(_el$9, _el$0);
+      _$insertNode(_el$9, _el$10);
+      _$setProp(_el$9, "flexDirection", "row");
+      _$setProp(_el$9, "justifyContent", "space-between");
+      _$insertNode(_el$0, _$createTextNode(`progress`));
+      _$setProp(_el$0, "onMouseDown", () => openProgressDialog(ctx));
+      _$insertNode(_el$10, _el$14);
+      _$setProp(_el$10, "flexDirection", "row");
+      _$insert(_el$10, _$createComponent(Show, {
+        get when() {
+          return doneRoots().length > 0;
+        },
+        get children() {
+          return [(() => {
+            var _el$11 = _$createElement("text");
+            _$setProp(_el$11, "onMouseDown", onDismissDone);
+            _$insert(_el$11, () => `dismiss done (${doneRoots().length})`);
+            _$effect((_$p) => _$setProp(_el$11, "fg", ctx.theme.text.base, _$p));
+            return _el$11;
+          })(), (() => {
+            var _el$12 = _$createElement("text");
+            _$insertNode(_el$12, _$createTextNode(`  \xB7  `));
+            _$effect((_$p) => _$setProp(_el$12, "fg", ctx.theme.text.muted, _$p));
+            return _el$12;
+          })()];
+        }
+      }), _el$14);
+      _$setProp(_el$14, "onMouseDown", onDismissAll);
+      _$insert(_el$14, () => `dismiss all (${roots().length})`);
+      _$insert(_el$8, _$createComponent(For, {
         get each() {
           return view().rows;
         },
         children: (row) => _$createComponent(ProgressRow, {
-          row
+          row,
+          get sessionID() {
+            return props.sessionID;
+          }
         })
       }), null);
-      _$insert(_el$5, _$createComponent(Show, {
+      _$insert(_el$8, _$createComponent(Show, {
         get when() {
           return view().hidden > 0;
         },
         get children() {
-          var _el$8 = _$createElement("text");
-          _$insert(_el$8, () => `\u2026 +${view().hidden} more \xB7 /progress`);
-          _$effect((_$p) => _$setProp(_el$8, "fg", ctx.theme.text.muted, _$p));
-          return _el$8;
+          var _el$15 = _$createElement("text");
+          _$setProp(_el$15, "onMouseDown", () => openProgressDialog(ctx));
+          _$insert(_el$15, () => `\u2026 +${view().hidden} more \xB7 /progress`);
+          _$effect((_$p) => _$setProp(_el$15, "fg", ctx.theme.text.muted, _$p));
+          return _el$15;
         }
       }), null);
-      _$effect((_$p) => _$setProp(_el$6, "fg", ctx.theme.text.muted, _$p));
-      return _el$5;
+      _$effect((_p$) => {
+        var _v$4 = ctx.theme.text.muted, _v$5 = ctx.theme.text.base;
+        _v$4 !== _p$.e && (_p$.e = _$setProp(_el$0, "fg", _v$4, _p$.e));
+        _v$5 !== _p$.t && (_p$.t = _$setProp(_el$14, "fg", _v$5, _p$.t));
+        return _p$;
+      }, {
+        e: void 0,
+        t: void 0
+      });
+      return _el$8;
     }
   });
 }
@@ -463,6 +547,17 @@ function dismissRoots(context, roots) {
     message: count === 0 ? "Nothing to dismiss" : `Dismissed ${count} progress task${count === 1 ? "" : "s"}`,
     variant: count === 0 ? "info" : "success"
   });
+}
+async function confirmDismissAll(context, roots) {
+  if (roots.length === 0) return;
+  const confirmed = await context.ui.dialog.confirm({
+    title: "Dismiss all progress?",
+    message: `${roots.length} task${roots.length === 1 ? "" : "s"} will be hidden. Agent updates bring them back.`,
+    label: {
+      confirm: "Dismiss all"
+    }
+  });
+  if (confirmed) dismissRoots(context, roots);
 }
 async function openProgressDialog(context) {
   const sessionID = currentSessionID(context);
@@ -521,14 +616,7 @@ async function openProgressDialog(context) {
     return;
   }
   if (choice.kind === "all") {
-    const confirmed = await context.ui.dialog.confirm({
-      title: "Dismiss all progress?",
-      message: `${roots.length} task${roots.length === 1 ? "" : "s"} will be hidden. Agent updates bring them back.`,
-      label: {
-        confirm: "Dismiss all"
-      }
-    });
-    if (confirmed) dismissRoots(context, roots);
+    await confirmDismissAll(context, roots);
     return;
   }
   if (choice.kind === "pick-dismiss") {
@@ -565,10 +653,10 @@ function FooterStatus() {
       return summary();
     },
     get children() {
-      var _el$9 = _$createElement("text");
-      _$insert(_el$9, summary);
-      _$effect((_$p) => _$setProp(_el$9, "fg", ctx.theme.text.muted, _$p));
-      return _el$9;
+      var _el$16 = _$createElement("text");
+      _$insert(_el$16, summary);
+      _$effect((_$p) => _$setProp(_el$16, "fg", ctx.theme.text.muted, _$p));
+      return _el$16;
     }
   });
 }
@@ -593,7 +681,7 @@ var tui_default = Plugin.define({
         title: "Progress: expand or dismiss",
         description: "Browse progress roots; expand a tree or dismiss tasks",
         group: "progress",
-        bind: false,
+        bind: "alt+p",
         palette: true,
         slash: {
           name: "progress"
