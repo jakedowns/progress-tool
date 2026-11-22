@@ -587,7 +587,7 @@ var tui_default = Plugin.define({
         variant: "success"
       });
     }
-    context.ui.keymap.layer(() => ({
+    context.keymap.layer(() => ({
       commands: [{
         id: "progress.open",
         title: "Progress: expand or dismiss",

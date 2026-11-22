@@ -311,7 +311,7 @@ export default Plugin.define({
       context.ui.toast.show({ message: "Progress plugin loaded", variant: "success" });
     }
 
-    context.ui.keymap.layer(() => ({
+    context.keymap.layer(() => ({
       commands: [
         {
           id: "progress.open",
