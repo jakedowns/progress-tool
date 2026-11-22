@@ -1,4 +1,5 @@
 // src/tui.js
+import { memo as _$memo } from "@opentui/solid";
 import { createTextNode as _$createTextNode } from "@opentui/solid";
 import { insertNode as _$insertNode } from "@opentui/solid";
 import { createComponent as _$createComponent } from "@opentui/solid";
@@ -326,7 +327,7 @@ function normalizeMaxRoots(value) {
 }
 function normalizeSidebarRows(value) {
   const numeric = typeof value === "number" && Number.isFinite(value) ? Math.floor(value) : 24;
-  return Math.max(1, Math.min(100, numeric));
+  return Math.max(0, Math.min(100, numeric));
 }
 function normalizeTuiLayout(value) {
   return value === "sidebar" ? "sidebar" : "composer";
@@ -544,9 +545,8 @@ function ProgressTree(props) {
       return view().rows.length > 0;
     },
     get children() {
-      var _el$9 = _$createElement("box"), _el$0 = _$createElement("box"), _el$1 = _$createElement("text"), _el$11 = _$createElement("box"), _el$15 = _$createElement("text"), _el$16 = _$createElement("scrollbox");
+      var _el$9 = _$createElement("box"), _el$0 = _$createElement("box"), _el$1 = _$createElement("text"), _el$11 = _$createElement("box"), _el$15 = _$createElement("text");
       _$insertNode(_el$9, _el$0);
-      _$insertNode(_el$9, _el$16);
       _$setProp(_el$9, "flexDirection", "column");
       _$setProp(_el$9, "paddingLeft", 1);
       _$setProp(_el$9, "paddingRight", 1);
@@ -583,23 +583,44 @@ function ProgressTree(props) {
       _$setProp(_el$15, "selectable", false);
       _$setProp(_el$15, "onMouseUp", onDismissAll);
       _$insert(_el$15, () => `dismiss all (${roots().length})`);
-      _$setProp(_el$16, "scrollY", true);
-      _$setProp(_el$16, "stickyStart", "top");
-      _$setProp(_el$16, "focusable", false);
-      _$insert(_el$16, _$createComponent(For, {
-        get each() {
-          return view().rows;
+      _$insert(_el$9, _$createComponent(Show, {
+        when: capacity > 0,
+        get fallback() {
+          return _$createComponent(For, {
+            get each() {
+              return view().rows;
+            },
+            children: (row) => _$createComponent(ProgressRow, {
+              row,
+              get sessionID() {
+                return props.sessionID;
+              }
+            })
+          });
         },
-        children: (row) => _$createComponent(ProgressRow, {
-          row,
-          get sessionID() {
-            return props.sessionID;
-          }
-        })
-      }));
+        get children() {
+          var _el$16 = _$createElement("scrollbox");
+          _$setProp(_el$16, "scrollY", true);
+          _$setProp(_el$16, "stickyStart", "top");
+          _$setProp(_el$16, "focusable", false);
+          _$insert(_el$16, _$createComponent(For, {
+            get each() {
+              return view().rows;
+            },
+            children: (row) => _$createComponent(ProgressRow, {
+              row,
+              get sessionID() {
+                return props.sessionID;
+              }
+            })
+          }));
+          _$effect((_$p) => _$setProp(_el$16, "height", viewportHeight(), _$p));
+          return _el$16;
+        }
+      }), null);
       _$insert(_el$9, _$createComponent(Show, {
         get when() {
-          return overflowLines() > 0;
+          return capacity > 0 && overflowLines() > 0;
         },
         get children() {
           var _el$17 = _$createElement("text");
@@ -623,15 +644,13 @@ function ProgressTree(props) {
         }
       }), null);
       _$effect((_p$) => {
-        var _v$4 = ctx.theme.text.muted, _v$5 = ctx.theme.text.base, _v$6 = viewportHeight();
+        var _v$4 = ctx.theme.text.muted, _v$5 = ctx.theme.text.base;
         _v$4 !== _p$.e && (_p$.e = _$setProp(_el$1, "fg", _v$4, _p$.e));
         _v$5 !== _p$.t && (_p$.t = _$setProp(_el$15, "fg", _v$5, _p$.t));
-        _v$6 !== _p$.a && (_p$.a = _$setProp(_el$16, "height", _v$6, _p$.a));
         return _p$;
       }, {
         e: void 0,
-        t: void 0,
-        a: void 0
+        t: void 0
       });
       return _el$9;
     }

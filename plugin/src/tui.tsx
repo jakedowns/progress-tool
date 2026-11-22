@@ -289,17 +289,26 @@ function ProgressTree(props: { sessionID: string; capacity?: number }) {
             </text>
           </box>
         </box>
-        <scrollbox
-          height={viewportHeight()}
-          scrollY
-          stickyStart="top"
-          focusable={false}
+        <Show
+          when={capacity > 0}
+          fallback={
+            <For each={view().rows}>
+              {(row) => <ProgressRow row={row} sessionID={props.sessionID} />}
+            </For>
+          }
         >
-          <For each={view().rows}>
-            {(row) => <ProgressRow row={row} sessionID={props.sessionID} />}
-          </For>
-        </scrollbox>
-        <Show when={overflowLines() > 0}>
+          <scrollbox
+            height={viewportHeight()}
+            scrollY
+            stickyStart="top"
+            focusable={false}
+          >
+            <For each={view().rows}>
+              {(row) => <ProgressRow row={row} sessionID={props.sessionID} />}
+            </For>
+          </scrollbox>
+        </Show>
+        <Show when={capacity > 0 && overflowLines() > 0}>
           <text selectable={false} fg={ctx.theme.text.muted}>
             {`--- scroll to see ${overflowLines()} more ---`}
           </text>

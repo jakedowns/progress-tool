@@ -115,10 +115,10 @@ export function normalizeMaxRoots(value: unknown): number {
   return Math.max(1, Math.min(50, numeric));
 }
 
-/** Sidebar viewport height in terminal rows; defaults to 24. */
+/** Sidebar viewport height in terminal rows; 0 means render everything and let the sidebar scroll. */
 export function normalizeSidebarRows(value: unknown): number {
   const numeric = typeof value === "number" && Number.isFinite(value) ? Math.floor(value) : 24;
-  return Math.max(1, Math.min(100, numeric));
+  return Math.max(0, Math.min(100, numeric));
 }
 
 export type TuiLayout = "composer" | "sidebar";
