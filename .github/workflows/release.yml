@@ -1,0 +1,113 @@
+# Publish releases with npm trusted publishing (OIDC).
+#
+# One-time setup on npmjs.com, per package:
+#   Package -> Settings -> Trusted publishing -> GitHub Actions
+#     Organization/user: jakedowns
+#     Repository:        progress-tool
+#     Workflow filename: release.yml
+#     Environment:       (optional; if set, add `environment: <name>` to the job)
+#
+# Requirements: GitHub-hosted runner, Node >= 22.14, npm >= 11.5.1.
+# No NPM_TOKEN secret is used; npm exchanges the GitHub OIDC token directly.
+#
+# Trigger a release by pushing a tag that matches the package version:
+#   git tag -a plugin@2.18.8 -m "progress-tool plugin 2.18.8" && git push origin plugin@2.18.8
+#   git tag -a mcp-server@2.11.0 -m "progress-tool mcp 2.11.0" && git push origin mcp-server@2.11.0
+#
+# workflow_dispatch exists so an already-pushed tag (for example plugin@2.18.7)
+# can be published after trusted publishing is configured.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - plugin@*
+      - mcp-server@*
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish (for example plugin@2.18.7)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    # Deploy keys and forks cannot publish; only the canonical repository can.
+    if: github.repository == 'jakedowns/progress-tool'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      # Node 22 ships npm 10, which predates trusted publishing.
+      - name: Upgrade npm for trusted publishing
+        run: npm install --global npm@^11.5.1
+
+      - name: Verify plugin tag matches package version
+        if: startsWith(env.RELEASE_TAG, 'plugin@')
+        working-directory: plugin
+        run: |
+          set -euo pipefail
+          expected="${RELEASE_TAG#plugin@}"
+          actual="$(node -p "require('./package.json').version")"
+          if [ "$expected" != "$actual" ]; then
+            echo "::error::Tag $RELEASE_TAG does not match plugin/package.json version $actual"
+            exit 1
+          fi
+          echo "Publishing @jakedowns/progress-tool-opencode-plugin@$actual"
+
+      - name: Install plugin dependencies
+        if: startsWith(env.RELEASE_TAG, 'plugin@')
+        working-directory: plugin
+        run: npm install --no-audit --no-fund
+
+      # prepublishOnly runs the test suite and rebuilds both bundles.
+      - name: Publish plugin
+        if: startsWith(env.RELEASE_TAG, 'plugin@')
+        working-directory: plugin
+        run: npm publish --provenance --access public
+
+      - name: Verify mcp-server tag matches package version
+        if: startsWith(env.RELEASE_TAG, 'mcp-server@')
+        working-directory: mcp-server
+        run: |
+          set -euo pipefail
+          expected="${RELEASE_TAG#mcp-server@}"
+          actual="$(node -p "require('./package.json').version")"
+          if [ "$expected" != "$actual" ]; then
+            echo "::error::Tag $RELEASE_TAG does not match mcp-server/package.json version $actual"
+            exit 1
+          fi
+          echo "Publishing @jakedowns/progress-tool-mcp@$actual"
+
+      - name: Install mcp-server dependencies
+        if: startsWith(env.RELEASE_TAG, 'mcp-server@')
+        working-directory: mcp-server
+        run: npm install --no-audit --no-fund
+
+      - name: Publish mcp-server
+        if: startsWith(env.RELEASE_TAG, 'mcp-server@')
+        working-directory: mcp-server
+        run: npm publish --provenance --access public
