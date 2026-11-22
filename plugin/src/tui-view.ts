@@ -73,6 +73,37 @@ export function rootDetailLines(root: TreeNode): string[] {
   return lines;
 }
 
+const ROOT_SUMMARY_ORDER = ["waiting", "running", "error", "done", "dismissed"] as const;
+
+/**
+ * One-line status summary for the collapsed TUI view, e.g.
+ * `waiting (1) | running (3) | error (2) | done (5) | dismissed (34)`.
+ * Dismissed roots are counted separately and excluded from status buckets.
+ * Zero buckets are omitted; returns "" when there is nothing to show.
+ */
+export function summarizeRoots(
+  roots: readonly TreeNode[],
+  isDismissedRoot: (root: TreeNode) => boolean
+): string {
+  const counts: Record<(typeof ROOT_SUMMARY_ORDER)[number], number> = {
+    waiting: 0,
+    running: 0,
+    error: 0,
+    done: 0,
+    dismissed: 0,
+  };
+  for (const root of roots) {
+    if (isDismissedRoot(root)) {
+      counts.dismissed += 1;
+    } else if (root.status && root.status in counts) {
+      counts[root.status as keyof typeof counts] += 1;
+    }
+  }
+  return ROOT_SUMMARY_ORDER.filter((key) => counts[key] > 0)
+    .map((key) => `${key} (${counts[key]})`)
+    .join(" | ");
+}
+
 export function buildTuiView(
   roots: readonly TreeNode[],
   options: TuiViewOptions = {}

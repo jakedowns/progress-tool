@@ -35,6 +35,7 @@ const {
   normalizeTuiLayout,
   rootDetailLines,
   sortRootsByUrgency,
+  summarizeRoots,
 } = require(path.join(OUT, 'tui-view.cjs'));
 
 const root = (id, status, children = []) => ({ id, key: id, status, title: id, children });
@@ -137,6 +138,35 @@ test('normalizeSidebarRows defaults to 0 (full tree) and clamps to 0..100', () =
   assert.equal(normalizeSidebarRows(0), 0);
   assert.equal(normalizeSidebarRows(200), 100);
   assert.equal(normalizeSidebarRows(30), 30);
+});
+
+test('collapsed summary counts statuses separately from dismissed roots', () => {
+  const roots = [
+    root('w', 'waiting'),
+    root('r1', 'running'),
+    root('r2', 'running'),
+    root('r3', 'running'),
+    root('e1', 'error'),
+    root('e2', 'error'),
+    root('d1', 'done'),
+    root('d2', 'done'),
+    root('d3', 'done'),
+    root('d4', 'done'),
+    root('d5', 'done'),
+    root('x1', 'done'),
+    root('x2', 'error'),
+    root('x3', 'waiting'),
+  ];
+  const dismissed = new Set(['x1', 'x2', 'x3']);
+  assert.equal(
+    summarizeRoots(roots, (node) => dismissed.has(node.id)),
+    'waiting (1) | running (3) | error (2) | done (5) | dismissed (3)'
+  );
+});
+
+test('collapsed summary omits zero buckets and empty trees', () => {
+  assert.equal(summarizeRoots([root('r', 'running')], () => false), 'running (1)');
+  assert.equal(summarizeRoots([], () => false), '');
 });
 
 test('expandByDefault opens roots unless the budget says otherwise', () => {

@@ -42,6 +42,7 @@ import {
   normalizeSidebarRows,
   normalizeTuiLayout,
   rootDetailLines,
+  summarizeRoots,
   type TuiRow,
 } from "./tui-view.js";
 import type { ProgressStatus, ProgressState, TreeNode } from "./types.js";
@@ -65,6 +66,9 @@ let setRootCap: ((mutation: (draft: { value: number }) => void) => void) | undef
 /** Runtime placement; seeded from `tuiLayout` and flipped by the swap command. */
 let layoutState: { mode: "composer" | "sidebar" } = { mode: "composer" };
 let setLayout: ((mutation: (draft: { mode: "composer" | "sidebar" }) => void) => void) | undefined;
+/** Runtime collapsed view; the palette toggles it between the tree and one summary row. */
+let collapsedState: { value: boolean } = { value: false };
+let setCollapsed: ((mutation: (draft: { value: boolean }) => void) => void) | undefined;
 
 function startPolling(refreshMs: number): () => void {
   pollers += 1;
@@ -104,8 +108,8 @@ function toggleExpanded(sessionID: string, key: string): void {
   });
 }
 
-/** Undismissed roots for a session, built from the latest polled state. */
-function rootsForSession(sessionID: string): TreeNode[] {
+/** All roots for a session, including dismissed ones, from the latest polled state. */
+function allRootsForSession(sessionID: string): TreeNode[] {
   const entries = state().entries ?? {};
   return buildTree(
     visibleEntries(
@@ -113,7 +117,15 @@ function rootsForSession(sessionID: string): TreeNode[] {
       Date.now(),
       visibilityOptions
     )
-  ).filter((root) => !isDismissed(root, dismissedMap(entries)));
+  );
+}
+
+/** Undismissed roots for a session, built from the latest polled state. */
+function rootsForSession(sessionID: string): TreeNode[] {
+  const entries = state().entries ?? {};
+  return allRootsForSession(sessionID).filter(
+    (root) => !isDismissed(root, dismissedMap(entries))
+  );
 }
 
 const STATUS_SUMMARY_ORDER: ProgressStatus[] = ["error", "running", "waiting", "done"];
@@ -291,10 +303,34 @@ function ProgressTree(props: { sessionID: string; capacity?: number; variant?: "
     </box>
   );
 
+  const collapsed = () => collapsedState.value === true;
+  const summary = () => {
+    const entries = state().entries ?? {};
+    return summarizeRoots(allRootsForSession(props.sessionID), (root) =>
+      isDismissed(root, dismissedMap(entries))
+    );
+  };
+  const hasContent = () => (collapsed() ? summary().length > 0 : view().rows.length > 0);
+
   return (
-    <Show when={view().rows.length > 0}>
+    <Show when={hasContent()}>
       <box flexDirection="column" paddingLeft={1} paddingRight={1} paddingTop={1}>
-        <Show
+        <Show when={collapsed()}>
+          <text
+            selectable={false}
+            fg={ctx.theme.text.base}
+            onMouseUp={() =>
+              setCollapsed?.((draft) => {
+                draft.value = false;
+              })
+            }
+          >
+            <span fg={ctx.theme.text.muted}>progress: </span>
+            {summary()}
+          </text>
+        </Show>
+        <Show when={!collapsed()}>
+          <Show
           when={stackedHeader}
           fallback={
             <box flexDirection="row" justifyContent="space-between">
@@ -338,6 +374,7 @@ function ProgressTree(props: { sessionID: string; capacity?: number; variant?: "
           >
             {`view full progress tree (${statusSummary(roots())})`}
           </text>
+        </Show>
         </Show>
       </box>
     </Show>
@@ -390,6 +427,19 @@ function swapLayout(context: TuiContext): void {
       next === "sidebar"
         ? "Progress moved to the sidebar"
         : "Progress moved above the prompt",
+    variant: "info",
+  });
+}
+
+/** Collapse the tree to a one-line summary, or restore it. */
+function toggleCollapsed(context: TuiContext): void {
+  if (!setCollapsed) return;
+  const next = !collapsedState.value;
+  setCollapsed((draft) => {
+    draft.value = next;
+  });
+  context.ui.toast.show({
+    message: next ? "Progress collapsed to summary" : "Progress tree expanded",
     variant: "info",
   });
 }
@@ -541,6 +591,12 @@ export default Plugin.define({
     layoutState = layoutStore;
     setLayout = updateStoredLayout;
 
+    const [collapsedStore, updateCollapsed] = context.storage.memory("tuiCollapsed", {
+      initial: { value: false },
+    });
+    collapsedState = collapsedStore;
+    setCollapsed = updateCollapsed;
+
     const stopPolling = startPolling(normalizeRefreshMs(context.options));
     if (context.options?.notifyOnLoad === true) {
       context.ui.toast.show({ message: "Progress plugin loaded", variant: "success" });
@@ -580,6 +636,14 @@ export default Plugin.define({
           group: "progress",
           palette: true,
           run: () => promptRootCap(context),
+        },
+        {
+          id: "progress.toggle-collapsed",
+          title: "Progress: collapse or expand tree",
+          description: "Toggle between the progress tree and a one-line status summary",
+          group: "progress",
+          palette: true,
+          run: () => toggleCollapsed(context),
         },
       ],
     }));

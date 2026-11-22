@@ -124,7 +124,8 @@ Multi-line titles and details accept real newlines, `\n` / `\r\n`, or `<br>`.
   `tuiMaxRoots` (default 3) and scrollable inside `tuiMaxRows` (default 8) so
   long lists never push the prompt away. A `--- scroll to see N more ---` hint
   appears on overflow; `/progress` opens a dialog to expand a tree or dismiss
-  tasks, and the palette can change the root cap. Set `tuiLayout: "sidebar"` to
+  tasks, and the palette can change the root cap or collapse the tree to a
+  one-line status summary. Set `tuiLayout: "sidebar"` to
   park the tree in the sidebar instead, or run `/progress swap-layout` to flip
   placements at runtime.
 - Running and waiting tasks stay visible; errors stay until dismissed or

@@ -292,6 +292,24 @@ function rootDetailLines(root) {
   lines.push("", root.detail?.trim() ? root.detail.trim() : "(no detail)");
   return lines;
 }
+var ROOT_SUMMARY_ORDER = ["waiting", "running", "error", "done", "dismissed"];
+function summarizeRoots(roots, isDismissedRoot) {
+  const counts = {
+    waiting: 0,
+    running: 0,
+    error: 0,
+    done: 0,
+    dismissed: 0
+  };
+  for (const root of roots) {
+    if (isDismissedRoot(root)) {
+      counts.dismissed += 1;
+    } else if (root.status && root.status in counts) {
+      counts[root.status] += 1;
+    }
+  }
+  return ROOT_SUMMARY_ORDER.filter((key) => counts[key] > 0).map((key) => `${key} (${counts[key]})`).join(" | ");
+}
 function buildTuiView(roots, options = {}) {
   const maxRows2 = Math.max(1, Math.min(50, Math.floor(options.maxRows ?? 8)));
   const maxRoots = Math.max(1, Math.floor(options.maxRoots ?? Infinity));
@@ -354,6 +372,10 @@ var layoutState = {
   mode: "composer"
 };
 var setLayout;
+var collapsedState = {
+  value: false
+};
+var setCollapsed;
 function startPolling(refreshMs) {
   pollers += 1;
   setState(readProgressState());
@@ -390,9 +412,13 @@ function toggleExpanded(sessionID, key) {
     return next;
   });
 }
+function allRootsForSession(sessionID) {
+  const entries = state().entries ?? {};
+  return buildTree(visibleEntries(scopeEntries(entries, sessionID, visibilityOptions), Date.now(), visibilityOptions));
+}
 function rootsForSession(sessionID) {
   const entries = state().entries ?? {};
-  return buildTree(visibleEntries(scopeEntries(entries, sessionID, visibilityOptions), Date.now(), visibilityOptions)).filter((root) => !isDismissed(root, dismissedMap(entries)));
+  return allRootsForSession(sessionID).filter((root) => !isDismissed(root, dismissedMap(entries)));
 }
 var STATUS_SUMMARY_ORDER = ["error", "running", "waiting", "done"];
 function statusSummary(roots) {
@@ -579,9 +605,15 @@ function ProgressTree(props) {
     _$effect((_$p) => _$setProp(_el$13, "fg", ctx.theme.text.base, _$p));
     return _el$1;
   })();
+  const collapsed = () => collapsedState.value === true;
+  const summary = () => {
+    const entries = state().entries ?? {};
+    return summarizeRoots(allRootsForSession(props.sessionID), (root) => isDismissed(root, dismissedMap(entries)));
+  };
+  const hasContent = () => collapsed() ? summary().length > 0 : view().rows.length > 0;
   return _$createComponent(Show, {
     get when() {
-      return view().rows.length > 0;
+      return hasContent();
     },
     get children() {
       var _el$14 = _$createElement("box");
@@ -590,79 +622,108 @@ function ProgressTree(props) {
       _$setProp(_el$14, "paddingRight", 1);
       _$setProp(_el$14, "paddingTop", 1);
       _$insert(_el$14, _$createComponent(Show, {
-        when: stackedHeader,
-        get fallback() {
-          return (() => {
-            var _el$18 = _$createElement("box");
-            _$setProp(_el$18, "flexDirection", "row");
-            _$setProp(_el$18, "justifyContent", "space-between");
-            _$insert(_el$18, title, null);
-            _$insert(_el$18, actions, null);
-            return _el$18;
-          })();
+        get when() {
+          return collapsed();
         },
         get children() {
-          return [_$memo(() => title()), _$memo(() => actions())];
-        }
-      }), null);
-      _$insert(_el$14, _$createComponent(Show, {
-        when: capacity > 0,
-        get fallback() {
-          return _$createComponent(For, {
-            get each() {
-              return view().rows;
-            },
-            children: (row) => _$createComponent(ProgressRow, {
-              row,
-              get sessionID() {
-                return props.sessionID;
-              }
-            })
-          });
-        },
-        get children() {
-          var _el$15 = _$createElement("scrollbox");
-          _$setProp(_el$15, "scrollY", true);
-          _$setProp(_el$15, "stickyStart", "top");
-          _$setProp(_el$15, "focusable", false);
-          _$insert(_el$15, _$createComponent(For, {
-            get each() {
-              return view().rows;
-            },
-            children: (row) => _$createComponent(ProgressRow, {
-              row,
-              get sessionID() {
-                return props.sessionID;
-              }
-            })
+          var _el$15 = _$createElement("text"), _el$16 = _$createElement("span");
+          _$insertNode(_el$15, _el$16);
+          _$setProp(_el$15, "selectable", false);
+          _$setProp(_el$15, "onMouseUp", () => setCollapsed?.((draft) => {
+            draft.value = false;
           }));
-          _$effect((_$p) => _$setProp(_el$15, "height", viewportHeight(), _$p));
+          _$insertNode(_el$16, _$createTextNode(`progress: `));
+          _$insert(_el$15, summary, null);
+          _$effect((_p$) => {
+            var _v$4 = ctx.theme.text.base, _v$5 = ctx.theme.text.muted;
+            _v$4 !== _p$.e && (_p$.e = _$setProp(_el$15, "fg", _v$4, _p$.e));
+            _v$5 !== _p$.t && (_p$.t = _$setProp(_el$16, "fg", _v$5, _p$.t));
+            return _p$;
+          }, {
+            e: void 0,
+            t: void 0
+          });
           return _el$15;
         }
       }), null);
       _$insert(_el$14, _$createComponent(Show, {
         get when() {
-          return capacity > 0 && overflowLines() > 0;
+          return !collapsed();
         },
         get children() {
-          var _el$16 = _$createElement("text");
-          _$setProp(_el$16, "selectable", false);
-          _$insert(_el$16, () => `--- scroll to see ${overflowLines()} more ---`);
-          _$effect((_$p) => _$setProp(_el$16, "fg", ctx.theme.text.muted, _$p));
-          return _el$16;
-        }
-      }), null);
-      _$insert(_el$14, _$createComponent(Show, {
-        get when() {
-          return view().hiddenRoots > 0;
-        },
-        get children() {
-          var _el$17 = _$createElement("text");
-          _$setProp(_el$17, "selectable", false);
-          _$setProp(_el$17, "onMouseUp", () => openProgressDialog(ctx));
-          _$insert(_el$17, () => `view full progress tree (${statusSummary(roots())})`);
-          _$effect((_$p) => _$setProp(_el$17, "fg", ctx.theme.text.base, _$p));
-          return _el$17;
+          return [_$createComponent(Show, {
+            when: stackedHeader,
+            get fallback() {
+              return (() => {
+                var _el$21 = _$createElement("box");
+                _$setProp(_el$21, "flexDirection", "row");
+                _$setProp(_el$21, "justifyContent", "space-between");
+                _$insert(_el$21, title, null);
+                _$insert(_el$21, actions, null);
+                return _el$21;
+              })();
+            },
+            get children() {
+              return [_$memo(() => title()), _$memo(() => actions())];
+            }
+          }), _$createComponent(Show, {
+            when: capacity > 0,
+            get fallback() {
+              return _$createComponent(For, {
+                get each() {
+                  return view().rows;
+                },
+                children: (row) => _$createComponent(ProgressRow, {
+                  row,
+                  get sessionID() {
+                    return props.sessionID;
+                  }
+                })
+              });
+            },
+            get children() {
+              var _el$18 = _$createElement("scrollbox");
+              _$setProp(_el$18, "scrollY", true);
+              _$setProp(_el$18, "stickyStart", "top");
+              _$setProp(_el$18, "focusable", false);
+              _$insert(_el$18, _$createComponent(For, {
+                get each() {
+                  return view().rows;
+                },
+                children: (row) => _$createComponent(ProgressRow, {
+                  row,
+                  get sessionID() {
+                    return props.sessionID;
+                  }
+                })
+              }));
+              _$effect((_$p) => _$setProp(_el$18, "height", viewportHeight(), _$p));
+              return _el$18;
+            }
+          }), _$createComponent(Show, {
+            get when() {
+              return capacity > 0 && overflowLines() > 0;
+            },
+            get children() {
+              var _el$19 = _$createElement("text");
+              _$setProp(_el$19, "selectable", false);
+              _$insert(_el$19, () => `--- scroll to see ${overflowLines()} more ---`);
+              _$effect((_$p) => _$setProp(_el$19, "fg", ctx.theme.text.muted, _$p));
+              return _el$19;
+            }
+          }), _$createComponent(Show, {
+            get when() {
+              return view().hiddenRoots > 0;
+            },
+            get children() {
+              var _el$20 = _$createElement("text");
+              _$setProp(_el$20, "selectable", false);
+              _$setProp(_el$20, "onMouseUp", () => openProgressDialog(ctx));
+              _$insert(_el$20, () => `view full progress tree (${statusSummary(roots())})`);
+              _$effect((_$p) => _$setProp(_el$20, "fg", ctx.theme.text.base, _$p));
+              return _el$20;
+            }
+          })];
         }
       }), null);
       return _el$14;
@@ -697,6 +758,17 @@ function swapLayout(context) {
   });
   context.ui.toast.show({
     message: next === "sidebar" ? "Progress moved to the sidebar" : "Progress moved above the prompt",
+    variant: "info"
+  });
+}
+function toggleCollapsed(context) {
+  if (!setCollapsed) return;
+  const next = !collapsedState.value;
+  setCollapsed((draft) => {
+    draft.value = next;
+  });
+  context.ui.toast.show({
+    message: next ? "Progress collapsed to summary" : "Progress tree expanded",
     variant: "info"
   });
 }
@@ -825,10 +897,10 @@ function FooterStatus() {
       return summary();
     },
     get children() {
-      var _el$19 = _$createElement("text");
-      _$insert(_el$19, summary);
-      _$effect((_$p) => _$setProp(_el$19, "fg", ctx.theme.text.muted, _$p));
-      return _el$19;
+      var _el$22 = _$createElement("text");
+      _$insert(_el$22, summary);
+      _$effect((_$p) => _$setProp(_el$22, "fg", ctx.theme.text.muted, _$p));
+      return _el$22;
     }
   });
 }
@@ -855,6 +927,13 @@ var tui_default = Plugin.define({
     });
     layoutState = layoutStore;
     setLayout = updateStoredLayout;
+    const [collapsedStore, updateCollapsed] = context.storage.memory("tuiCollapsed", {
+      initial: {
+        value: false
+      }
+    });
+    collapsedState = collapsedStore;
+    setCollapsed = updateCollapsed;
     const stopPolling = startPolling(normalizeRefreshMs(context.options));
     if (context.options?.notifyOnLoad === true) {
       context.ui.toast.show({
@@ -896,6 +975,13 @@ var tui_default = Plugin.define({
         group: "progress",
         palette: true,
         run: () => promptRootCap(context)
+      }, {
+        id: "progress.toggle-collapsed",
+        title: "Progress: collapse or expand tree",
+        description: "Toggle between the progress tree and a one-line status summary",
+        group: "progress",
+        palette: true,
+        run: () => toggleCollapsed(context)
       }]
     }));
     const unregisterComposer = context.ui.slot({
