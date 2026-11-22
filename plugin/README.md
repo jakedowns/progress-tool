@@ -1,5 +1,9 @@
 # @jakedowns/progress-tool-opencode-plugin
 
+[![npm version](https://img.shields.io/npm/v/@jakedowns/progress-tool-opencode-plugin?style=flat-square&logo=npm)](https://www.npmjs.com/package/@jakedowns/progress-tool-opencode-plugin)
+[![monthly downloads](https://img.shields.io/npm/dm/@jakedowns/progress-tool-opencode-plugin?style=flat-square&label=downloads%2Fmo)](https://www.npmjs.com/package/@jakedowns/progress-tool-opencode-plugin)
+[![license](https://img.shields.io/npm/l/@jakedowns/progress-tool-opencode-plugin?style=flat-square)](https://github.com/jakedowns/progress-tool/blob/master/LICENSE)
+
 OpenCode plugin that gives agents a **fire-and-forget progress tool** and an
 **out-of-band relay** for long-running commands — a live, glance-able tree above
 the transcript, at zero model tokens for telemetry.

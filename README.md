@@ -1,5 +1,11 @@
 # Progress Tool — live task trees for OpenCode (TUI + desktop/web)
 
+[![plugin version](https://img.shields.io/npm/v/@jakedowns/progress-tool-opencode-plugin?style=flat-square&logo=npm&label=plugin)](https://www.npmjs.com/package/@jakedowns/progress-tool-opencode-plugin)
+[![plugin downloads](https://img.shields.io/npm/dm/@jakedowns/progress-tool-opencode-plugin?style=flat-square&label=downloads%2Fmo)](https://www.npmjs.com/package/@jakedowns/progress-tool-opencode-plugin)
+[![mcp version](https://img.shields.io/npm/v/@jakedowns/progress-tool-mcp?style=flat-square&logo=npm&label=mcp)](https://www.npmjs.com/package/@jakedowns/progress-tool-mcp)
+[![mcp downloads](https://img.shields.io/npm/dm/@jakedowns/progress-tool-mcp?style=flat-square&label=downloads%2Fmo)](https://www.npmjs.com/package/@jakedowns/progress-tool-mcp)
+[![license](https://img.shields.io/npm/l/@jakedowns/progress-tool-opencode-plugin?style=flat-square)](./LICENSE)
+
 <img src="https://raw.githubusercontent.com/jakedowns/progress-tool/master/screenshots/1.png" width="300" alt="Progress pill showing a live task tree">
 <img src="https://raw.githubusercontent.com/jakedowns/progress-tool/master/screenshots/subagents.png" width="300" alt="Progress pill showing subagent rows">
 
