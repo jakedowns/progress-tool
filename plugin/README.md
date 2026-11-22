@@ -12,8 +12,9 @@ opencode plugin add @jakedowns/progress-tool-opencode-plugin
 
 Restart the service (or reload the window) and a progress pill appears above the
 composer. The plugin also installs and registers the MCP server
-(`@jakedowns/progress-tool-mcp`) automatically, and ships four skills
-(`progress-tool`, `delegation`, `osc-demo`, `tree-demo`).
+(`@jakedowns/progress-tool-mcp`) automatically, and ships four skills:
+`progress-tool` and `delegation` register by default, while `osc-demo` and
+`tree-demo` live in `optional-skills/` and only register with `demoSkills: true`.
 
 The MCP entrypoint is spawned with a real JavaScript runtime (`node`, then
 `bun`, then `npx -y @jakedowns/progress-tool-mcp`). It deliberately never uses
@@ -53,10 +54,11 @@ Prefer manual configuration? Add to `opencode.json`:
 - **Guidance that adapts** — injected rules, skill playbooks, pre-flight relay
   hints, strict-mode nudges (silent runs, stale progress), a turn-end idle
   reminder, and an optional 2-minute wall-clock nudge.
-- **Subagent attribution** — a subagent's progress rolls up under the parent
-  session (map in `~/.opencode-progress-sessions.json`, override
-  `PROGRESS_SESSION_MAP_PATH`), so child work is visible in the parent's pill
-  instead of an orphaned child scope.
+- **Subagent attribution** — child→parent links are recorded from
+  `session.created` (map in `~/.opencode-progress-sessions.json`, override
+  `PROGRESS_SESSION_MAP_PATH`) and the parent id is stamped into each subagent
+  prompt at launch, so child work rolls up in the parent's pill instead of an
+  orphaned child scope.
 
 ## Options
 
@@ -65,7 +67,8 @@ Pass under the plugin entry's `options` in `opencode.json`:
 | option | default | meaning |
 |---|---|---|
 | `injectInstructions` | `true` | inject progress/relay rules into every session |
-| `registerSkills` | `true` | register the bundled skills |
+| `registerSkills` | `true` | register the default skills (usage + delegation) |
+| `demoSkills` | `false` | also register the demo skills (`osc-demo`, `tree-demo`) |
 | `autoRegisterMcp` | `true` | register `@jakedowns/progress-tool-mcp` automatically |
 | `mcpRuntime` | auto | absolute path to the `node`/`bun` used to spawn the MCP server (auto-detected; set this if detection picks wrong) |
 | `strictMode` | `"nudge"` | `"nudge"` / `"force"` / `"off"` tool-call monitor |

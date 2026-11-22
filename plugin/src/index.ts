@@ -40,6 +40,13 @@ import {
 } from "./monitor.js";
 import { logNudge, nudgeLoggingEnabled, diffStatuses, type StatusSnapshot } from "./telemetry.js";
 import { resolveMcpLaunch } from "./mcp.js";
+import { injectParentSession, isSubagentTool } from "./subagent.js";
+import {
+  PACKAGED_SKILLS,
+  enabledSkills,
+  loadPackagedSkillBody,
+  skillPath,
+} from "./skills.js";
 
 /**
  * The plugin's own version, read at runtime so a running server part can be
@@ -59,42 +66,6 @@ const pluginVersion = (() => {
     return "unknown";
   }
 })();
-
-/** Skills shipped in the package and registered at setup (see plugin/skills/). */
-const PLUGIN_DIR = path.dirname(fileURLToPath(new URL("../package.json", import.meta.url)));
-const PACKAGED_SKILLS = [
-  {
-    id: "progress-tool",
-    name: "Progress Tool Usage",
-    description:
-      "Use the progress-tool MCP correctly — report long-horizon work (research, planning, exploration, refactors, docs) with the fire-and-forget progress tool, structure multi-step plans as a parentId tree, keep entries current between tool calls, and wrap long-running commands with the out-of-band progress-relay at zero token cost",
-  },
-  {
-    id: "osc-demo",
-    name: "OSC 9;4 Demo",
-    description:
-      "Demo OSC 9;4 terminal progress support in progress-tool — run a fake build that streams native OSC 9;4 progress sequences through the out-of-band relay (progress-relay), zero agent tokens",
-  },
-  {
-    id: "tree-demo",
-    name: "Task Tree Demo",
-    description:
-      "Demo nested task trees (parentId roll-up) in progress-tool — run a fake release pipeline with parent, child, and grandchild tasks streaming through the out-of-band relay at zero agent tokens, with an optional failure mode that rolls an error up the tree",
-  },
-  {
-    id: "delegation",
-    name: "Delegation (Subagents)",
-    description:
-      "Use subagents well — fan out independent research and verification in parallel, pick explore vs general, inherit the session's model, and avoid parallel-edit conflicts",
-  },
-];
-
-function loadPackagedSkillBody(id: string): string {
-  // Strip frontmatter: the skill tool adds the Markdown body, and the
-  // directory copies keep frontmatter for repo-local discovery.
-  const raw = readFileSync(path.join(PLUGIN_DIR, "skills", id, "SKILL.md"), "utf8");
-  return raw.replace(/^---\n[\s\S]*?\n---\n/, "").trimStart();
-}
 
 export default Plugin.define({
   id: "opencode-progress",
@@ -241,23 +212,26 @@ export default Plugin.define({
       if (injectRules) console.log("[opencode-progress] progress rules injected into system instructions");
     }
 
-    // Ship the usage + demo skills with the package so installing the plugin
-    // installs the skills. Opt out per project with
-    // `{ "options": { "registerSkills": false } }`.
+    // Register the usage + delegation skills by default; the demos are
+    // dev-only and opt in with `{ "options": { "demoSkills": true } }`.
+    // Disable everything with `{ "options": { "registerSkills": false } }`.
     if (ctx.options?.registerSkills !== false) {
+      const enabled = enabledSkills(ctx.options ?? {});
       await ctx.skill.transform((editor) => {
-        for (const skill of PACKAGED_SKILLS) {
+        for (const skill of enabled) {
           editor.add({
             id: Skill.ID.make(skill.id),
             name: Skill.Name.make(skill.name),
             description: skill.description,
-            path: Skill.Info.fields.path.make(path.join(PLUGIN_DIR, "skills", skill.id, "SKILL.md")),
-            content: loadPackagedSkillBody(skill.id),
+            path: Skill.Info.fields.path.make(skillPath(skill)),
+            content: loadPackagedSkillBody(skill),
             autoinvoke: true,
           });
         }
       });
-      console.log(`[opencode-progress] v${pluginVersion} registered ${PACKAGED_SKILLS.length} packaged skills`);
+      console.log(
+        `[opencode-progress] v${pluginVersion} registered ${enabled.length}/${PACKAGED_SKILLS.length} packaged skills${ctx.options?.demoSkills === true ? " (demos on)" : ""}`
+      );
     }
 
     // Strict mode: watch tool calls and nudge when the agent works silently
@@ -390,52 +364,67 @@ export default Plugin.define({
     }
     }
 
+    // Subagent attribution, part 1: `session.created` carries parentID the
+    // moment a child session exists, so map (and adopt) before the child's
+    // first progress call. Consumed in the background; the stream ends when
+    // the plugin unloads.
+    if (ctx.event?.subscribe) void (async () => {
+      try {
+        for await (const event of ctx.event.subscribe({ types: ['session.created'] })) {
+          if (event.type !== 'session.created') continue;
+          const child = event.data.sessionID;
+          const parent = event.data.parentID;
+          if (!child || !parent) continue;
+          if (recordChildSession(child, parent)) adoptChildEntries(child, parent);
+        }
+      } catch (error) {
+        console.error('[opencode-progress] session.created subscription failed', String(error));
+      }
+    })();
+
+    // Subagent attribution, part 2 (fallback): stamp the parent session id
+    // into the child's task prompt. Even a child whose map link is missing
+    // then reports under the session the user is watching. The injected
+    // attribution rules explain that a prompt-supplied id wins.
+    await ctx.tool.hook('execute.before', (event) => {
+      if (!isSubagentTool(event.tool)) return;
+      if (!progressTool.available) return;
+      injectParentSession(event.input, event.sessionID);
+    });
+
     // Idle reminder: at turn end (session about to go idle) with open,
     // non-dismissed entries, admit ONE synthetic message — it runs in the
     // same execution instead of the session going idle, so the model gets a
     // turn-end reminder ("you have a tree of todos pending"). Debounced by
     // entry signature + cooldown + per-run cap (monitor.ts).
-    //
-    // The same hook records subagent children (the idle event carries
-    // `background[].childSessionID`), so it is registered even when the
-    // reminder itself is disabled.
     const idleTrackers = new Map<string, IdleTracker>();
     const idleReminderEnabled = ctx.options?.idleReminder !== false;
     let idleHook: Awaited<ReturnType<typeof ctx.session.hook>> | undefined;
-    idleHook = await ctx.session.hook('experimental.idle', async (event) => {
-      try {
-        for (const work of event.background ?? []) {
-          if (work && work.kind === 'subagent') {
-            if (recordChildSession(work.childSessionID, work.sessionID)) {
-              adoptChildEntries(work.childSessionID, work.sessionID);
-            }
+    if (idleReminderEnabled) {
+      idleHook = await ctx.session.hook('experimental.idle', async (event) => {
+        try {
+          const entries = Object.values(readProgressState().entries ?? {}).filter(
+            (entry) => entry && entry.sessionId === event.sessionID
+          );
+          const tracker = idleTrackers.get(event.sessionID) ?? { signature: '', lastAt: 0, count: 0 };
+          const decision = idleReminder(tracker, entries, { now: Date.now() });
+          idleTrackers.set(event.sessionID, {
+            signature: decision.signature,
+            lastAt: decision.lastAt,
+            count: decision.count,
+          });
+          if (decision.action !== 'remind' || !decision.message) return;
+          console.log(`[opencode-progress] v${pluginVersion} idle reminder (${decision.count}) for ${event.sessionID}`);
+          if (verbose) {
+            logNudge({ event: 'idle-reminder', sessionID: event.sessionID, count: decision.count, openEntries: decision.signature.split(' | ').filter(Boolean).length });
           }
+          await ctx.session.synthetic({ sessionID: event.sessionID, text: decision.message });
+        } catch (error) {
+          console.error('[opencode-progress] idle reminder failed', String(error));
         }
-      } catch (error) {
-        console.error('[opencode-progress] session map update failed', String(error));
-      }
-      if (!idleReminderEnabled) return;
-      try {
-        const entries = Object.values(readProgressState().entries ?? {}).filter(
-          (entry) => entry && entry.sessionId === event.sessionID
-        );
-        const tracker = idleTrackers.get(event.sessionID) ?? { signature: '', lastAt: 0, count: 0 };
-        const decision = idleReminder(tracker, entries, { now: Date.now() });
-        idleTrackers.set(event.sessionID, {
-          signature: decision.signature,
-          lastAt: decision.lastAt,
-          count: decision.count,
-        });
-        if (decision.action !== 'remind' || !decision.message) return;
-        console.log(`[opencode-progress] v${pluginVersion} idle reminder (${decision.count}) for ${event.sessionID}`);
-        if (verbose) {
-          logNudge({ event: 'idle-reminder', sessionID: event.sessionID, count: decision.count, openEntries: decision.signature.split(' | ').filter(Boolean).length });
-        }
-        await ctx.session.synthetic({ sessionID: event.sessionID, text: decision.message });
-      } catch (error) {
-        console.error('[opencode-progress] idle reminder failed', String(error));
-      }
-    });
+
+      });
+    }
 
     // "Unhinged" mode (opt-in): append a progress reminder to every user
     // message so the agent re-checks its task list whenever the workload

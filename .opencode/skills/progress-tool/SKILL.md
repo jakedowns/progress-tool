@@ -1,9 +1,9 @@
 ---
-name: Progress Tool Usage
+name: [progress-tool] Progress Tool Usage
 description: Use the progress-tool MCP correctly — report long-horizon work (research, planning, exploration, refactors, docs) with the fire-and-forget progress tool, structure multi-step plans as a parentId tree, keep entries current between tool calls, and wrap long-running commands with the out-of-band progress-relay at zero token cost
 ---
 
-# Using the progress tool well
+# [progress-tool] Progress Tool Usage
 
 The `progress` tool (progress-server MCP) is **dual purpose**:
 

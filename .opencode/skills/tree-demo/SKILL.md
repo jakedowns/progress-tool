@@ -1,9 +1,9 @@
 ---
-name: Task Tree Demo
+name: [progress-tool] Task Tree Demo
 description: Demo nested task trees (parentId roll-up) in progress-tool — run a fake release pipeline with parent, child, and grandchild tasks streaming through the out-of-band relay at zero agent tokens, with an optional failure mode that rolls an error up the tree
 ---
 
-# Task tree demo
+# [progress-tool] Task Tree Demo
 
 Run the demo and explain what the viewer sees:
 

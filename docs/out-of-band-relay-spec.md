@@ -250,6 +250,7 @@ A shared global view can group entries by `sessionId`; harnesses that need compl
 Harnesses that run subagents in child sessions (OpenCode does) SHOULD attribute a child's progress to its parent, because the UI only surfaces the session the user is looking at:
 
 - MAY keep a small child→parent map beside the state file: `~/.opencode-progress-sessions.json` (`PROGRESS_SESSION_MAP_PATH` overrides). Shape: `{ "links": { "<childSessionId>": { "parentId": "...", "at": <ms> } } }`; a bare `"<child>": "<parent>"` is also accepted.
+- Harnesses that expose a child-creation event SHOULD write the link there (OpenCode: `session.created` with `data.parentID`), before the child's first tool call. A tool-execute hook that can rewrite the subagent prompt SHOULD also stamp the parent session id into it as a fallback.
 - Before writing, resolve the session through the map, following chains (bounded, cycle-safe) so nested subagents land on the top-most ancestor. Explicit `sessionId` / `--session` values are resolved the same way.
 - Entries already written under the child scope SHOULD be re-keyed onto the parent on first resolution (newer entry wins on collision); this catches a subagent that reports before the link exists.
 - The map is advisory and local: a missing or corrupt file MUST resolve every session to itself.

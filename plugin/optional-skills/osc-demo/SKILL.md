@@ -1,9 +1,9 @@
 ---
-name: OSC 9;4 Demo
+name: [progress-tool] OSC 9;4 Demo
 description: Demo OSC 9;4 terminal progress support in progress-tool — run a fake build that streams native OSC 9;4 progress sequences through the out-of-band relay (progress-relay), zero agent tokens
 ---
 
-# OSC 9;4 demo
+# [progress-tool] OSC 9;4 Demo
 
 Run the demo and explain what the viewer sees:
 
