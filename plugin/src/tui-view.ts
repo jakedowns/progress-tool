@@ -114,3 +114,15 @@ export function normalizeMaxRoots(value: unknown): number {
   const numeric = typeof value === "number" && Number.isFinite(value) ? Math.floor(value) : 3;
   return Math.max(1, Math.min(50, numeric));
 }
+
+export type TuiLayout = "composer" | "sidebar";
+
+/** Normalize the configured placement; anything but `sidebar` means the composer. */
+export function normalizeTuiLayout(value: unknown): TuiLayout {
+  return value === "sidebar" ? "sidebar" : "composer";
+}
+
+/** Flip between the two placements. */
+export function nextTuiLayout(current: TuiLayout): TuiLayout {
+  return current === "sidebar" ? "composer" : "sidebar";
+}

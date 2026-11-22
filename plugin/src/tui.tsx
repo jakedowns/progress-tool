@@ -35,7 +35,14 @@ import {
   type BarOptions,
   type VisibilityOptions,
 } from "./tree.js";
-import { buildTuiView, normalizeMaxRoots, rootDetailLines, type TuiRow } from "./tui-view.js";
+import {
+  buildTuiView,
+  nextTuiLayout,
+  normalizeMaxRoots,
+  normalizeTuiLayout,
+  rootDetailLines,
+  type TuiRow,
+} from "./tui-view.js";
 import type { ProgressStatus, ProgressState, TreeNode } from "./types.js";
 
 const [state, setState] = createSignal<ProgressState>(readProgressState());
@@ -53,6 +60,9 @@ let expandRootsByDefault = false;
 /** Runtime root cap; seeded from `tuiMaxRoots` and adjustable from the palette. */
 let rootCapState: { value: number } = { value: 3 };
 let setRootCap: ((mutation: (draft: { value: number }) => void) => void) | undefined;
+/** Runtime placement; seeded from `tuiLayout` and flipped by the swap command. */
+let layoutState: { mode: "composer" | "sidebar" } = { mode: "composer" };
+let setLayout: ((mutation: (draft: { mode: "composer" | "sidebar" }) => void) => void) | undefined;
 
 function startPolling(refreshMs: number): () => void {
   pollers += 1;
@@ -339,6 +349,22 @@ function showRootDetail(context: TuiContext, root: TreeNode): void {
   });
 }
 
+/** Flip the tree between above-prompt and sidebar placements. */
+function swapLayout(context: TuiContext): void {
+  if (!setLayout) return;
+  const next = nextTuiLayout(layoutState.mode);
+  setLayout((draft) => {
+    draft.mode = next;
+  });
+  context.ui.toast.show({
+    message:
+      next === "sidebar"
+        ? "Progress moved to the sidebar"
+        : "Progress moved above the prompt",
+    variant: "info",
+  });
+}
+
 /** Palette command: choose how many root rows the TUI renders. */
 async function promptRootCap(context: TuiContext): Promise<void> {
   const current = rootCapState.value;
@@ -478,6 +504,12 @@ export default Plugin.define({
     rootCapState = capStore;
     setRootCap = updateCap;
 
+    const [layoutStore, updateStoredLayout] = context.storage.memory("tuiLayout", {
+      initial: { mode: normalizeTuiLayout(context.options?.tuiLayout) },
+    });
+    layoutState = layoutStore;
+    setLayout = updateStoredLayout;
+
     const stopPolling = startPolling(normalizeRefreshMs(context.options));
     if (context.options?.notifyOnLoad === true) {
       context.ui.toast.show({ message: "Progress plugin loaded", variant: "success" });
@@ -493,8 +525,22 @@ export default Plugin.define({
           group: "progress",
           bind: "alt+p",
           palette: true,
-          slash: { name: "progress" },
-          run: () => openProgressDialog(context),
+          slash: { name: "progress", arguments: true },
+          run: (input) => {
+            if ((input ?? "").trim().toLowerCase() === "swap-layout") {
+              swapLayout(context);
+              return;
+            }
+            return openProgressDialog(context);
+          },
+        },
+        {
+          id: "progress.swap-layout",
+          title: "Progress: swap layout (composer/sidebar)",
+          description: "Move the progress tree above the prompt or into the sidebar",
+          group: "progress",
+          palette: true,
+          run: () => swapLayout(context),
         },
         {
           id: "progress.set-root-cap",
@@ -507,9 +553,21 @@ export default Plugin.define({
       ],
     }));
 
-    const unregisterTree = context.ui.slot({
+    const unregisterComposer = context.ui.slot({
       append: "session.composer.top",
-      render: ({ sessionID }) => <ProgressTree sessionID={sessionID} />,
+      render: ({ sessionID }) => (
+        <Show when={layoutState.mode === "composer"}>
+          <ProgressTree sessionID={sessionID} />
+        </Show>
+      ),
+    });
+    const unregisterSidebar = context.ui.slot({
+      append: "sidebar.content",
+      render: ({ sessionID }) => (
+        <Show when={layoutState.mode === "sidebar"}>
+          <ProgressTree sessionID={sessionID} />
+        </Show>
+      ),
     });
     const unregisterFooter = context.ui.slot({
       append: "home.footer.status",
@@ -517,7 +575,8 @@ export default Plugin.define({
     });
 
     return () => {
-      unregisterTree?.();
+      unregisterComposer?.();
+      unregisterSidebar?.();
       unregisterFooter?.();
       stopPolling();
     };

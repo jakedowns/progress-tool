@@ -324,6 +324,12 @@ function normalizeMaxRoots(value) {
   const numeric = typeof value === "number" && Number.isFinite(value) ? Math.floor(value) : 3;
   return Math.max(1, Math.min(50, numeric));
 }
+function normalizeTuiLayout(value) {
+  return value === "sidebar" ? "sidebar" : "composer";
+}
+function nextTuiLayout(current) {
+  return current === "sidebar" ? "composer" : "sidebar";
+}
 
 // src/tui.js
 var [state, setState] = createSignal(readProgressState());
@@ -338,6 +344,10 @@ var rootCapState = {
   value: 3
 };
 var setRootCap;
+var layoutState = {
+  mode: "composer"
+};
+var setLayout;
 function startPolling(refreshMs) {
   pollers += 1;
   setState(readProgressState());
@@ -641,6 +651,17 @@ function showRootDetail(context, root) {
     message: rootDetailLines(root).join("\n")
   });
 }
+function swapLayout(context) {
+  if (!setLayout) return;
+  const next = nextTuiLayout(layoutState.mode);
+  setLayout((draft) => {
+    draft.mode = next;
+  });
+  context.ui.toast.show({
+    message: next === "sidebar" ? "Progress moved to the sidebar" : "Progress moved above the prompt",
+    variant: "info"
+  });
+}
 async function promptRootCap(context) {
   const current = rootCapState.value;
   const choice = await context.ui.dialog.select({
@@ -788,6 +809,13 @@ var tui_default = Plugin.define({
     });
     rootCapState = capStore;
     setRootCap = updateCap;
+    const [layoutStore, updateStoredLayout] = context.storage.memory("tuiLayout", {
+      initial: {
+        mode: normalizeTuiLayout(context.options?.tuiLayout)
+      }
+    });
+    layoutState = layoutStore;
+    setLayout = updateStoredLayout;
     const stopPolling = startPolling(normalizeRefreshMs(context.options));
     if (context.options?.notifyOnLoad === true) {
       context.ui.toast.show({
@@ -805,9 +833,23 @@ var tui_default = Plugin.define({
         bind: "alt+p",
         palette: true,
         slash: {
-          name: "progress"
+          name: "progress",
+          arguments: true
         },
-        run: () => openProgressDialog(context)
+        run: (input) => {
+          if ((input ?? "").trim().toLowerCase() === "swap-layout") {
+            swapLayout(context);
+            return;
+          }
+          return openProgressDialog(context);
+        }
+      }, {
+        id: "progress.swap-layout",
+        title: "Progress: swap layout (composer/sidebar)",
+        description: "Move the progress tree above the prompt or into the sidebar",
+        group: "progress",
+        palette: true,
+        run: () => swapLayout(context)
       }, {
         id: "progress.set-root-cap",
         title: "Progress: set root cap",
@@ -817,12 +859,34 @@ var tui_default = Plugin.define({
         run: () => promptRootCap(context)
       }]
     }));
-    const unregisterTree = context.ui.slot({
+    const unregisterComposer = context.ui.slot({
       append: "session.composer.top",
       render: ({
         sessionID
-      }) => _$createComponent(ProgressTree, {
+      }) => _$createComponent(Show, {
+        get when() {
+          return layoutState.mode === "composer";
+        },
+        get children() {
+          return _$createComponent(ProgressTree, {
+            sessionID
+          });
+        }
+      })
+    });
+    const unregisterSidebar = context.ui.slot({
+      append: "sidebar.content",
+      render: ({
         sessionID
+      }) => _$createComponent(Show, {
+        get when() {
+          return layoutState.mode === "sidebar";
+        },
+        get children() {
+          return _$createComponent(ProgressTree, {
+            sessionID
+          });
+        }
       })
     });
     const unregisterFooter = context.ui.slot({
@@ -830,7 +894,8 @@ var tui_default = Plugin.define({
       render: () => _$createComponent(FooterStatus, {})
     });
     return () => {
-      unregisterTree?.();
+      unregisterComposer?.();
+      unregisterSidebar?.();
       unregisterFooter?.();
       stopPolling();
     };

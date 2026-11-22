@@ -27,9 +27,14 @@ execFileSync(
   { stdio: 'pipe' }
 );
 
-const { buildTuiView, normalizeMaxRoots, rootDetailLines, sortRootsByUrgency } = require(
-  path.join(OUT, 'tui-view.cjs')
-);
+const {
+  buildTuiView,
+  nextTuiLayout,
+  normalizeMaxRoots,
+  normalizeTuiLayout,
+  rootDetailLines,
+  sortRootsByUrgency,
+} = require(path.join(OUT, 'tui-view.cjs'));
 
 const root = (id, status, children = []) => ({ id, key: id, status, title: id, children });
 
@@ -116,6 +121,14 @@ test('normalizeMaxRoots clamps to 1..50 with a 3 default', () => {
   assert.equal(normalizeMaxRoots(0), 1);
   assert.equal(normalizeMaxRoots(100), 50);
   assert.equal(normalizeMaxRoots(5), 5);
+});
+
+test('layout normalizes and swaps between composer and sidebar', () => {
+  assert.equal(normalizeTuiLayout('sidebar'), 'sidebar');
+  assert.equal(normalizeTuiLayout('nope'), 'composer');
+  assert.equal(normalizeTuiLayout(undefined), 'composer');
+  assert.equal(nextTuiLayout('composer'), 'sidebar');
+  assert.equal(nextTuiLayout('sidebar'), 'composer');
 });
 
 test('expandByDefault opens roots unless the budget says otherwise', () => {
