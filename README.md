@@ -9,7 +9,7 @@ with user-dismissed entries hidden by default — useful before planning or when
 
 Implements the [Agent Progress Tool proposal](https://gist.github.com/jakedowns/ddc4eb4817184a074c82c61dc6e7228c) for OpenCode 2, and is written as a portable reference implementation that any model, agent, or harness can copy, adapt, or train on.
 
-**Versions:** MCP server `2.10.1` · OpenCode plugin `2.18.3`
+**Versions:** MCP server `2.10.1` · OpenCode plugin `2.18.4`
 
 ## Install from npm
 
@@ -457,13 +457,18 @@ For npm installs, the `bin` entries are installed automatically.
 The plugin at `plugin/` targets the OpenCode **V2** plugin API and exposes four parts:
 `server`, `tui`, `rpc`, and `gui-experimental`.
 
-1. Build the desktop/web GUI bundle (only needed after editing `plugin/src/gui.tsx`):
+1. Build the bundles (only needed after editing `plugin/src/gui.tsx` or `plugin/src/tui.tsx`):
 
    ```bash
    cd plugin
    npm install
    npm run build
    ```
+
+   `npm run build` compiles the GUI bundle (`dist/gui-experimental.cjs`) and the TUI
+   entry (`dist/tui.js`). The TUI is precompiled because npm installs live under
+   `node_modules`, which OpenCode's Solid transform skips — raw TSX there falls back
+   to React's JSX runtime and fails to load.
 
    `dist/gui-experimental.cjs` is committed, so a fresh checkout already has a bundle.
    `npm run build` stages the sources in `/tmp/opencode/build/progress-gui`, builds
