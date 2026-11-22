@@ -7,7 +7,7 @@
  * a "+N more" footer.
  */
 
-import { countDescendants, flattenTreeWithDepth } from "./tree.js";
+import { countDescendants, flattenTreeWithDepth, progressLabel } from "./tree.js";
 import type { TreeNode } from "./types.js";
 
 export interface TuiRow {
@@ -45,7 +45,7 @@ const STATUS_URGENCY: Record<string, number> = {
   done: 1,
 };
 
-/** Errors first, then running, waiting, done; stable within a status. */
+/** Error-first ordering for the click-to-expand summary line. */
 export function sortRootsByUrgency(roots: readonly TreeNode[]): TreeNode[] {
   return roots
     .map((node, index) => ({ node, index }))
@@ -55,6 +55,20 @@ export function sortRootsByUrgency(roots: readonly TreeNode[]): TreeNode[] {
         a.index - b.index
     )
     .map(({ node }) => node);
+}
+
+/**
+ * Full, untruncated detail for a root row (click target).
+ * Blank line separates metadata from the description.
+ */
+export function rootDetailLines(root: TreeNode): string[] {
+  const lines = [`status: ${root.status ?? "unknown"}`];
+  const pct = progressLabel(root.progress);
+  if (pct) lines.push(`progress: ${pct}`);
+  const descendants = countDescendants(root);
+  if (descendants > 0) lines.push(`descendants: ${descendants}`);
+  lines.push("", root.detail?.trim() ? root.detail.trim() : "(no detail)");
+  return lines;
 }
 
 export function buildTuiView(

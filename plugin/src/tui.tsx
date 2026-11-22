@@ -35,7 +35,7 @@ import {
   type BarOptions,
   type VisibilityOptions,
 } from "./tree.js";
-import { buildTuiView, type TuiRow } from "./tui-view.js";
+import { buildTuiView, rootDetailLines, type TuiRow } from "./tui-view.js";
 import type { ProgressStatus, ProgressState, TreeNode } from "./types.js";
 
 const [state, setState] = createSignal<ProgressState>(readProgressState());
@@ -128,11 +128,18 @@ function ProgressRow(props: { row: TuiRow; sessionID: string }) {
 
   const isRoot = () => props.row.depth === 0;
   const hasChildren = () => (props.row.node.children?.length ?? 0) > 0;
+  const hasMarker = () => isRoot() && hasChildren();
 
-  /** Row click mirrors the keyboard/dialog toggle: expand or collapse a root. */
+  /** The leading marker is the click-to-expand target; the rest of the row opens the detail. */
   const onToggle = (event: TuiMouseEvent) => {
-    if (!leftClick(event) || !isRoot() || !hasChildren()) return;
+    if (!leftClick(event) || !hasMarker()) return;
     toggleExpanded(props.sessionID, props.row.node.key);
+  };
+
+  /** The row (and its truncated detail line) opens the full description. */
+  const onDetail = (event: TuiMouseEvent) => {
+    if (!leftClick(event)) return;
+    showRootDetail(ctx, props.row.node);
   };
 
   /** The trailing ✕ is the click-to-dismiss redundancy for `Dismiss a task…`. */
@@ -145,14 +152,15 @@ function ProgressRow(props: { row: TuiRow; sessionID: string }) {
   const title = () =>
     `${props.row.depth === 0 ? subagentPrefix(props.row.node) : ""}${props.row.node.title}`;
 
-  const marker = () => {
-    if (props.row.depth !== 0) return "";
-    if (props.row.collapsed) return "▸ ";
-    return (props.row.node.children?.length ?? 0) > 0 ? "▾ " : "";
-  };
+  const marker = () => (props.row.collapsed ? "▸ " : "▾ ");
 
   const suffix = () =>
     props.row.hiddenChildren > 0 ? `  +${props.row.hiddenChildren}` : "";
+
+  const detailPreview = () => {
+    const full = oneLineText(props.row.node.detail ?? "");
+    return full.length > 120 ? `${full.slice(0, 120)}…` : full;
+  };
 
   const label = () => {
     const parts = barParts(props.row.node.progress, barOptions);
@@ -163,10 +171,10 @@ function ProgressRow(props: { row: TuiRow; sessionID: string }) {
           : props.row.node.status === "error"
           ? " ✗"
           : "";
-      return `${marker()}${title()}: ${parts.bar}${parts.fraction}${done}${suffix()}`;
+      return `${title()}: ${parts.bar}${parts.fraction}${done}${suffix()}`;
     }
     const pct = progressLabel(props.row.node.progress);
-    return `${glyph(props.row.node.status)} [${parts.bar}] ${marker()}${title()}${
+    return `${glyph(props.row.node.status)} [${parts.bar}] ${title()}${
       pct ? ` ${pct}` : ""
     }${suffix()}`;
   };
@@ -174,25 +182,36 @@ function ProgressRow(props: { row: TuiRow; sessionID: string }) {
   return (
     <box flexDirection="column" paddingLeft={props.row.depth === 0 ? 0 : 2}>
       <box flexDirection="row" alignItems="flex-start">
+        <Show when={hasMarker()}>
+          <text selectable={false} fg={ctx.theme.text.muted} onMouseUp={onToggle}>
+            {marker()}
+          </text>
+        </Show>
         <text
+          selectable={false}
           fg={ctx.theme.text.base}
           wrapMode="word"
           flexGrow={1}
           flexShrink={1}
-          onMouseDown={onToggle}
+          onMouseUp={onDetail}
         >
           <span fg={ctx.theme.text.muted}>{indent()}</span>
           {label()}
         </text>
         <Show when={isRoot()}>
-          <text fg={ctx.theme.text.muted} onMouseDown={onDismiss}>
+          <text selectable={false} fg={ctx.theme.text.muted} onMouseUp={onDismiss}>
             {"  ✕"}
           </text>
         </Show>
       </box>
       <Show when={props.row.node.detail}>
-        <text fg={ctx.theme.text.muted} wrapMode="word">
-          {`${detailIndent()}${oneLineText(props.row.node.detail ?? "").slice(0, 120)}`}
+        <text
+          selectable={false}
+          fg={ctx.theme.text.muted}
+          wrapMode="word"
+          onMouseUp={onDetail}
+        >
+          {`${detailIndent()}${detailPreview()}`}
         </text>
       </Show>
     </box>
@@ -227,17 +246,21 @@ function ProgressTree(props: { sessionID: string }) {
     <Show when={view().rows.length > 0}>
       <box flexDirection="column" paddingLeft={1} paddingRight={1} paddingTop={1}>
         <box flexDirection="row" justifyContent="space-between">
-          <text fg={ctx.theme.text.muted} onMouseDown={() => openProgressDialog(ctx)}>
+          <text
+            selectable={false}
+            fg={ctx.theme.text.muted}
+            onMouseUp={() => openProgressDialog(ctx)}
+          >
             progress
           </text>
           <box flexDirection="row">
             <Show when={doneRoots().length > 0}>
-              <text fg={ctx.theme.text.base} onMouseDown={onDismissDone}>
+              <text selectable={false} fg={ctx.theme.text.base} onMouseUp={onDismissDone}>
                 {`dismiss done (${doneRoots().length})`}
               </text>
               <text fg={ctx.theme.text.muted}>{"  ·  "}</text>
             </Show>
-            <text fg={ctx.theme.text.base} onMouseDown={onDismissAll}>
+            <text selectable={false} fg={ctx.theme.text.base} onMouseUp={onDismissAll}>
               {`dismiss all (${roots().length})`}
             </text>
           </box>
@@ -246,12 +269,20 @@ function ProgressTree(props: { sessionID: string }) {
           {(row) => <ProgressRow row={row} sessionID={props.sessionID} />}
         </For>
         <Show when={view().hidden > 0}>
-          <text fg={ctx.theme.text.muted} onMouseDown={() => openProgressDialog(ctx)}>
+          <text
+            selectable={false}
+            fg={ctx.theme.text.muted}
+            onMouseUp={() => openProgressDialog(ctx)}
+          >
             {`… +${view().hidden} more · /progress`}
           </text>
         </Show>
         <Show when={view().hiddenRoots > 0}>
-          <text fg={ctx.theme.text.base} onMouseDown={() => openProgressDialog(ctx)}>
+          <text
+            selectable={false}
+            fg={ctx.theme.text.base}
+            onMouseUp={() => openProgressDialog(ctx)}
+          >
             {`view full progress tree (${statusSummary(roots())})`}
           </text>
         </Show>
@@ -283,6 +314,14 @@ function dismissRoots(context: TuiContext, roots: TreeNode[]): void {
         ? "Nothing to dismiss"
         : `Dismissed ${count} progress task${count === 1 ? "" : "s"}`,
     variant: count === 0 ? "info" : "success",
+  });
+}
+
+/** Click target: the row shows the full, untruncated description in a dialog. */
+function showRootDetail(context: TuiContext, root: TreeNode): void {
+  void context.ui.dialog.alert({
+    title: `${subagentPrefix(root)}${root.title}`,
+    message: rootDetailLines(root).join("\n"),
   });
 }
 

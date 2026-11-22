@@ -27,7 +27,9 @@ execFileSync(
   { stdio: 'pipe' }
 );
 
-const { buildTuiView, sortRootsByUrgency } = require(path.join(OUT, 'tui-view.cjs'));
+const { buildTuiView, rootDetailLines, sortRootsByUrgency } = require(
+  path.join(OUT, 'tui-view.cjs')
+);
 
 const root = (id, status, children = []) => ({ id, key: id, status, title: id, children });
 
@@ -84,6 +86,20 @@ test('the root cap hides extra roots after urgency ordering', () => {
   );
   assert.equal(view.hidden, 0);
   assert.equal(view.hiddenRoots, 2);
+});
+
+test('root detail shows the full untruncated description', () => {
+  const long = `start ${'detail '.repeat(40)}end`;
+  const node = {
+    ...root('build', 'running', [root('child', 'done')]),
+    detail: long,
+    progress: 0.5,
+  };
+  const lines = rootDetailLines(node);
+  assert.ok(lines.includes('status: running'));
+  assert.ok(lines.includes('progress: 50%'));
+  assert.ok(lines.includes('descendants: 1'));
+  assert.ok(lines.includes(long), 'description must not be truncated');
 });
 
 test('expandByDefault opens roots unless the budget says otherwise', () => {
