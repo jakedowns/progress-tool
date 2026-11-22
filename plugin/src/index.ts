@@ -434,7 +434,7 @@ export default Plugin.define({
     // changes. Off by default — it edits user input text.
     if (ctx.options?.unhinged === true) {
       const promptHook = await ctx.session.hook('prompt', (event) => {
-        event.prompt.text = `${event.prompt.text}\n\n[did the user's message just change your workload? update your task list!]`;
+        event.prompt.text = `${event.prompt.text}\n\n[did the user's message just change your workload? if so, update the task tree with the \`progress\` tool (progress-server MCP) — not todowrite.]`;
         if (verbose) logNudge({ event: 'unhinged', sessionID: (event as { sessionID?: string }).sessionID });
       });
       promptReminderHook = promptHook;
