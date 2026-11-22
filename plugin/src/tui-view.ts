@@ -115,9 +115,9 @@ export function normalizeMaxRoots(value: unknown): number {
   return Math.max(1, Math.min(50, numeric));
 }
 
-/** Sidebar viewport height in terminal rows; 0 means render everything and let the sidebar scroll. */
+/** Sidebar viewport height in terminal rows; 0 (default) renders everything and lets the sidebar scroll. */
 export function normalizeSidebarRows(value: unknown): number {
-  const numeric = typeof value === "number" && Number.isFinite(value) ? Math.floor(value) : 24;
+  const numeric = typeof value === "number" && Number.isFinite(value) ? Math.floor(value) : 0;
   return Math.max(0, Math.min(100, numeric));
 }
 

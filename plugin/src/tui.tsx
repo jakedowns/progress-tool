@@ -57,7 +57,7 @@ let timer: ReturnType<typeof setInterval> | undefined;
 let barOptions: BarOptions = {};
 let visibilityOptions: VisibilityOptions = {};
 let maxRows = 8;
-let sidebarRows = 24;
+let sidebarRows = 0;
 let expandRootsByDefault = false;
 /** Runtime root cap; seeded from `tuiMaxRoots` and adjustable from the palette. */
 let rootCapState: { value: number } = { value: 3 };
@@ -233,9 +233,10 @@ function ProgressRow(props: { row: TuiRow; sessionID: string }) {
   );
 }
 
-function ProgressTree(props: { sessionID: string; capacity?: number }) {
+function ProgressTree(props: { sessionID: string; capacity?: number; variant?: "composer" | "sidebar" }) {
   const ctx = usePlugin();
   const capacity = props.capacity ?? maxRows;
+  const stackedHeader = props.variant === "sidebar";
   const roots = () => rootsForSession(props.sessionID);
   const doneRoots = () => roots().filter((root) => root.status === "done");
   const view = () =>
@@ -266,29 +267,45 @@ function ProgressTree(props: { sessionID: string; capacity?: number }) {
     void confirmDismissAll(ctx, roots());
   };
 
+  const title = () => (
+    <text
+      selectable={false}
+      fg={ctx.theme.text.muted}
+      onMouseUp={() => openProgressDialog(ctx)}
+    >
+      progress
+    </text>
+  );
+
+  const actions = () => (
+    <box flexDirection="row">
+      <Show when={doneRoots().length > 0}>
+        <text selectable={false} fg={ctx.theme.text.base} onMouseUp={onDismissDone}>
+          {`dismiss done (${doneRoots().length})`}
+        </text>
+        <text fg={ctx.theme.text.muted}>{"  ·  "}</text>
+      </Show>
+      <text selectable={false} fg={ctx.theme.text.base} onMouseUp={onDismissAll}>
+        {`dismiss all (${roots().length})`}
+      </text>
+    </box>
+  );
+
   return (
     <Show when={view().rows.length > 0}>
       <box flexDirection="column" paddingLeft={1} paddingRight={1} paddingTop={1}>
-        <box flexDirection="row" justifyContent="space-between">
-          <text
-            selectable={false}
-            fg={ctx.theme.text.muted}
-            onMouseUp={() => openProgressDialog(ctx)}
-          >
-            progress
-          </text>
-          <box flexDirection="row">
-            <Show when={doneRoots().length > 0}>
-              <text selectable={false} fg={ctx.theme.text.base} onMouseUp={onDismissDone}>
-                {`dismiss done (${doneRoots().length})`}
-              </text>
-              <text fg={ctx.theme.text.muted}>{"  ·  "}</text>
-            </Show>
-            <text selectable={false} fg={ctx.theme.text.base} onMouseUp={onDismissAll}>
-              {`dismiss all (${roots().length})`}
-            </text>
-          </box>
-        </box>
+        <Show
+          when={stackedHeader}
+          fallback={
+            <box flexDirection="row" justifyContent="space-between">
+              {title()}
+              {actions()}
+            </box>
+          }
+        >
+          {title()}
+          {actions()}
+        </Show>
         <Show
           when={capacity > 0}
           fallback={
@@ -571,7 +588,7 @@ export default Plugin.define({
       append: "session.composer.top",
       render: ({ sessionID }) => (
         <Show when={layoutState.mode === "composer"}>
-          <ProgressTree sessionID={sessionID} capacity={maxRows} />
+          <ProgressTree sessionID={sessionID} capacity={maxRows} variant="composer" />
         </Show>
       ),
     });
@@ -579,7 +596,7 @@ export default Plugin.define({
       append: "sidebar.content",
       render: ({ sessionID }) => (
         <Show when={layoutState.mode === "sidebar"}>
-          <ProgressTree sessionID={sessionID} capacity={sidebarRows} />
+          <ProgressTree sessionID={sessionID} capacity={sidebarRows} variant="sidebar" />
         </Show>
       ),
     });

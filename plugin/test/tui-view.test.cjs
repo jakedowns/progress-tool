@@ -132,8 +132,8 @@ test('layout normalizes and swaps between composer and sidebar', () => {
   assert.equal(nextTuiLayout('sidebar'), 'composer');
 });
 
-test('normalizeSidebarRows defaults to 24 and clamps to 0..100', () => {
-  assert.equal(normalizeSidebarRows(undefined), 24);
+test('normalizeSidebarRows defaults to 0 (full tree) and clamps to 0..100', () => {
+  assert.equal(normalizeSidebarRows(undefined), 0);
   assert.equal(normalizeSidebarRows(0), 0);
   assert.equal(normalizeSidebarRows(200), 100);
   assert.equal(normalizeSidebarRows(30), 30);
