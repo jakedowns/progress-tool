@@ -22,6 +22,8 @@ export interface TuiRow {
 export interface TuiViewOptions {
   /** Rows to render, including roots, details are counted by the view. */
   maxRows?: number;
+  /** Root rows to render; extra roots are omitted and counted in hiddenRoots. Defaults to no cap. */
+  maxRoots?: number;
   /** Root keys the user expanded. */
   expanded?: ReadonlySet<string>;
   /** Expand every root by default (matches the desktop option). */
@@ -32,6 +34,8 @@ export interface TuiView {
   rows: TuiRow[];
   /** Rows that did not fit the budget. */
   hidden: number;
+  /** Roots omitted by the root cap. */
+  hiddenRoots: number;
 }
 
 const STATUS_URGENCY: Record<string, number> = {
@@ -58,10 +62,14 @@ export function buildTuiView(
   options: TuiViewOptions = {}
 ): TuiView {
   const maxRows = Math.max(1, Math.min(50, Math.floor(options.maxRows ?? 8)));
+  const maxRoots = Math.max(1, Math.floor(options.maxRoots ?? Infinity));
   const expanded = options.expanded;
   const all: TuiRow[] = [];
+  const sorted = sortRootsByUrgency(roots);
+  const visibleRoots = maxRoots === Infinity ? sorted : sorted.slice(0, maxRoots);
+  const hiddenRoots = sorted.length - visibleRoots.length;
 
-  for (const root of sortRootsByUrgency(roots)) {
+  for (const root of visibleRoots) {
     const hasChildren = (root.children?.length ?? 0) > 0;
     const isExpanded =
       hasChildren && (expanded ? expanded.has(root.key) : options.expandByDefault === true);
@@ -78,5 +86,9 @@ export function buildTuiView(
     }
   }
 
-  return { rows: all.slice(0, maxRows), hidden: Math.max(0, all.length - maxRows) };
+  return {
+    rows: all.slice(0, maxRows),
+    hidden: Math.max(0, all.length - maxRows),
+    hiddenRoots,
+  };
 }

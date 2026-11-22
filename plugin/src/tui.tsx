@@ -101,6 +101,19 @@ function rootsForSession(sessionID: string): TreeNode[] {
   ).filter((root) => !isDismissed(root, dismissedMap(entries)));
 }
 
+const STATUS_SUMMARY_ORDER: ProgressStatus[] = ["error", "running", "waiting", "done"];
+
+/** "1 error / 2 running / 2 waiting / 3 done" across every root, including hidden ones. */
+function statusSummary(roots: readonly TreeNode[]): string {
+  const counts: Record<ProgressStatus, number> = { error: 0, running: 0, waiting: 0, done: 0 };
+  for (const root of roots) {
+    if (root.status && root.status in counts) counts[root.status] += 1;
+  }
+  return STATUS_SUMMARY_ORDER.filter((status) => counts[status] > 0)
+    .map((status) => `${counts[status]} ${status}`)
+    .join(" / ");
+}
+
 type TuiMouseEvent = { button?: number; stopPropagation(): void };
 
 /** Treat a bare mouse event (no button reported) as a left click. */
@@ -193,6 +206,7 @@ function ProgressTree(props: { sessionID: string }) {
   const view = () =>
     buildTuiView(roots(), {
       maxRows,
+      maxRoots: 3,
       expanded: expandedFor(props.sessionID),
       expandByDefault: expandRootsByDefault,
     });
@@ -234,6 +248,11 @@ function ProgressTree(props: { sessionID: string }) {
         <Show when={view().hidden > 0}>
           <text fg={ctx.theme.text.muted} onMouseDown={() => openProgressDialog(ctx)}>
             {`… +${view().hidden} more · /progress`}
+          </text>
+        </Show>
+        <Show when={view().hiddenRoots > 0}>
+          <text fg={ctx.theme.text.base} onMouseDown={() => openProgressDialog(ctx)}>
+            {`view full progress tree (${statusSummary(roots())})`}
           </text>
         </Show>
       </box>

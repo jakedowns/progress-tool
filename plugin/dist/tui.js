@@ -284,9 +284,13 @@ function sortRootsByUrgency(roots) {
 }
 function buildTuiView(roots, options = {}) {
   const maxRows2 = Math.max(1, Math.min(50, Math.floor(options.maxRows ?? 8)));
+  const maxRoots = Math.max(1, Math.floor(options.maxRoots ?? Infinity));
   const expanded = options.expanded;
   const all = [];
-  for (const root of sortRootsByUrgency(roots)) {
+  const sorted = sortRootsByUrgency(roots);
+  const visibleRoots = maxRoots === Infinity ? sorted : sorted.slice(0, maxRoots);
+  const hiddenRoots = sorted.length - visibleRoots.length;
+  for (const root of visibleRoots) {
     const hasChildren = (root.children?.length ?? 0) > 0;
     const isExpanded = hasChildren && (expanded ? expanded.has(root.key) : options.expandByDefault === true);
     all.push({
@@ -301,7 +305,11 @@ function buildTuiView(roots, options = {}) {
       }
     }
   }
-  return { rows: all.slice(0, maxRows2), hidden: Math.max(0, all.length - maxRows2) };
+  return {
+    rows: all.slice(0, maxRows2),
+    hidden: Math.max(0, all.length - maxRows2),
+    hiddenRoots
+  };
 }
 
 // src/tui.js
@@ -352,6 +360,19 @@ function toggleExpanded(sessionID, key) {
 function rootsForSession(sessionID) {
   const entries = state().entries ?? {};
   return buildTree(visibleEntries(scopeEntries(entries, sessionID, visibilityOptions), Date.now(), visibilityOptions)).filter((root) => !isDismissed(root, dismissedMap(entries)));
+}
+var STATUS_SUMMARY_ORDER = ["error", "running", "waiting", "done"];
+function statusSummary(roots) {
+  const counts = {
+    error: 0,
+    running: 0,
+    waiting: 0,
+    done: 0
+  };
+  for (const root of roots) {
+    if (root.status && root.status in counts) counts[root.status] += 1;
+  }
+  return STATUS_SUMMARY_ORDER.filter((status) => counts[status] > 0).map((status) => `${counts[status]} ${status}`).join(" / ");
 }
 function leftClick(event) {
   return event.button === void 0 || event.button === 0;
@@ -445,6 +466,7 @@ function ProgressTree(props) {
   const doneRoots = () => roots().filter((root) => root.status === "done");
   const view = () => buildTuiView(roots(), {
     maxRows,
+    maxRoots: 3,
     expanded: expandedFor(props.sessionID),
     expandByDefault: expandRootsByDefault
   });
@@ -519,6 +541,18 @@ function ProgressTree(props) {
           _$insert(_el$15, () => `\u2026 +${view().hidden} more \xB7 /progress`);
           _$effect((_$p) => _$setProp(_el$15, "fg", ctx.theme.text.muted, _$p));
           return _el$15;
+        }
+      }), null);
+      _$insert(_el$8, _$createComponent(Show, {
+        get when() {
+          return view().hiddenRoots > 0;
+        },
+        get children() {
+          var _el$16 = _$createElement("text");
+          _$setProp(_el$16, "onMouseDown", () => openProgressDialog(ctx));
+          _$insert(_el$16, () => `view full progress tree (${statusSummary(roots())})`);
+          _$effect((_$p) => _$setProp(_el$16, "fg", ctx.theme.text.base, _$p));
+          return _el$16;
         }
       }), null);
       _$effect((_p$) => {
@@ -653,10 +687,10 @@ function FooterStatus() {
       return summary();
     },
     get children() {
-      var _el$16 = _$createElement("text");
-      _$insert(_el$16, summary);
-      _$effect((_$p) => _$setProp(_el$16, "fg", ctx.theme.text.muted, _$p));
-      return _el$16;
+      var _el$17 = _$createElement("text");
+      _$insert(_el$17, summary);
+      _$effect((_$p) => _$setProp(_el$17, "fg", ctx.theme.text.muted, _$p));
+      return _el$17;
     }
   });
 }

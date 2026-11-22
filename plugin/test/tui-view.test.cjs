@@ -69,6 +69,23 @@ test('the row budget clips and counts what remains', () => {
   assert.equal(view.hidden, 6);
 });
 
+test('the root cap hides extra roots after urgency ordering', () => {
+  const roots = [
+    root('a-done', 'done'),
+    root('b-run', 'running'),
+    root('c-error', 'error'),
+    root('d-wait', 'waiting'),
+    root('e-done', 'done'),
+  ];
+  const view = buildTuiView(roots, { maxRows: 8, maxRoots: 3 });
+  assert.deepEqual(
+    view.rows.map((row) => row.node.id),
+    ['c-error', 'b-run', 'd-wait']
+  );
+  assert.equal(view.hidden, 0);
+  assert.equal(view.hiddenRoots, 2);
+});
+
 test('expandByDefault opens roots unless the budget says otherwise', () => {
   const tree = root('build', 'running', [root('compile', 'done')]);
   const view = buildTuiView([tree], { expandByDefault: true });
