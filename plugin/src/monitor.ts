@@ -17,13 +17,19 @@
  *
  * Progress activity is measured from the store, not from the model's
  * self-reports: any progress write (tool call or relay tick) bumps an
- * entry's updatedAt, which resets the staleness clock and the
- * calls-since-progress counter.
+ * entry's updatedAt, which resets the staleness clock, the
+ * calls-since-progress counter, and the escalation ladder.
  *
  * Pure decision logic — no I/O — so it is unit-testable. The plugin server
  * part applies the decision: an instructions entry (visible to the model at
  * the next step boundary, without queuing a message turn) for "nudge" /
- * "stale-nudge", plus a synthetic message for "force".
+ * "stale-nudge", plus a synthetic message for "force" and "stale-escalate".
+ *
+ * Stale-progress reinforces itself: the first `staleEscalateAfter` reminders
+ * (default 3) ride the standing context entry so a busy agent can finish its
+ * step. If it still has not written progress, the next reminder escalates once
+ * to a synthetic message, which cannot be mistaken for a discardable context
+ * value. The ladder resets on any real progress write.
  */
 
 export type StrictMode = "nudge" | "force" | "off";
@@ -39,9 +45,21 @@ export interface MonitorState {
   forced: boolean;
   /** Epoch ms of the last stale-progress nudge (cooldown). */
   lastStaleNudgeAt: number;
+  /** Stale-progress reminders sent in the current non-compliance stretch. */
+  staleNudges: number;
+  /** The synthetic escalation was already sent this non-compliance stretch. */
+  escalated: boolean;
+  /** Epoch ms the current standing nudge was written (compliance latency). */
+  nudgedAt: number;
 }
 
-export type MonitorAction = "none" | "nudge" | "force" | "clear" | "stale-nudge";
+export type MonitorAction =
+  | "none"
+  | "nudge"
+  | "force"
+  | "clear"
+  | "stale-nudge"
+  | "stale-escalate";
 
 export interface ObserveInput {
   /** The call was to the progress tool itself. */
@@ -65,6 +83,21 @@ export interface ObserveOptions {
   staleMinCalls?: number;
   /** Minimum gap between stale nudges. Default 2 min. */
   cooldownMs?: number;
+  /**
+   * Entry-based stale reminders allowed before one synthetic escalation.
+   * Default 3 (escalate on the 4th stale nudge); 0 disables escalation.
+   */
+  staleEscalateAfter?: number;
+}
+
+export interface ObserveResult {
+  action: MonitorAction;
+  count: number;
+  callsSinceProgress: number;
+  lastStaleNudgeAt: number;
+  staleNudges: number;
+  escalated: boolean;
+  nudgedAt: number;
 }
 
 export function normalizeStrictMode(raw: unknown): StrictMode {
@@ -80,6 +113,24 @@ export function normalizeStaleAfterMs(raw: unknown, fallback = 5 * 60 * 1000): n
   return typeof ms === "number" && Number.isFinite(ms) && ms >= 30_000 ? ms : fallback;
 }
 
+/** Minimum gap between stale reminders. Default 2 min; values below 30s are ignored. */
+export function normalizeStaleCooldownMs(raw: unknown, fallback = 2 * 60 * 1000): number {
+  const value = (raw ?? {}) as Record<string, unknown>;
+  const ms = value.cooldownMs;
+  return typeof ms === "number" && Number.isFinite(ms) && ms >= 30_000 ? ms : fallback;
+}
+
+/** `0` disables synthetic escalation; otherwise at least one entry nudge. */
+export function normalizeStaleEscalateAfter(raw: unknown, fallback = 3): number {
+  const value = (raw ?? {}) as Record<string, unknown>;
+  const n = value.staleEscalateAfter;
+  if (n === 0) return 0;
+  if (typeof n === "number" && Number.isFinite(n) && n >= 1) {
+    return Math.min(50, Math.floor(n));
+  }
+  return fallback;
+}
+
 /**
  * Decide the response to one observed tool call.
  *
@@ -91,20 +142,25 @@ export function observeToolCall(
   monitor: MonitorState,
   input: ObserveInput,
   options: ObserveOptions = {}
-): { action: MonitorAction; count: number; callsSinceProgress: number; lastStaleNudgeAt: number } {
+): ObserveResult {
   const threshold = options.threshold ?? 3;
   const strictMode = options.strictMode ?? 'nudge';
   const staleAfterMs = options.staleAfterMs ?? 5 * 60 * 1000;
   const staleMinCalls = options.staleMinCalls ?? 3;
   const cooldownMs = options.cooldownMs ?? 2 * 60 * 1000;
+  const staleEscalateAfter = options.staleEscalateAfter ?? 3;
 
-  const untouched = {
-    count: monitor.count,
-    callsSinceProgress: monitor.callsSinceProgress,
-    lastStaleNudgeAt: monitor.lastStaleNudgeAt,
-  };
-
-  if (strictMode === 'off') return { action: 'none', count: 0, callsSinceProgress: 0, lastStaleNudgeAt: monitor.lastStaleNudgeAt };
+  if (strictMode === 'off') {
+    return {
+      action: 'none',
+      count: 0,
+      callsSinceProgress: 0,
+      lastStaleNudgeAt: monitor.lastStaleNudgeAt,
+      staleNudges: 0,
+      escalated: false,
+      nudgedAt: 0,
+    };
+  }
 
   if (input.isProgressCall) {
     return {
@@ -112,21 +168,38 @@ export function observeToolCall(
       count: 0,
       callsSinceProgress: 0,
       lastStaleNudgeAt: monitor.lastStaleNudgeAt,
+      staleNudges: 0,
+      escalated: false,
+      nudgedAt: 0,
     };
   }
 
   // A relay tick (or any write since the last observation) is progress
-  // activity: reset the staleness clock and the counter.
-  const callsSinceProgress = input.progressAdvanced ? 0 : monitor.callsSinceProgress + 1;
+  // activity: reset the staleness clock, the counter, and the escalation
+  // ladder.
+  const progressed = input.progressAdvanced === true;
+  const callsSinceProgress = progressed ? 0 : monitor.callsSinceProgress + 1;
   const now = input.now ?? Date.now();
   const lastProgressAt = input.lastProgressAt ?? now;
+  const staleNudges = progressed ? 0 : monitor.staleNudges ?? 0;
+  const escalated = progressed ? false : monitor.escalated ?? false;
+  const nudgedAt = progressed ? 0 : monitor.nudgedAt ?? 0;
+
+  const untouched: ObserveResult = {
+    action: 'none',
+    count: monitor.count,
+    callsSinceProgress,
+    lastStaleNudgeAt: monitor.lastStaleNudgeAt,
+    staleNudges,
+    escalated,
+    nudgedAt,
+  };
 
   if (input.hasActive) {
     // Compliant on the "has a task" axis. A standing nudge entry clears only
     // when actual progress happened (a progress call or a store write) —
     // otherwise a stale-progress reminder would be wiped by the very next
     // tool call before the agent acted on it.
-    const progressed = input.progressAdvanced === true;
     const clearAction: MonitorAction = monitor.nudged && progressed ? 'clear' : 'none';
     const age = now - lastProgressAt;
     if (
@@ -134,29 +207,79 @@ export function observeToolCall(
       callsSinceProgress >= staleMinCalls &&
       now - monitor.lastStaleNudgeAt >= cooldownMs
     ) {
-      return { action: 'stale-nudge', count: 0, callsSinceProgress, lastStaleNudgeAt: now };
+      const nextStale = staleNudges + 1;
+      // The first few reminders are soft (context entry). If the agent still
+      // has not written progress, escalate ONE synthetic message so the
+      // instruction is a real turn input instead of a mutable context value.
+      const shouldEscalate =
+        staleEscalateAfter > 0 && nextStale > staleEscalateAfter && !escalated;
+      return {
+        action: shouldEscalate ? 'stale-escalate' : 'stale-nudge',
+        count: 0,
+        callsSinceProgress,
+        lastStaleNudgeAt: now,
+        staleNudges: nextStale,
+        escalated: escalated || shouldEscalate,
+        nudgedAt: now,
+      };
     }
-    return { action: clearAction, count: 0, callsSinceProgress, lastStaleNudgeAt: monitor.lastStaleNudgeAt };
+    return {
+      ...untouched,
+      action: clearAction,
+      count: 0,
+      callsSinceProgress,
+      nudgedAt: progressed ? 0 : nudgedAt,
+    };
   }
 
   const count = monitor.count + 1;
   if (count >= threshold && !monitor.nudged) {
     if (strictMode === 'force' && !monitor.forced) {
-      return { action: 'force', count, callsSinceProgress, lastStaleNudgeAt: monitor.lastStaleNudgeAt };
+      return {
+        action: 'force',
+        count,
+        callsSinceProgress,
+        lastStaleNudgeAt: monitor.lastStaleNudgeAt,
+        staleNudges,
+        escalated,
+        nudgedAt: now,
+      };
     }
-    return { action: 'nudge', count, callsSinceProgress, lastStaleNudgeAt: monitor.lastStaleNudgeAt };
+    return {
+      action: 'nudge',
+      count,
+      callsSinceProgress,
+      lastStaleNudgeAt: monitor.lastStaleNudgeAt,
+      staleNudges,
+      escalated,
+      nudgedAt: now,
+    };
   }
   return { ...untouched, action: 'none', count, callsSinceProgress };
 }
 
-/** The standing instructions-entry nudge text (silent run). */
+/**
+ * The standing instructions-entry nudge text (silent run).
+ *
+ * Self-identifies as authoritative because the harness renders entry updates
+ * behind a "context changed and supersedes the previous value" preamble. The
+ * payload must still read as a directive if the model skims that wrapper.
+ */
 export function silentRunNudge(count: number): string {
-  return `⚠ STRICT MODE: ${count} consecutive tool calls with no progress entry. Call the progress tool NOW (status "running", a stable id, a short title), then keep it current between steps — see the progress-tool skill.`;
+  return `⚠ STRICT MODE — AUTHORITATIVE INSTRUCTION (current; replaces any earlier progress nudge): ${count} consecutive tool calls with no progress entry. Before your next tool call, call the progress tool with status "running", a stable id, and a short title, then keep it current between steps. This is required now — do not continue working silently.`;
 }
 
 /** The stale-progress nudge text (pending tasks, unchanged %). */
 export function staleProgressNudge(callsSinceProgress: number): string {
-  return `⚠ STRICT MODE: ${callsSinceProgress} tool calls since any progress value changed, and you have pending tasks — any updates? Update the running entries now (fresh detail and a 0.0–1.0 progress fraction, or close what is finished), or mark them waiting.`;
+  return `⚠ STRICT MODE — ACTION REQUIRED (current instruction, not a status update): ${callsSinceProgress} tool calls since any progress value changed while tasks are still open. Before your next tool call, update the running entries: call progress with a fresh detail and a 0.0–1.0 progress fraction, close finished work with "done"/"error", or mark blocked work "waiting" with a detail. Do not continue silently.`;
+}
+
+/**
+ * Escalated stale-progress message: sent as a synthetic turn input, not a
+ * context entry, after the entry-based reminders were ignored.
+ */
+export function staleProgressEscalation(callsSinceProgress: number, staleNudges: number): string {
+  return `⚠ STRICT MODE ESCALATION — direct instruction, not context: progress reminder #${staleNudges}, and the task tree is still unchanged after ${callsSinceProgress} tool calls. Stop before your next tool call and update it now: for each running entry call progress with fresh detail and a 0.0–1.0 fraction, close finished work with "done"/"error", or mark blocked work "waiting". Do not resume work until the tree reflects reality.`;
 }
 
 // --- Relay hint (pre-flight, before the command runs) ---------------------
@@ -357,8 +480,8 @@ export function wallClockNudge(
 
   const minutes = Math.max(1, Math.round(age / 60_000));
   const message = [
-    `⚠ WALL CLOCK: it has been ~${minutes} minute${minutes === 1 ? "" : "s"} since any progress value changed, and you still have open tasks.`,
-    `Update the tracker now (fresh detail, a 0.0–1.0 progress fraction, or close what is finished).`,
+    `⚠ WALL CLOCK — ACTION REQUIRED (current instruction, not a status update): it has been ~${minutes} minute${minutes === 1 ? "" : "s"} since any progress value changed, and you still have open tasks.`,
+    `Before your next tool call, update the tracker (fresh detail, a 0.0–1.0 progress fraction, or close what is finished).`,
     `If you are waiting on a long-running command, route it through the out-of-band relay so telemetry stays live without polling: progress-relay --id <id> -- <cmd>.`,
   ].join(" ");
 

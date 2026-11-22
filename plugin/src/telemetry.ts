@@ -11,7 +11,13 @@
  * or by setting `PROGRESS_NUDGE_LOG` to a path (or `1` for the default).
  *
  * Each line is one JSON object: { ts, event, sessionID, ...details }.
- * Events: wall-clock, strict, idle-reminder, child-list-error, unhinged.
+ * Events: wall-clock, strict, compliance, idle-reminder, child-list-error,
+ * transition, relay-hint, subagent, unhinged.
+ *
+ * `strict` records an injected reminder (including `stale-escalate`). Its
+ * `priorNudged`/`staleNudges` fields let an analysis distinguish a fresh
+ * reminder from one that superseded an ignored standing nudge. `compliance`
+ * is written when a standing nudge is cleared by a real progress write.
  */
 
 import { appendFileSync } from "node:fs";

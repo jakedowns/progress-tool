@@ -24,16 +24,44 @@ const {
   observeToolCall,
   normalizeStrictMode,
   normalizeStaleAfterMs,
+  normalizeStaleCooldownMs,
+  normalizeStaleEscalateAfter,
   normalizeWallClockMs,
   silentRunNudge,
   staleProgressNudge,
+  staleProgressEscalation,
   idleReminder,
   wallClockNudge,
   relayHintFor,
   relayHintMessage,
 } = require(path.join(OUT, 'monitor.cjs'));
 
-const idle = () => ({ count: 0, callsSinceProgress: 0, nudged: false, forced: false, lastStaleNudgeAt: 0 });
+const idle = () => ({
+  count: 0,
+  callsSinceProgress: 0,
+  nudged: false,
+  forced: false,
+  lastStaleNudgeAt: 0,
+  staleNudges: 0,
+  escalated: false,
+  nudgedAt: 0,
+});
+
+/** Copy the fields observeToolCall owns back onto the mutable monitor. */
+const apply = (monitor, step) => {
+  monitor.count = step.count;
+  monitor.callsSinceProgress = step.callsSinceProgress;
+  monitor.lastStaleNudgeAt = step.lastStaleNudgeAt;
+  monitor.staleNudges = step.staleNudges;
+  monitor.escalated = step.escalated;
+  monitor.nudgedAt = step.nudgedAt;
+  if (step.action === 'nudge' || step.action === 'force' || step.action === 'stale-nudge' || step.action === 'stale-escalate') {
+    monitor.nudged = true;
+  }
+  if (step.action === 'force') monitor.forced = true;
+  if (step.action === 'clear') monitor.nudged = false;
+  return step;
+};
 
 test('off disables everything', () => {
   const step = observeToolCall(idle(), { isProgressCall: false, hasActive: false }, { strictMode: 'off' });
@@ -121,10 +149,71 @@ test('stale-progress: needs pending tasks, elapsed time, and calls since progres
   assert.equal(step.action, 'stale-nudge');
 });
 
-test('relay activity (progressAdvanced) resets the stale counter', () => {
+test('stale-progress: escalates to a synthetic action after N entry reminders, once per stretch', () => {
+  const now = 1_000_000_000;
+  const opts = {
+    strictMode: 'nudge',
+    staleAfterMs: 5 * 60 * 1000,
+    staleMinCalls: 1,
+    cooldownMs: 60_000,
+    staleEscalateAfter: 3,
+  };
+  const monitor = idle();
+  const lastProgressAt = now - 10 * 60 * 1000;
+  const input = (t) => ({ isProgressCall: false, hasActive: true, lastProgressAt, now: t });
+
+  // Reminders 1–3 stay soft (instructions entry).
+  for (let i = 1; i <= 3; i += 1) {
+    const step = apply(monitor, observeToolCall(monitor, input(now + i * 60_000), opts));
+    assert.equal(step.action, 'stale-nudge', `reminder ${i} is an entry nudge`);
+    assert.equal(step.staleNudges, i);
+    assert.equal(step.escalated, false);
+  }
+
+  // Reminder 4 escalates exactly once.
+  let step = apply(monitor, observeToolCall(monitor, input(now + 4 * 60_000), opts));
+  assert.equal(step.action, 'stale-escalate');
+  assert.equal(step.staleNudges, 4);
+  assert.equal(step.escalated, true);
+
+  // No escalation loop: later reminders return to the standing entry.
+  step = apply(monitor, observeToolCall(monitor, input(now + 5 * 60_000), opts));
+  assert.equal(step.action, 'stale-nudge');
+  assert.equal(step.escalated, true);
+
+  // Any real progress write resets the ladder and clears the nudge.
+  step = apply(
+    monitor,
+    observeToolCall(monitor, { isProgressCall: true, hasActive: true, now: now + 6 * 60_000 }, opts)
+  );
+  assert.equal(step.action, 'clear');
+  assert.equal(step.staleNudges, 0);
+  assert.equal(step.escalated, false);
+  assert.equal(step.nudgedAt, 0);
+});
+
+test('stale-progress: staleEscalateAfter 0 disables escalation; 1 escalates on the second reminder', () => {
+  const now = 1_000_000_000;
+  const base = { strictMode: 'nudge', staleAfterMs: 5 * 60 * 1000, staleMinCalls: 1, cooldownMs: 0 };
+  const input = (t) => ({ isProgressCall: false, hasActive: true, lastProgressAt: now - 10 * 60_000, now: t });
+
+  const off = idle();
+  for (let i = 0; i < 8; i += 1) {
+    const step = apply(off, observeToolCall(off, input(now + i * 1000), { ...base, staleEscalateAfter: 0 }));
+    assert.equal(step.action, 'stale-nudge', 'escalation disabled');
+  }
+
+  const early = idle();
+  let step = apply(early, observeToolCall(early, input(now), { ...base, staleEscalateAfter: 1 }));
+  assert.equal(step.action, 'stale-nudge', 'first reminder is always soft');
+  step = apply(early, observeToolCall(early, input(now + 1000), { ...base, staleEscalateAfter: 1 }));
+  assert.equal(step.action, 'stale-escalate', 'second reminder escalates');
+});
+
+test('relay activity (progressAdvanced) resets the stale counter and escalation ladder', () => {
   const now = 1_000_000_000;
   const opts = { strictMode: 'nudge', staleAfterMs: 5 * 60 * 1000, staleMinCalls: 3 };
-  const monitor = { ...idle(), callsSinceProgress: 5 };
+  const monitor = { ...idle(), callsSinceProgress: 5, staleNudges: 4, escalated: true };
   const step = observeToolCall(
     monitor,
     { isProgressCall: false, hasActive: true, lastProgressAt: now - 10 * 60 * 1000, progressAdvanced: true, now },
@@ -132,6 +221,8 @@ test('relay activity (progressAdvanced) resets the stale counter', () => {
   );
   assert.equal(step.action, 'none');
   assert.equal(step.callsSinceProgress, 0);
+  assert.equal(step.staleNudges, 0);
+  assert.equal(step.escalated, false);
 });
 
 test('recent progress activity never nudges', () => {
@@ -237,10 +328,25 @@ test('normalizers and message texts', () => {
   assert.equal(normalizeStrictMode({}), 'nudge');
   assert.equal(normalizeStaleAfterMs({ staleAfterMs: 10_000 }), 5 * 60 * 1000, 'below floor → default');
   assert.equal(normalizeStaleAfterMs({ staleAfterMs: 120_000 }), 120_000);
+  assert.equal(normalizeStaleCooldownMs({}), 2 * 60 * 1000);
+  assert.equal(normalizeStaleCooldownMs({ cooldownMs: 45_000 }), 45_000);
+  assert.equal(normalizeStaleCooldownMs({ cooldownMs: 5_000 }), 2 * 60 * 1000, 'below floor → default');
+  assert.equal(normalizeStaleEscalateAfter({}), 3, 'default is three entry chances');
+  assert.equal(normalizeStaleEscalateAfter({ staleEscalateAfter: 0 }), 0, '0 disables escalation');
+  assert.equal(normalizeStaleEscalateAfter({ staleEscalateAfter: 1 }), 1);
+  assert.equal(normalizeStaleEscalateAfter({ staleEscalateAfter: 2.8 }), 2);
+  assert.equal(normalizeStaleEscalateAfter({ staleEscalateAfter: -1 }), 3, 'invalid → default');
+  assert.equal(normalizeStaleEscalateAfter({ staleEscalateAfter: 999 }), 50, 'capped');
 
-  assert.match(silentRunNudge(4), /STRICT MODE: 4 consecutive tool calls/);
-  assert.match(staleProgressNudge(7), /STRICT MODE: 7 tool calls since any progress value changed/);
-  assert.match(staleProgressNudge(7), /any updates\?/);
+  assert.match(silentRunNudge(4), /STRICT MODE — AUTHORITATIVE INSTRUCTION/);
+  assert.match(silentRunNudge(4), /4 consecutive tool calls/);
+  assert.match(staleProgressNudge(7), /STRICT MODE — ACTION REQUIRED/);
+  assert.match(staleProgressNudge(7), /7 tool calls since any progress value changed/);
+  assert.doesNotMatch(staleProgressNudge(7), /any updates\?/);
+  assert.match(staleProgressNudge(7), /Before your next tool call/);
+  assert.match(staleProgressEscalation(20, 4), /ESCALATION — direct instruction, not context/);
+  assert.match(staleProgressEscalation(20, 4), /progress reminder #4/);
+  assert.match(staleProgressEscalation(20, 4), /still unchanged after 20 tool calls/);
 });
 
 test('idle reminder: fires for open entries, skips dismissed/closed, names them', () => {

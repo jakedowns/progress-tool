@@ -52,8 +52,9 @@ Prefer manual configuration? Add to `opencode.json`:
 - **Desktop pill** — `(N · agg%)` title, collapsible trees (animated),
   dismissals that persist, started/last-updated tooltips, nudge telemetry.
 - **Guidance that adapts** — injected rules, skill playbooks, pre-flight relay
-  hints, strict-mode nudges (silent runs, stale progress), a turn-end idle
-  reminder, and an optional 2-minute wall-clock nudge.
+  hints, strict-mode nudges (silent runs, stale progress with one synthetic
+  escalation after 3 entry reminders), a turn-end idle reminder, and an
+  optional 2-minute wall-clock nudge.
 - **Subagent attribution** — child→parent links are recorded from
   `session.created` (map in `~/.opencode-progress-sessions.json`, override
   `PROGRESS_SESSION_MAP_PATH`) and the parent id is stamped into each subagent
@@ -73,6 +74,7 @@ Pass under the plugin entry's `options` in `opencode.json`:
 | `autoRegisterMcp` | `true` | register `@jakedowns/progress-tool-mcp` automatically |
 | `mcpRuntime` | auto | absolute path to the `node`/`bun` used to spawn the MCP server (auto-detected; set this if detection picks wrong) |
 | `strictMode` | `"nudge"` | `"nudge"` / `"force"` / `"off"` tool-call monitor |
+| `staleEscalateAfter` | `3` | entry-based stale reminders before one synthetic escalation (`0` disables) |
 | `wallClockMs` | `120000` | wall-clock nudge threshold (`0` disables) |
 | `idleReminder` | `true` | turn-end nudge when open tasks remain |
 | `unhinged` | `false` | append a task-list reminder to every user message |

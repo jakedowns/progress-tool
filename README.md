@@ -153,6 +153,7 @@ Multi-line titles and details accept real newlines, `\n` / `\r\n`, or `<br>`.
 | `tuiSidebarRows` | Sidebar viewport height in rows (default 0 = full tree, sidebar scrolls; max 100) |
 | `expandRootsByDefault` | Expand trees by default (default collapsed) |
 | `strictMode` | `"nudge"` / `"force"` / `"off"` silent-work nudges |
+| `staleEscalateAfter` | Entry reminders before one synthetic escalation (default 3; `0` disables) |
 | `idleReminder` | Turn-end nudge when tasks remain (default on) |
 | `demoSkills` | Register the demo skills (default off) |
 | `barStyle` | `"blocks"` or `"emoji"` |

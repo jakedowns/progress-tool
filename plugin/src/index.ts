@@ -27,9 +27,12 @@ import {
   observeToolCall,
   normalizeStrictMode,
   normalizeStaleAfterMs,
+  normalizeStaleCooldownMs,
+  normalizeStaleEscalateAfter,
   normalizeWallClockMs,
   silentRunNudge,
   staleProgressNudge,
+  staleProgressEscalation,
   idleReminder,
   wallClockNudge,
   relayHintFor,
@@ -162,6 +165,8 @@ export default Plugin.define({
     // call a tool that doesn't exist just produces phantom tool calls.
     const strictMode = normalizeStrictMode(ctx.options);
     const staleAfterMs = normalizeStaleAfterMs(ctx.options);
+    const staleCooldownMs = normalizeStaleCooldownMs(ctx.options);
+    const staleEscalateAfter = normalizeStaleEscalateAfter(ctx.options);
     const strictThreshold =
       typeof ctx.options?.strictThreshold === 'number' && ctx.options.strictThreshold >= 2
         ? ctx.options.strictThreshold
@@ -295,7 +300,14 @@ export default Plugin.define({
             nudged: false,
             forced: false,
             lastStaleNudgeAt: 0,
+            staleNudges: 0,
+            escalated: false,
+            nudgedAt: 0,
           };
+          const wasNudged = monitor.nudged;
+          const priorNudgedAt = monitor.nudgedAt;
+          const priorStaleNudges = monitor.staleNudges;
+          const priorEscalated = monitor.escalated;
           const step = observeToolCall(
             monitor,
             {
@@ -305,27 +317,49 @@ export default Plugin.define({
               progressAdvanced,
               now: Date.now(),
             },
-            { strictMode, staleAfterMs, threshold: strictThreshold }
+            { strictMode, staleAfterMs, cooldownMs: staleCooldownMs, threshold: strictThreshold, staleEscalateAfter }
           );
 
           monitor.count = step.count;
           monitor.callsSinceProgress = step.callsSinceProgress;
           monitor.lastStaleNudgeAt = step.lastStaleNudgeAt;
-          if (step.action === 'nudge' || step.action === 'force' || step.action === 'stale-nudge') {
+          monitor.staleNudges = step.staleNudges;
+          monitor.escalated = step.escalated;
+          monitor.nudgedAt = step.nudgedAt;
+          if (
+            step.action === 'nudge' ||
+            step.action === 'force' ||
+            step.action === 'stale-nudge' ||
+            step.action === 'stale-escalate'
+          ) {
             monitor.nudged = true;
           }
           if (step.action === 'force') monitor.forced = true;
           if (step.action === 'clear') monitor.nudged = false;
           monitors.set(event.sessionID, monitor);
 
-          if (verbose && step.action !== 'none' && step.action !== 'clear') {
-            logNudge({
-              event: 'strict',
-              action: step.action,
-              sessionID: event.sessionID,
-              count: step.count,
-              callsSinceProgress: step.callsSinceProgress,
-            });
+          if (verbose && step.action !== 'none') {
+            const now = Date.now();
+            if (step.action === 'clear') {
+              logNudge({
+                event: 'compliance',
+                sessionID: event.sessionID,
+                afterMs: priorNudgedAt ? Math.max(0, now - priorNudgedAt) : null,
+                staleNudges: priorStaleNudges,
+                escalated: priorEscalated,
+              });
+            } else {
+              logNudge({
+                event: 'strict',
+                action: step.action,
+                sessionID: event.sessionID,
+                count: step.count,
+                callsSinceProgress: step.callsSinceProgress,
+                staleNudges: step.staleNudges,
+                escalated: step.escalated,
+                priorNudged: wasNudged,
+              });
+            }
           }
           if (verbose && event.status === 'completed') {
             const resultText = JSON.stringify(event.result ?? '');
@@ -335,16 +369,24 @@ export default Plugin.define({
           }
 
           const text =
-            step.action === 'stale-nudge'
-              ? staleProgressNudge(step.callsSinceProgress)
-              : silentRunNudge(step.count);
+            step.action === 'stale-escalate' ||
+            (step.action === 'stale-nudge' && step.escalated)
+              ? staleProgressEscalation(step.callsSinceProgress, step.staleNudges)
+              : step.action === 'stale-nudge'
+                ? staleProgressNudge(step.callsSinceProgress)
+                : silentRunNudge(step.count);
 
-          if (step.action === 'nudge' || step.action === 'force' || step.action === 'stale-nudge') {
+          if (
+            step.action === 'nudge' ||
+            step.action === 'force' ||
+            step.action === 'stale-nudge' ||
+            step.action === 'stale-escalate'
+          ) {
             void ctx.session.instructions.entry
               .put({ sessionID: event.sessionID, key: NUDGE_KEY, value: text })
               .catch(() => {});
           }
-          if (step.action === 'force') {
+          if (step.action === 'force' || step.action === 'stale-escalate') {
             void ctx.session
               .synthetic({ sessionID: event.sessionID, text })
               .catch(() => {});
@@ -360,7 +402,7 @@ export default Plugin.define({
       });
       console.log(`[opencode-progress] v${pluginVersion} strict mode: ${strictMode} (threshold ${strictThreshold}, gated on progress tool availability)`);
     if (verbose) {
-      logNudge({ event: "config", strictMode, strictThreshold, wallClockMs: normalizeWallClockMs(ctx.options), idleReminder: ctx.options?.idleReminder !== false, unhinged: ctx.options?.unhinged === true });
+      logNudge({ event: "config", strictMode, strictThreshold, staleEscalateAfter, staleCooldownMs, wallClockMs: normalizeWallClockMs(ctx.options), idleReminder: ctx.options?.idleReminder !== false, unhinged: ctx.options?.unhinged === true });
     }
     }
 
@@ -542,7 +584,10 @@ export default Plugin.define({
               void ctx.session.instructions.entry
                 .put({ sessionID, key: WALL_KEY, value: decision.message })
                 .catch(() => {});
-            } else if (hasActive && now - lastProgressAt < wallClockMs) {
+            } else if (!hasActive || now - lastProgressAt < wallClockMs) {
+              // Clear the standing entry when work is fresh OR when the tree
+              // has no pending entries left; otherwise a finished session
+              // would keep an obsolete "wall clock" instruction in context.
               void ctx.session.instructions.entry
                 .remove({ sessionID, key: WALL_KEY })
                 .catch(() => {});
