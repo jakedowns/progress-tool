@@ -384,6 +384,7 @@ export default Plugin.define({
     }
 
     context.keymap.layer(() => ({
+      mode: "global",
       commands: [
         {
           id: "progress.open",

@@ -18,7 +18,7 @@ Implements the [Agent Progress Tool proposal](https://gist.github.com/jakedowns/
 for OpenCode 2, and is written as a portable reference implementation any
 harness can copy or adapt.
 
-**Versions:** MCP server `2.10.1` · OpenCode plugin `2.18.6`
+**Versions:** MCP server `2.10.1` · OpenCode plugin `2.18.7`
 
 > **Advanced docs:** [schema, relay internals, state store, architecture, all
 > options, file map →](./README-advanced.md)

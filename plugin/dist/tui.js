@@ -676,6 +676,7 @@ var tui_default = Plugin.define({
       });
     }
     context.keymap.layer(() => ({
+      mode: "global",
       commands: [{
         id: "progress.open",
         title: "Progress: expand or dismiss",
