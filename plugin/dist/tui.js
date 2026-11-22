@@ -315,10 +315,14 @@ function buildTuiView(roots, options = {}) {
     }
   }
   return {
-    rows: all.slice(0, maxRows2),
-    hidden: Math.max(0, all.length - maxRows2),
+    rows: options.clipRows === false ? all : all.slice(0, maxRows2),
+    hidden: options.clipRows === false ? 0 : Math.max(0, all.length - maxRows2),
     hiddenRoots
   };
+}
+function normalizeMaxRoots(value) {
+  const numeric = typeof value === "number" && Number.isFinite(value) ? Math.floor(value) : 3;
+  return Math.max(1, Math.min(50, numeric));
 }
 
 // src/tui.js
@@ -330,6 +334,10 @@ var barOptions = {};
 var visibilityOptions = {};
 var maxRows = 8;
 var expandRootsByDefault = false;
+var rootCapState = {
+  value: 3
+};
+var setRootCap;
 function startPolling(refreshMs) {
   pollers += 1;
   setState(readProgressState());
@@ -497,10 +505,14 @@ function ProgressTree(props) {
   const doneRoots = () => roots().filter((root) => root.status === "done");
   const view = () => buildTuiView(roots(), {
     maxRows,
-    maxRoots: 3,
+    maxRoots: rootCapState.value,
+    clipRows: false,
     expanded: expandedFor(props.sessionID),
     expandByDefault: expandRootsByDefault
   });
+  const lineCount = (rows) => rows.reduce((total, row) => total + 1 + (row.node.detail ? 1 : 0), 0);
+  const viewportHeight = () => Math.max(1, Math.min(maxRows, lineCount(view().rows)));
+  const overflowLines = () => Math.max(0, lineCount(view().rows) - maxRows);
   const onDismissDone = (event) => {
     if (!leftClick(event)) return;
     event.stopPropagation();
@@ -516,8 +528,9 @@ function ProgressTree(props) {
       return view().rows.length > 0;
     },
     get children() {
-      var _el$9 = _$createElement("box"), _el$0 = _$createElement("box"), _el$1 = _$createElement("text"), _el$11 = _$createElement("box"), _el$15 = _$createElement("text");
+      var _el$9 = _$createElement("box"), _el$0 = _$createElement("box"), _el$1 = _$createElement("text"), _el$11 = _$createElement("box"), _el$15 = _$createElement("text"), _el$16 = _$createElement("scrollbox");
       _$insertNode(_el$9, _el$0);
+      _$insertNode(_el$9, _el$16);
       _$setProp(_el$9, "flexDirection", "column");
       _$setProp(_el$9, "paddingLeft", 1);
       _$setProp(_el$9, "paddingRight", 1);
@@ -554,7 +567,10 @@ function ProgressTree(props) {
       _$setProp(_el$15, "selectable", false);
       _$setProp(_el$15, "onMouseUp", onDismissAll);
       _$insert(_el$15, () => `dismiss all (${roots().length})`);
-      _$insert(_el$9, _$createComponent(For, {
+      _$setProp(_el$16, "scrollY", true);
+      _$setProp(_el$16, "stickyStart", "top");
+      _$setProp(_el$16, "focusable", false);
+      _$insert(_el$16, _$createComponent(For, {
         get each() {
           return view().rows;
         },
@@ -564,18 +580,17 @@ function ProgressTree(props) {
             return props.sessionID;
           }
         })
-      }), null);
+      }));
       _$insert(_el$9, _$createComponent(Show, {
         get when() {
-          return view().hidden > 0;
+          return overflowLines() > 0;
         },
         get children() {
-          var _el$16 = _$createElement("text");
-          _$setProp(_el$16, "selectable", false);
-          _$setProp(_el$16, "onMouseUp", () => openProgressDialog(ctx));
-          _$insert(_el$16, () => `\u2026 +${view().hidden} more \xB7 /progress`);
-          _$effect((_$p) => _$setProp(_el$16, "fg", ctx.theme.text.muted, _$p));
-          return _el$16;
+          var _el$17 = _$createElement("text");
+          _$setProp(_el$17, "selectable", false);
+          _$insert(_el$17, () => `--- scroll to see ${overflowLines()} more ---`);
+          _$effect((_$p) => _$setProp(_el$17, "fg", ctx.theme.text.muted, _$p));
+          return _el$17;
         }
       }), null);
       _$insert(_el$9, _$createComponent(Show, {
@@ -583,22 +598,24 @@ function ProgressTree(props) {
           return view().hiddenRoots > 0;
         },
         get children() {
-          var _el$17 = _$createElement("text");
-          _$setProp(_el$17, "selectable", false);
-          _$setProp(_el$17, "onMouseUp", () => openProgressDialog(ctx));
-          _$insert(_el$17, () => `view full progress tree (${statusSummary(roots())})`);
-          _$effect((_$p) => _$setProp(_el$17, "fg", ctx.theme.text.base, _$p));
-          return _el$17;
+          var _el$18 = _$createElement("text");
+          _$setProp(_el$18, "selectable", false);
+          _$setProp(_el$18, "onMouseUp", () => openProgressDialog(ctx));
+          _$insert(_el$18, () => `view full progress tree (${statusSummary(roots())})`);
+          _$effect((_$p) => _$setProp(_el$18, "fg", ctx.theme.text.base, _$p));
+          return _el$18;
         }
       }), null);
       _$effect((_p$) => {
-        var _v$4 = ctx.theme.text.muted, _v$5 = ctx.theme.text.base;
+        var _v$4 = ctx.theme.text.muted, _v$5 = ctx.theme.text.base, _v$6 = viewportHeight();
         _v$4 !== _p$.e && (_p$.e = _$setProp(_el$1, "fg", _v$4, _p$.e));
         _v$5 !== _p$.t && (_p$.t = _$setProp(_el$15, "fg", _v$5, _p$.t));
+        _v$6 !== _p$.a && (_p$.a = _$setProp(_el$16, "height", _v$6, _p$.a));
         return _p$;
       }, {
         e: void 0,
-        t: void 0
+        t: void 0,
+        a: void 0
       });
       return _el$9;
     }
@@ -622,6 +639,26 @@ function showRootDetail(context, root) {
   void context.ui.dialog.alert({
     title: `${subagentPrefix(root)}${root.title}`,
     message: rootDetailLines(root).join("\n")
+  });
+}
+async function promptRootCap(context) {
+  const current = rootCapState.value;
+  const choice = await context.ui.dialog.select({
+    title: "Progress root cap",
+    current,
+    options: [1, 2, 3, 5, 10, 25].map((value) => ({
+      title: `${value} root${value === 1 ? "" : "s"}`,
+      value,
+      description: value === current ? "current" : void 0
+    }))
+  });
+  if (choice == null) return;
+  setRootCap?.((draft) => {
+    draft.value = choice;
+  });
+  context.ui.toast.show({
+    message: `Showing up to ${choice} root${choice === 1 ? "" : "s"}`,
+    variant: "info"
   });
 }
 async function confirmDismissAll(context, roots) {
@@ -729,10 +766,10 @@ function FooterStatus() {
       return summary();
     },
     get children() {
-      var _el$18 = _$createElement("text");
-      _$insert(_el$18, summary);
-      _$effect((_$p) => _$setProp(_el$18, "fg", ctx.theme.text.muted, _$p));
-      return _el$18;
+      var _el$19 = _$createElement("text");
+      _$insert(_el$19, summary);
+      _$effect((_$p) => _$setProp(_el$19, "fg", ctx.theme.text.muted, _$p));
+      return _el$19;
     }
   });
 }
@@ -744,6 +781,13 @@ var tui_default = Plugin.define({
     expandRootsByDefault = context.options?.expandRootsByDefault === true;
     const configuredRows = context.options?.tuiMaxRows;
     maxRows = typeof configuredRows === "number" && configuredRows >= 1 ? Math.min(50, Math.floor(configuredRows)) : 8;
+    const [capStore, updateCap] = context.storage.memory("tuiMaxRoots", {
+      initial: {
+        value: normalizeMaxRoots(context.options?.tuiMaxRoots)
+      }
+    });
+    rootCapState = capStore;
+    setRootCap = updateCap;
     const stopPolling = startPolling(normalizeRefreshMs(context.options));
     if (context.options?.notifyOnLoad === true) {
       context.ui.toast.show({
@@ -764,6 +808,13 @@ var tui_default = Plugin.define({
           name: "progress"
         },
         run: () => openProgressDialog(context)
+      }, {
+        id: "progress.set-root-cap",
+        title: "Progress: set root cap",
+        description: "Choose how many root tasks the TUI shows",
+        group: "progress",
+        palette: true,
+        run: () => promptRootCap(context)
       }]
     }));
     const unregisterTree = context.ui.slot({

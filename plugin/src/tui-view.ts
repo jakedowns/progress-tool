@@ -24,6 +24,8 @@ export interface TuiViewOptions {
   maxRows?: number;
   /** Root rows to render; extra roots are omitted and counted in hiddenRoots. Defaults to no cap. */
   maxRoots?: number;
+  /** Clip rows to maxRows (default). Set false when the caller provides its own scroll viewport. */
+  clipRows?: boolean;
   /** Root keys the user expanded. */
   expanded?: ReadonlySet<string>;
   /** Expand every root by default (matches the desktop option). */
@@ -101,8 +103,14 @@ export function buildTuiView(
   }
 
   return {
-    rows: all.slice(0, maxRows),
-    hidden: Math.max(0, all.length - maxRows),
+    rows: options.clipRows === false ? all : all.slice(0, maxRows),
+    hidden: options.clipRows === false ? 0 : Math.max(0, all.length - maxRows),
     hiddenRoots,
   };
+}
+
+/** Clamp the configurable root cap to a sane range; invalid values fall back to 3. */
+export function normalizeMaxRoots(value: unknown): number {
+  const numeric = typeof value === "number" && Number.isFinite(value) ? Math.floor(value) : 3;
+  return Math.max(1, Math.min(50, numeric));
 }

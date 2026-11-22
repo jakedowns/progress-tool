@@ -27,7 +27,7 @@ execFileSync(
   { stdio: 'pipe' }
 );
 
-const { buildTuiView, rootDetailLines, sortRootsByUrgency } = require(
+const { buildTuiView, normalizeMaxRoots, rootDetailLines, sortRootsByUrgency } = require(
   path.join(OUT, 'tui-view.cjs')
 );
 
@@ -100,6 +100,22 @@ test('root detail shows the full untruncated description', () => {
   assert.ok(lines.includes('progress: 50%'));
   assert.ok(lines.includes('descendants: 1'));
   assert.ok(lines.includes(long), 'description must not be truncated');
+});
+
+test('clipRows false hands the full view to an external scrollbox', () => {
+  const roots = Array.from({ length: 4 }, (_, index) => root(`task-${index}`, 'running'));
+  const view = buildTuiView(roots, { maxRows: 2, maxRoots: 3, clipRows: false });
+  assert.equal(view.rows.length, 3);
+  assert.equal(view.hidden, 0);
+  assert.equal(view.hiddenRoots, 1);
+});
+
+test('normalizeMaxRoots clamps to 1..50 with a 3 default', () => {
+  assert.equal(normalizeMaxRoots(undefined), 3);
+  assert.equal(normalizeMaxRoots('nope'), 3);
+  assert.equal(normalizeMaxRoots(0), 1);
+  assert.equal(normalizeMaxRoots(100), 50);
+  assert.equal(normalizeMaxRoots(5), 5);
 });
 
 test('expandByDefault opens roots unless the budget says otherwise', () => {

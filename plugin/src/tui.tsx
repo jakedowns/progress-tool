@@ -35,7 +35,7 @@ import {
   type BarOptions,
   type VisibilityOptions,
 } from "./tree.js";
-import { buildTuiView, rootDetailLines, type TuiRow } from "./tui-view.js";
+import { buildTuiView, normalizeMaxRoots, rootDetailLines, type TuiRow } from "./tui-view.js";
 import type { ProgressStatus, ProgressState, TreeNode } from "./types.js";
 
 const [state, setState] = createSignal<ProgressState>(readProgressState());
@@ -50,6 +50,9 @@ let barOptions: BarOptions = {};
 let visibilityOptions: VisibilityOptions = {};
 let maxRows = 8;
 let expandRootsByDefault = false;
+/** Runtime root cap; seeded from `tuiMaxRoots` and adjustable from the palette. */
+let rootCapState: { value: number } = { value: 3 };
+let setRootCap: ((mutation: (draft: { value: number }) => void) => void) | undefined;
 
 function startPolling(refreshMs: number): () => void {
   pollers += 1;
@@ -225,10 +228,18 @@ function ProgressTree(props: { sessionID: string }) {
   const view = () =>
     buildTuiView(roots(), {
       maxRows,
-      maxRoots: 3,
+      maxRoots: rootCapState.value,
+      clipRows: false,
       expanded: expandedFor(props.sessionID),
       expandByDefault: expandRootsByDefault,
     });
+
+  /** Visible terminal lines: one per row plus one for each rendered detail. */
+  const lineCount = (rows: readonly TuiRow[]) =>
+    rows.reduce((total, row) => total + 1 + (row.node.detail ? 1 : 0), 0);
+
+  const viewportHeight = () => Math.max(1, Math.min(maxRows, lineCount(view().rows)));
+  const overflowLines = () => Math.max(0, lineCount(view().rows) - maxRows);
 
   const onDismissDone = (event: TuiMouseEvent) => {
     if (!leftClick(event)) return;
@@ -265,16 +276,19 @@ function ProgressTree(props: { sessionID: string }) {
             </text>
           </box>
         </box>
-        <For each={view().rows}>
-          {(row) => <ProgressRow row={row} sessionID={props.sessionID} />}
-        </For>
-        <Show when={view().hidden > 0}>
-          <text
-            selectable={false}
-            fg={ctx.theme.text.muted}
-            onMouseUp={() => openProgressDialog(ctx)}
-          >
-            {`… +${view().hidden} more · /progress`}
+        <scrollbox
+          height={viewportHeight()}
+          scrollY
+          stickyStart="top"
+          focusable={false}
+        >
+          <For each={view().rows}>
+            {(row) => <ProgressRow row={row} sessionID={props.sessionID} />}
+          </For>
+        </scrollbox>
+        <Show when={overflowLines() > 0}>
+          <text selectable={false} fg={ctx.theme.text.muted}>
+            {`--- scroll to see ${overflowLines()} more ---`}
           </text>
         </Show>
         <Show when={view().hiddenRoots > 0}>
@@ -322,6 +336,28 @@ function showRootDetail(context: TuiContext, root: TreeNode): void {
   void context.ui.dialog.alert({
     title: `${subagentPrefix(root)}${root.title}`,
     message: rootDetailLines(root).join("\n"),
+  });
+}
+
+/** Palette command: choose how many root rows the TUI renders. */
+async function promptRootCap(context: TuiContext): Promise<void> {
+  const current = rootCapState.value;
+  const choice = await context.ui.dialog.select<number>({
+    title: "Progress root cap",
+    current,
+    options: [1, 2, 3, 5, 10, 25].map((value) => ({
+      title: `${value} root${value === 1 ? "" : "s"}`,
+      value,
+      description: value === current ? "current" : undefined,
+    })),
+  });
+  if (choice == null) return;
+  setRootCap?.((draft) => {
+    draft.value = choice;
+  });
+  context.ui.toast.show({
+    message: `Showing up to ${choice} root${choice === 1 ? "" : "s"}`,
+    variant: "info",
   });
 }
 
@@ -436,6 +472,12 @@ export default Plugin.define({
         ? Math.min(50, Math.floor(configuredRows))
         : 8;
 
+    const [capStore, updateCap] = context.storage.memory("tuiMaxRoots", {
+      initial: { value: normalizeMaxRoots(context.options?.tuiMaxRoots) },
+    });
+    rootCapState = capStore;
+    setRootCap = updateCap;
+
     const stopPolling = startPolling(normalizeRefreshMs(context.options));
     if (context.options?.notifyOnLoad === true) {
       context.ui.toast.show({ message: "Progress plugin loaded", variant: "success" });
@@ -453,6 +495,14 @@ export default Plugin.define({
           palette: true,
           slash: { name: "progress" },
           run: () => openProgressDialog(context),
+        },
+        {
+          id: "progress.set-root-cap",
+          title: "Progress: set root cap",
+          description: "Choose how many root tasks the TUI shows",
+          group: "progress",
+          palette: true,
+          run: () => promptRootCap(context),
         },
       ],
     }));

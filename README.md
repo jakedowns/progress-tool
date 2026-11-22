@@ -121,8 +121,10 @@ Multi-line titles and details accept real newlines, `\n` / `\r\n`, or `<br>`.
 - **Desktop/web pill:** one row per root, with `(N · agg%)` when several roots
   exist, hover details, and a menu with the full tree.
 - **TUI:** compact tree above the composer, roots collapsed, capped at
-  `tuiMaxRows` (default 8) so long lists never push the prompt away. `/progress`
-  opens a dialog to expand a tree or dismiss tasks.
+  `tuiMaxRoots` (default 3) and scrollable inside `tuiMaxRows` (default 8) so
+  long lists never push the prompt away. A `--- scroll to see N more ---` hint
+  appears on overflow; `/progress` opens a dialog to expand a tree or dismiss
+  tasks, and the palette can change the root cap.
 - Running and waiting tasks stay visible; errors stay until dismissed or
   updated; completed tasks stay unless dismissed (or `autoHideDone` is on).
 - Dismissal is view-plane, not a status change: a dismissed tree stays hidden
@@ -143,6 +145,7 @@ Multi-line titles and details accept real newlines, `\n` / `\r\n`, or `<br>`.
 |---|---|
 | `scope` | `"session"` (default) or `"all"` |
 | `tuiMaxRows` | TUI tree row cap (default 8, max 50) |
+| `tuiMaxRoots` | TUI root cap before the full-tree summary (default 3, max 50) |
 | `expandRootsByDefault` | Expand trees by default (default collapsed) |
 | `strictMode` | `"nudge"` / `"force"` / `"off"` silent-work nudges |
 | `idleReminder` | Turn-end nudge when tasks remain (default on) |
