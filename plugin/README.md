@@ -81,6 +81,7 @@ Pass under the plugin entry's `options` in `opencode.json`:
 | `expandRootsByDefault` | `false` | expand pill tree roots by default |
 | `barStyle` | `"blocks"` | `"blocks"` or `"emoji"` |
 | `refreshMs` | `1000` | view refresh interval |
+| `tuiMaxRows` | `8` | max TUI tree rows above the prompt; `/progress` expands or dismisses |
 
 State lives in `~/.opencode-progress-state.json` (override with
 `PROGRESS_STATE_PATH`). Retention is opt-in (`PROGRESS_AUTO_PRUNE_S`); entries

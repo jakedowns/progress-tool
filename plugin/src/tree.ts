@@ -282,6 +282,20 @@ export function isDismissed(root: TreeNode, map: Record<string, Dismissal>): boo
   return true;
 }
 
+/** Persisted dismissal state keyed by storage key, read from entries. */
+export function dismissedMap(
+  entries: Record<string, ProgressEntry>
+): Record<string, Dismissal> {
+  const map: Record<string, Dismissal> = {};
+  for (const [key, entry] of Object.entries(entries)) {
+    const dismissed = entry?.dismissed;
+    if (dismissed && typeof dismissed === "object" && typeof dismissed.at === "number") {
+      map[key] = { status: String(dismissed.status ?? ""), at: dismissed.at };
+    }
+  }
+  return map;
+}
+
 /** Snapshot every given root for "Dismiss all". */
 export function dismissalsFor(
   roots: readonly TreeNode[],

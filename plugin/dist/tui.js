@@ -27,6 +27,47 @@ function readProgressState() {
   return { entries: {}, version: 2 };
 }
 var SESSION_LINK_TTL_MS = 30 * 24 * 60 * 60 * 1e3;
+function writeDismissal(key, status) {
+  const file = stateFilePath();
+  const lock = `${file}.lock`;
+  let locked = false;
+  for (let attempt = 0; attempt < 10 && !locked; attempt++) {
+    try {
+      fs.writeFileSync(lock, String(process.pid), { flag: "wx" });
+      locked = true;
+    } catch {
+      try {
+        if (Date.now() - fs.statSync(lock).mtimeMs > 15e3) fs.unlinkSync(lock);
+      } catch {
+      }
+      try {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+      } catch {
+      }
+    }
+  }
+  if (!locked) return false;
+  try {
+    const state2 = readProgressState();
+    const entry = state2.entries[key];
+    if (!entry) return false;
+    entry.dismissed = { status, at: Date.now() };
+    state2.version = state2.version ?? 2;
+    const tmp = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(state2, null, 2));
+    fs.renameSync(tmp, file);
+    console.log(`[opencode-progress] dismissal persisted key=${key} status=${status} at=${entry.dismissed.at}`);
+    return true;
+  } catch (error) {
+    console.error("[opencode-progress] dismissal write failed", String(error));
+    return false;
+  } finally {
+    try {
+      fs.unlinkSync(lock);
+    } catch {
+    }
+  }
+}
 
 // src/tree.ts
 var STATUS_ORDER = {
@@ -44,6 +85,9 @@ function normalizeProgressText(value) {
   text = text.replace(/<br\s*\/?>/gi, "\n");
   text = text.split("\n").map((line) => line.replace(/[ \t]+$/g, "")).join("\n");
   return text.replace(/\n{3,}/g, "\n\n").trim();
+}
+function oneLineText(value) {
+  return normalizeProgressText(value).replace(/\s*\n+\s*/g, " ").replace(/[ \t]+/g, " ").trim();
 }
 function buildTree(entries) {
   const byKey = /* @__PURE__ */ new Map();
@@ -115,8 +159,42 @@ function flattenTree(nodes) {
   for (const node of nodes) visit(node);
   return out;
 }
+function flattenTreeWithDepth(nodes, depth = 0) {
+  const out = [];
+  for (const node of nodes) {
+    out.push({ node, depth });
+    out.push(...flattenTreeWithDepth(node.children, depth + 1));
+  }
+  return out;
+}
+function countDescendants(node) {
+  return (node.children ?? []).reduce(
+    (total, child) => total + 1 + countDescendants(child),
+    0
+  );
+}
 function countActive(nodes) {
   return flattenTree(nodes).filter((node) => node.status === "running" || node.status === "waiting").length;
+}
+function isDismissed(root, map) {
+  const d = map[root.key];
+  if (!d) return false;
+  if ((root.reportedAt ?? 0) > d.at) return false;
+  const wasTerminal = d.status === "done" || d.status === "error";
+  if (!wasTerminal || root.status === "error") {
+    if ((root.status ?? "") !== d.status) return false;
+  }
+  return true;
+}
+function dismissedMap(entries) {
+  const map = {};
+  for (const [key, entry] of Object.entries(entries)) {
+    const dismissed = entry?.dismissed;
+    if (dismissed && typeof dismissed === "object" && typeof dismissed.at === "number") {
+      map[key] = { status: String(dismissed.status ?? ""), at: dismissed.at };
+    }
+  }
+  return map;
 }
 function clampProgress(progress) {
   return progress == null ? 0 : Math.max(0, Math.min(1, progress));
@@ -192,12 +270,49 @@ function progressLabel(progress) {
   return progress == null ? null : `${Math.round(progress * 100)}%`;
 }
 
+// src/tui-view.ts
+var STATUS_URGENCY = {
+  error: 4,
+  running: 3,
+  waiting: 2,
+  done: 1
+};
+function sortRootsByUrgency(roots) {
+  return roots.map((node, index) => ({ node, index })).sort(
+    (a, b) => (STATUS_URGENCY[b.node.status] ?? 0) - (STATUS_URGENCY[a.node.status] ?? 0) || a.index - b.index
+  ).map(({ node }) => node);
+}
+function buildTuiView(roots, options = {}) {
+  const maxRows2 = Math.max(1, Math.min(50, Math.floor(options.maxRows ?? 8)));
+  const expanded = options.expanded;
+  const all = [];
+  for (const root of sortRootsByUrgency(roots)) {
+    const hasChildren = (root.children?.length ?? 0) > 0;
+    const isExpanded = hasChildren && (expanded ? expanded.has(root.key) : options.expandByDefault === true);
+    all.push({
+      node: root,
+      depth: 0,
+      collapsed: hasChildren && !isExpanded,
+      hiddenChildren: hasChildren && !isExpanded ? countDescendants(root) : 0
+    });
+    if (isExpanded) {
+      for (const { node, depth } of flattenTreeWithDepth(root.children, 1)) {
+        all.push({ node, depth, collapsed: false, hiddenChildren: 0 });
+      }
+    }
+  }
+  return { rows: all.slice(0, maxRows2), hidden: Math.max(0, all.length - maxRows2) };
+}
+
 // src/tui.js
 var [state, setState] = createSignal(readProgressState());
+var [expandedBySession, setExpandedBySession] = createSignal({});
 var pollers = 0;
 var timer;
 var barOptions = {};
 var visibilityOptions = {};
+var maxRows = 8;
+var expandRootsByDefault = false;
 function startPolling(refreshMs) {
   pollers += 1;
   setState(readProgressState());
@@ -219,19 +334,44 @@ function glyph(status) {
   if (status === "waiting") return "\u25D0";
   return "\u25CF";
 }
-function ProgressNode(props) {
+function expandedFor(sessionID) {
+  return expandedBySession()[sessionID] ?? /* @__PURE__ */ new Set();
+}
+function toggleExpanded(sessionID, key) {
+  setExpandedBySession((prev) => {
+    const next = {
+      ...prev
+    };
+    const set = new Set(prev[sessionID] ?? []);
+    if (set.has(key)) set.delete(key);
+    else set.add(key);
+    next[sessionID] = set;
+    return next;
+  });
+}
+function rootsForSession(sessionID) {
+  const entries = state().entries ?? {};
+  return buildTree(visibleEntries(scopeEntries(entries, sessionID, visibilityOptions), Date.now(), visibilityOptions)).filter((root) => !isDismissed(root, dismissedMap(entries)));
+}
+function ProgressRow(props) {
   const ctx = usePlugin();
-  const indent = () => props.depth === 0 ? "" : "\u2514\u2500 ";
-  const detailIndent = () => "  \xB7 ";
-  const title = () => `${props.depth === 0 ? subagentPrefix(props.node) : ""}${props.node.title}`;
+  const indent = () => props.row.depth === 0 ? "" : "\u2514\u2500 ";
+  const detailIndent = () => props.row.depth === 0 ? "  \xB7 " : "    \xB7 ";
+  const title = () => `${props.row.depth === 0 ? subagentPrefix(props.row.node) : ""}${props.row.node.title}`;
+  const marker = () => {
+    if (props.row.depth !== 0) return "";
+    if (props.row.collapsed) return "\u25B8 ";
+    return (props.row.node.children?.length ?? 0) > 0 ? "\u25BE " : "";
+  };
+  const suffix = () => props.row.hiddenChildren > 0 ? `  +${props.row.hiddenChildren}` : "";
   const label = () => {
-    const parts = barParts(props.node.progress, barOptions);
+    const parts = barParts(props.row.node.progress, barOptions);
     if (parts.style === "emoji") {
-      const suffix = props.node.status === "done" ? " \u2713" : props.node.status === "error" ? " \u2717" : "";
-      return `${title()}: ${parts.bar}${parts.fraction}${suffix}`;
+      const done = props.row.node.status === "done" ? " \u2713" : props.row.node.status === "error" ? " \u2717" : "";
+      return `${marker()}${title()}: ${parts.bar}${parts.fraction}${done}${suffix()}`;
     }
-    const pct = progressLabel(props.node.progress);
-    return `${glyph(props.node.status)} [${parts.bar}] ${title()}${pct ? ` ${pct}` : ""}`;
+    const pct = progressLabel(props.row.node.progress);
+    return `${glyph(props.row.node.status)} [${parts.bar}] ${marker()}${title()}${pct ? ` ${pct}` : ""}${suffix()}`;
   };
   return (() => {
     var _el$ = _$createElement("box"), _el$2 = _$createElement("text"), _el$3 = _$createElement("span");
@@ -243,29 +383,18 @@ function ProgressNode(props) {
     _$insert(_el$2, label, null);
     _$insert(_el$, _$createComponent(Show, {
       get when() {
-        return props.node.detail;
+        return props.row.node.detail;
       },
       get children() {
         var _el$4 = _$createElement("text");
         _$setProp(_el$4, "wrapMode", "word");
-        _$insert(_el$4, () => `${detailIndent()}${props.node.detail}`);
+        _$insert(_el$4, () => `${detailIndent()}${oneLineText(props.row.node.detail ?? "").slice(0, 120)}`);
         _$effect((_$p) => _$setProp(_el$4, "fg", ctx.theme.text.muted, _$p));
         return _el$4;
       }
     }), null);
-    _$insert(_el$, _$createComponent(For, {
-      get each() {
-        return props.node.children;
-      },
-      children: (child) => _$createComponent(ProgressNode, {
-        node: child,
-        get depth() {
-          return props.depth + 1;
-        }
-      })
-    }), null);
     _$effect((_p$) => {
-      var _v$ = props.depth === 0 ? 0 : 2, _v$2 = ctx.theme.text.base, _v$3 = ctx.theme.text.muted;
+      var _v$ = props.row.depth === 0 ? 0 : 2, _v$2 = ctx.theme.text.base, _v$3 = ctx.theme.text.muted;
       _v$ !== _p$.e && (_p$.e = _$setProp(_el$, "paddingLeft", _v$, _p$.e));
       _v$2 !== _p$.t && (_p$.t = _$setProp(_el$2, "fg", _v$2, _p$.t));
       _v$3 !== _p$.a && (_p$.a = _$setProp(_el$3, "fg", _v$3, _p$.a));
@@ -280,10 +409,14 @@ function ProgressNode(props) {
 }
 function ProgressTree(props) {
   const ctx = usePlugin();
-  const roots = () => buildTree(visibleEntries(scopeEntries(state().entries ?? {}, props.sessionID, visibilityOptions), Date.now(), visibilityOptions)).slice(0, 4);
+  const view = () => buildTuiView(rootsForSession(props.sessionID), {
+    maxRows,
+    expanded: expandedFor(props.sessionID),
+    expandByDefault: expandRootsByDefault
+  });
   return _$createComponent(Show, {
     get when() {
-      return roots().length > 0;
+      return view().rows.length > 0;
     },
     get children() {
       var _el$5 = _$createElement("box"), _el$6 = _$createElement("text");
@@ -295,17 +428,130 @@ function ProgressTree(props) {
       _$insertNode(_el$6, _$createTextNode(`progress`));
       _$insert(_el$5, _$createComponent(For, {
         get each() {
-          return roots();
+          return view().rows;
         },
-        children: (node) => _$createComponent(ProgressNode, {
-          node,
-          depth: 0
+        children: (row) => _$createComponent(ProgressRow, {
+          row
         })
+      }), null);
+      _$insert(_el$5, _$createComponent(Show, {
+        get when() {
+          return view().hidden > 0;
+        },
+        get children() {
+          var _el$8 = _$createElement("text");
+          _$insert(_el$8, () => `\u2026 +${view().hidden} more \xB7 /progress`);
+          _$effect((_$p) => _$setProp(_el$8, "fg", ctx.theme.text.muted, _$p));
+          return _el$8;
+        }
       }), null);
       _$effect((_$p) => _$setProp(_el$6, "fg", ctx.theme.text.muted, _$p));
       return _el$5;
     }
   });
+}
+function currentSessionID(context) {
+  const route = context.ui.router.current();
+  return route.type === "session" ? route.sessionID : void 0;
+}
+function dismissRoots(context, roots) {
+  let count = 0;
+  for (const root of roots) {
+    if (writeDismissal(root.key, root.status ?? "")) count += 1;
+  }
+  context.ui.toast.show({
+    message: count === 0 ? "Nothing to dismiss" : `Dismissed ${count} progress task${count === 1 ? "" : "s"}`,
+    variant: count === 0 ? "info" : "success"
+  });
+}
+async function openProgressDialog(context) {
+  const sessionID = currentSessionID(context);
+  if (!sessionID) {
+    context.ui.toast.show({
+      message: "Open a session to manage progress",
+      variant: "warning"
+    });
+    return;
+  }
+  const roots = rootsForSession(sessionID);
+  if (roots.length === 0) {
+    context.ui.toast.show({
+      message: "No progress to show",
+      variant: "info"
+    });
+    return;
+  }
+  const done = roots.filter((root) => root.status === "done");
+  const expanded = expandedFor(sessionID);
+  const choice = await context.ui.dialog.select({
+    title: "Progress",
+    placeholder: "Filter tasks\u2026",
+    options: [...done.length > 0 ? [{
+      title: `Dismiss done (${done.length})`,
+      value: {
+        kind: "done"
+      }
+    }] : [], {
+      title: `Dismiss all (${roots.length})`,
+      value: {
+        kind: "all"
+      }
+    }, {
+      title: "Dismiss a task\u2026",
+      value: {
+        kind: "pick-dismiss"
+      }
+    }, ...roots.map((root) => ({
+      title: `${expanded.has(root.key) ? "\u25BE" : "\u25B8"} ${glyph(root.status)} ${root.title}`,
+      value: {
+        kind: "toggle",
+        key: root.key
+      },
+      description: `${root.status}${countDescendants(root) > 0 ? ` \xB7 ${countDescendants(root)} descendant(s)` : ""}`
+    }))],
+    search: (query, options) => {
+      const needle = query.trim().toLowerCase();
+      if (!needle) return options;
+      return options.filter((option) => option.title.toLowerCase().includes(needle) || (option.description ?? "").toLowerCase().includes(needle));
+    }
+  });
+  if (!choice) return;
+  if (choice.kind === "done") {
+    dismissRoots(context, done);
+    return;
+  }
+  if (choice.kind === "all") {
+    const confirmed = await context.ui.dialog.confirm({
+      title: "Dismiss all progress?",
+      message: `${roots.length} task${roots.length === 1 ? "" : "s"} will be hidden. Agent updates bring them back.`,
+      label: {
+        confirm: "Dismiss all"
+      }
+    });
+    if (confirmed) dismissRoots(context, roots);
+    return;
+  }
+  if (choice.kind === "pick-dismiss") {
+    const picked = await context.ui.dialog.select({
+      title: "Dismiss a task",
+      placeholder: "Filter tasks\u2026",
+      options: roots.map((root) => ({
+        title: `${glyph(root.status)} ${root.title}`,
+        value: root,
+        description: root.status
+      }))
+    });
+    if (picked) dismissRoots(context, [picked]);
+    return;
+  }
+  if (choice.kind === "toggle") {
+    toggleExpanded(sessionID, choice.key);
+    return;
+  }
+  if (choice.kind === "dismiss") {
+    const root = roots.find((candidate) => candidate.key === choice.key);
+    if (root) dismissRoots(context, [root]);
+  }
 }
 function FooterStatus() {
   const ctx = usePlugin();
@@ -319,10 +565,10 @@ function FooterStatus() {
       return summary();
     },
     get children() {
-      var _el$8 = _$createElement("text");
-      _$insert(_el$8, summary);
-      _$effect((_$p) => _$setProp(_el$8, "fg", ctx.theme.text.muted, _$p));
-      return _el$8;
+      var _el$9 = _$createElement("text");
+      _$insert(_el$9, summary);
+      _$effect((_$p) => _$setProp(_el$9, "fg", ctx.theme.text.muted, _$p));
+      return _el$9;
     }
   });
 }
@@ -331,6 +577,9 @@ var tui_default = Plugin.define({
   setup(context) {
     barOptions = normalizeBarOptions(context.options);
     visibilityOptions = normalizeVisibilityOptions(context.options);
+    expandRootsByDefault = context.options?.expandRootsByDefault === true;
+    const configuredRows = context.options?.tuiMaxRows;
+    maxRows = typeof configuredRows === "number" && configuredRows >= 1 ? Math.min(50, Math.floor(configuredRows)) : 8;
     const stopPolling = startPolling(normalizeRefreshMs(context.options));
     if (context.options?.notifyOnLoad === true) {
       context.ui.toast.show({
@@ -338,6 +587,20 @@ var tui_default = Plugin.define({
         variant: "success"
       });
     }
+    context.ui.keymap.layer(() => ({
+      commands: [{
+        id: "progress.open",
+        title: "Progress: expand or dismiss",
+        description: "Browse progress roots; expand a tree or dismiss tasks",
+        group: "progress",
+        bind: false,
+        palette: true,
+        slash: {
+          name: "progress"
+        },
+        run: () => openProgressDialog(context)
+      }]
+    }));
     const unregisterTree = context.ui.slot({
       append: "session.composer.top",
       render: ({

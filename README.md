@@ -10,7 +10,7 @@ with user-dismissed entries hidden by default — useful before planning or when
 
 Implements the [Agent Progress Tool proposal](https://gist.github.com/jakedowns/ddc4eb4817184a074c82c61dc6e7228c) for OpenCode 2, and is written as a portable reference implementation that any model, agent, or harness can copy, adapt, or train on.
 
-**Versions:** MCP server `2.10.1` · OpenCode plugin `2.18.4`
+**Versions:** MCP server `2.10.1` · OpenCode plugin `2.18.5`
 
 ## Install from npm
 
@@ -544,6 +544,9 @@ The plugin at `plugin/` targets the OpenCode **V2** plugin API and exposes four 
    - `showDone`: set to `false` to drop completed tasks immediately.
    - `scope`: `"session"` (default) shows only the current chat's tasks; `"all"` shows every
      session sharing the state file.
+   - `tuiMaxRows`: rows the TUI progress tree may occupy above the prompt
+     (default `8`, max `50`). Roots are shown collapsed by default; `/progress`
+     opens a dialog to expand a tree or dismiss tasks.
    - `refreshMs`: how often the views re-read progress state in milliseconds
      (default `1000`, minimum `100`). Applies to the TUI poller, desktop GUI
      refresh loop, and the plugin's server-side state watcher. The standalone
