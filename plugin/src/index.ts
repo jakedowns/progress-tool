@@ -24,8 +24,14 @@ import { normalizeRefreshMs } from "./tree.js";
 import {
   PROGRESS_RULES,
   instructionsEnabled,
+  sayRules,
   sessionAttributionRules,
 } from "./instructions.js";
+import {
+  createSayController,
+  normalizeSayOptions,
+  type SayController,
+} from "./say.js";
 import {
   observeToolCall,
   normalizeStrictMode,
@@ -125,6 +131,43 @@ export default Plugin.define({
         if ((error as { code?: string } | undefined)?.code !== "MODULE_NOT_FOUND") {
           console.warn(`[opencode-progress] v${pluginVersion} progress-server auto-registration skipped: ${String(error)}`);
         }
+      }
+    }
+
+    // Experimental `say` narration tool. Opt in with { options: { say: true } }.
+    // It is a regular plugin tool, so the turn cannot end on a note; its result
+    // always tells the model to keep working.
+    const sayOptions = normalizeSayOptions(ctx.options);
+    let sayController: SayController | undefined;
+    let sayToolName = "say";
+    let sayRegistration: Awaited<ReturnType<typeof ctx.tool.transform>> | undefined;
+    let sayPromptHook: Awaited<ReturnType<typeof ctx.session.hook>> | undefined;
+    let sayIdleHook: Awaited<ReturnType<typeof ctx.session.hook>> | undefined;
+    if (sayOptions.enabled) {
+      try {
+        const taken = new Set((await ctx.tool.list()).map((tool) => tool.id));
+        sayToolName = taken.has("say") ? "progress_say" : "say";
+        sayController = createSayController(
+          sayOptions,
+          {
+            synthetic: (input) => ctx.session.synthetic(input),
+            log: (message, error) =>
+              console.warn(`[opencode-progress] ${message}`, error ?? ""),
+          },
+          sayToolName
+        );
+        sayRegistration = await ctx.tool.transform((editor) => {
+          editor.add(sayController!.tool as Parameters<typeof editor.add>[0]);
+        });
+        console.log(
+          `[opencode-progress] v${pluginVersion} experimental say tool registered as ${sayToolName} ` +
+            `(${sayOptions.minChars}–${sayOptions.maxChars} chars, ${sayOptions.budgetPerTurn}/turn)`
+        );
+      } catch (error) {
+        console.warn(
+          `[opencode-progress] v${pluginVersion} say tool registration failed: ${String(error)}`
+        );
+        sayController = undefined;
       }
     }
 
@@ -289,21 +332,25 @@ export default Plugin.define({
           if (!progressTool.warned) {
             progressTool.warned = true;
             console.warn(
-              `[opencode-progress] v${pluginVersion} progress tool not available — skipping rule injection and strict nudges until progress-server connects`
+              `[opencode-progress] v${pluginVersion} progress tool not available — skipping progress rule injection and strict nudges until progress-server connects`
             );
           }
-          return;
-        }
-
-        if (progressTool.warned) {
+        } else if (progressTool.warned) {
           progressTool.warned = false;
           console.log(`[opencode-progress] v${pluginVersion} progress tool available — guidance enabled`);
         }
         if (!injectRules) return;
-        event.system.push({ type: "text", text: PROGRESS_RULES });
-        const sessionID = (event as unknown as { sessionID?: string }).sessionID;
-        if (sessionID) {
-          event.system.push({ type: "text", text: sessionAttributionRules(sessionID) });
+        if (progressTool.available) {
+          event.system.push({ type: "text", text: PROGRESS_RULES });
+          const sessionID = (event as unknown as { sessionID?: string }).sessionID;
+          if (sessionID) {
+            event.system.push({ type: "text", text: sessionAttributionRules(sessionID) });
+          }
+        }
+        // `say` is independent of the progress MCP server: keep its rules even
+        // when progress-server has not connected yet.
+        if (sayController) {
+          event.system.push({ type: "text", text: sayRules(sayOptions, sayToolName) });
         }
       });
       if (injectRules) console.log("[opencode-progress] progress rules injected into system instructions");
@@ -575,6 +622,56 @@ export default Plugin.define({
       });
     }
 
+    // `say` turn lifecycle: a new user prompt starts a fresh note budget, and
+    // the final guard resumes once if the agent posted a note and then stopped
+    // without a conclusion.
+    if (sayController) {
+      sayPromptHook = await ctx.session.hook("prompt", (event) => {
+        const sessionID = (event as { sessionID?: string }).sessionID;
+        if (sessionID) sayController?.reset(sessionID);
+      });
+
+      if (sayOptions.finalGuard) {
+        sayIdleHook = await ctx.session.hook("experimental.idle", async (event) => {
+          const state = sayController?.get(event.sessionID);
+          if (!state?.accepted || state.guarded) return;
+
+          // Only resume when the turn really has no assistant text. A note
+          // followed by a normal answer must not trigger another turn.
+          let hasText = false;
+          try {
+            const messages = await ctx.session.context({ sessionID: event.sessionID });
+            const lastAssistant = [...messages]
+              .reverse()
+              .find((message) => (message as { type?: string }).type === "assistant");
+            const content =
+              (lastAssistant as
+                | { content?: Array<{ type?: string; text?: string }> }
+                | undefined)?.content ?? [];
+            hasText = content.some(
+              (part) => part.type === "text" && String(part.text ?? "").trim().length > 0
+            );
+          } catch (error) {
+            return; // cannot verify the transcript — do not guess
+          }
+          if (hasText) return;
+
+          sayController?.markGuarded(event.sessionID);
+          try {
+            await ctx.session.synthetic({
+              sessionID: event.sessionID,
+              text: "You posted a `say` note but did not conclude. Continue the task or give the final answer; do not post another note this turn.",
+            });
+            console.log(
+              `[opencode-progress] v${pluginVersion} say final guard fired for ${event.sessionID}`
+            );
+          } catch (error) {
+            console.warn("[opencode-progress] say final guard failed", error);
+          }
+        });
+      }
+    }
+
     // "Unhinged" mode (opt-in): append a progress reminder to every user
     // message so the agent re-checks its task list whenever the workload
     // changes. Off by default — it edits user input text.
@@ -715,6 +812,9 @@ export default Plugin.define({
       void promptReminderHook?.dispose();
       void activityHook?.dispose();
       void relayHintHook?.dispose();
+      void sayRegistration?.dispose();
+      void sayPromptHook?.dispose();
+      void sayIdleHook?.dispose();
     };
   },
 });

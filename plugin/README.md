@@ -99,6 +99,31 @@ These options are passed to the MCP server when the plugin auto-registers it. If
 | `tuiLayout` | `"composer"` | TUI placement: `"composer"` (above the prompt) or `"sidebar"`; `/progress swap-layout` toggles it |
 | `tuiSidebarRows` | `0` | sidebar viewport height in rows (0-100); `0` renders the full tree and lets the sidebar scroll |
 
+### Experimental: `say` (opt-in)
+
+`say` lets the agent post a short note mid-turn: what it is about to do and a
+rough ETA. The note appears immediately on the tool's progress line and is also
+admitted as a durable synthetic note (`resume: false`), so the user does not have
+to open the thought trace while a long tool runs. It is a tool call, so the turn
+cannot end on a note.
+
+```jsonc
+{ "options": { "say": true } }
+```
+
+| option | default | meaning |
+|---|---|---|
+| `say` | `false` | register the `say` tool and inject its narration rules |
+| `sayMinChars` | `180` | soft target; shorter notes are accepted with a warning |
+| `sayMaxChars` | `260` | hard cap; longer notes are trimmed at a word boundary |
+| `sayBudgetPerTurn` | `3` | accepted notes per user turn |
+| `sayCooldownMs` | `15000` | minimum gap between accepted notes |
+| `sayChatNotes` | `true` | `false` = progress line only, no synthetic note |
+| `sayFinalGuard` | `true` | if the agent posts a note and stops without concluding, resume once |
+
+Length never skips a note. Budget and cooldown skips return a result that points
+the agent at the progress tool for any further backchannel updates in that turn.
+
 State lives in `~/.opencode-progress-state.json` (override with
 `PROGRESS_STATE_PATH`). Retention is opt-in (`PROGRESS_AUTO_PRUNE_S`); entries
 ride by default so the store doubles as a report.

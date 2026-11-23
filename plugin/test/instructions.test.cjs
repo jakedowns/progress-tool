@@ -26,6 +26,7 @@ execFileSync(
 const {
   PROGRESS_RULES,
   instructionsEnabled,
+  sayRules,
   sessionAttributionRules,
 } = require(path.join(OUT, 'instructions.cjs'));
 
@@ -63,4 +64,32 @@ test('session attribution names the session and the subagent hand-off', () => {
 test('the delegation rule points subagents at the prompt session', () => {
   assert.match(PROGRESS_RULES, /session named in their prompt/);
   assert.match(PROGRESS_RULES, /orphaned/);
+});
+
+const sayOptions = {
+  enabled: true,
+  minChars: 180,
+  maxChars: 260,
+  budgetPerTurn: 3,
+  cooldownMs: 15_000,
+  chatNotes: true,
+  finalGuard: true,
+};
+
+test('sayRules asks for a short intent + ETA without ending the turn', () => {
+  const text = sayRules(sayOptions);
+  assert.match(text, /180–260/);
+  assert.match(text, /ETA/);
+  assert.match(text, /does \*\*not\*\* end the turn/);
+  assert.match(text, /3 notes per turn/);
+  assert.match(text, /15s apart/);
+  assert.ok(text.includes('`progress` is task state'));
+  assert.ok(text.includes('parallel tool calls'));
+  assert.doesNotMatch(text, /undefined/);
+});
+
+test('sayRules uses the resolved tool name on collision', () => {
+  const text = sayRules(sayOptions, 'progress_say');
+  assert.ok(text.includes('`progress_say` tool'));
+  assert.ok(!text.includes('`say` tool'));
 });

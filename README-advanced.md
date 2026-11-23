@@ -433,6 +433,24 @@ Both the TUI and GUI parts read these options.
 - `autoRegisterMcp`: set to `false` to keep the plugin from registering the MCP server itself (you manage `mcp.servers` manually).
 - `mcpRuntime`: absolute path to the `node`/`bun` used to spawn the MCP server (auto-detected). Set it if detection picks the wrong runtime.
 
+### `say` (experimental, opt-in)
+
+`say` is the narration channel beside the task tree. Opt in with
+`{ "options": { "say": true } }`. The agent gets a tool that posts a short note
+mid-turn — what it is about to do plus a rough ETA — so the user is not left
+watching a spinner or digging through the thought trace while a long tool runs.
+Because it is a tool call, the turn cannot end on a note.
+
+- `say`: register the tool and inject its rules. **Default `false`**.
+- `sayMinChars` / `sayMaxChars`: soft target and hard cap (default `180` / `260`). Over-max is clamped at a word boundary; under-min is accepted with a warning. Length never skips a note.
+- `sayBudgetPerTurn`: accepted notes per user turn (default `3`).
+- `sayCooldownMs`: minimum gap between accepted notes (default `15000`).
+- `sayChatNotes`: set to `false` for the instant progress line only, without the durable synthetic note.
+- `sayFinalGuard`: if the agent posts a note and then stops without a conclusion, resume the turn once (default `true`).
+
+Budget and cooldown skips return a result that points the agent at the `progress`
+tool for any further backchannel updates in that turn.
+
 ---
 
 ## Components and files

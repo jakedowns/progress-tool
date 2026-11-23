@@ -8,6 +8,8 @@
  * long-running command.
  */
 
+import type { SayOptions } from "./say.js";
+
 export const PROGRESS_RULES = `Progress reporting rules (progress-server MCP tool + progress-relay). This tool is DUAL PURPOSE:
 (1) A drop-in replacement for the todo/task-tracking tools you might instinctively reach for (todowrite / TaskCreate): task state belongs here, where it also drives the live indicator.
 (2) A wrapper for long-running programmatic tool calls (build scripts, compilers, test suites, installs — anything that reports progress on stdout) via the out-of-band relay.
@@ -40,4 +42,20 @@ export function sessionAttributionRules(sessionID: string): string {
 - This conversation's progress session is \`${sessionID}\`. Keep the id out of user-facing prose.
 - When you launch a subagent, include this line in its task prompt: \`progress sessionId: ${sessionID}\`, and tell it to pass \`sessionId: "${sessionID}"\` on every \`progress\` call and \`--session ${sessionID}\` on every \`progress-relay\` command.
 - If your task prompt contains a \`progress sessionId\`, that value wins over the id above: use it for all progress and relay calls so your work rolls up under the parent session instead of an orphaned child session.`;
+}
+
+/**
+ * `say` narration rules, injected only when the experimental tool is enabled.
+ *
+ * This is the part that asks for the shallow reply: one short note before the
+ * first tool of a multi-step task, so the user is not left watching a spinner
+ * or digging through the thought trace while tools run in the background.
+ */
+export function sayRules(options: SayOptions, toolName = "say"): string {
+  const seconds = Math.round(options.cooldownMs / 1000);
+  return `Narration (\`${toolName}\` tool, opt-in). Before you start a multi-step task, or any tool call likely to run longer than ~30 seconds, call \`${toolName}\` once: give a ${options.minChars}–${options.maxChars} character summary of what you're about to embark on and a rough ETA. The user should never be left wondering what you're doing, or forced to dig through your thought trace while tools run in the background.
+- Pair \`${toolName}\` with your first real tool call in the same assistant message (parallel tool calls) so it costs no extra round trip.
+- \`${toolName}\` does **not** end the turn. It is not the final answer; never use it to deliver conclusions.
+- Budget: at most ${options.budgetPerTurn} notes per turn, at least ${seconds}s apart. Do not narrate trivial single-step actions.
+- \`progress\` is task state; \`${toolName}\` is narration. Do not duplicate the same sentence in both.`;
 }
