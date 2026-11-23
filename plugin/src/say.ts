@@ -30,6 +30,8 @@ export interface SayOptions {
   finalGuard: boolean;
   /** Where note surfaces appear; see `tuiSaySurfaces` / `guiSaySurfaces`. */
   modes: SayMode[];
+  /** Notes older than this are hidden by views; 0 keeps them until dismissed. */
+  autoHideTimeoutMs: number;
 }
 
 export interface SayTurnState {
@@ -182,6 +184,30 @@ export function guiSaySurfaces(
   };
 }
 
+export const DEFAULT_SAY_AUTO_HIDE_TIMEOUT_MS = 60_000;
+export const MAX_SAY_AUTO_HIDE_TIMEOUT_MS = 86_400_000;
+
+/**
+ * Notes a view should still show at `now`.
+ *
+ * Visibility is strictly `now - note.at < timeoutMs`, so a note disappears at
+ * exactly the timeout. `timeoutMs <= 0` disables auto-hide. This is view-only:
+ * hidden notes stay in the shared ring buffer until dismissed or purged.
+ */
+export function visibleSayNotes<T extends { at?: number | null }>(
+  notes: readonly T[] | undefined,
+  now: number,
+  timeoutMs: number
+): T[] {
+  const list = notes ?? [];
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return [...list];
+  return list.filter((note) => {
+    const at =
+      typeof note.at === "number" && Number.isFinite(note.at) ? note.at : 0;
+    return now - at < timeoutMs;
+  });
+}
+
 function integerInRange(value: unknown, fallback: number, min: number, max: number): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
   return Math.min(max, Math.max(min, Math.floor(value)));
@@ -210,6 +236,12 @@ export function normalizeSayOptions(raw: unknown): SayOptions {
     chatNotes: options.sayChatNotes !== false,
     finalGuard: options.sayFinalGuard !== false,
     modes: normalizeSayModes(modesSource),
+    autoHideTimeoutMs: integerInRange(
+      options.sayAutoHideTimeoutMs,
+      DEFAULT_SAY_AUTO_HIDE_TIMEOUT_MS,
+      0,
+      MAX_SAY_AUTO_HIDE_TIMEOUT_MS
+    ),
   };
 }
 

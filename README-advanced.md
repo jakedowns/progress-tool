@@ -458,6 +458,7 @@ Because it is a tool call, the turn cannot end on a note.
 - `sayChatNotes`: set to `false` for the instant progress line only, without the durable synthetic note.
 - `sayFinalGuard`: if the agent posts a note and then stops without a conclusion, resume the turn once (default `true`).
 - `sayModes`: where note surfaces appear. **Default `["tree"]`**. Accepts a string or an array of `"pill"`, `"toast"`, `"tree"`; `sayMode` is a scalar alias. Unknown values are dropped, duplicates collapse, and an explicit `[]` records notes with no surface. This is view config only: the tool, its budget, and `sayChatNotes` stay independent.
+- `sayAutoHideTimeoutMs`: hide notes older than this from every notes surface (default `60000`, clamp `0..86400000`; `0` disables auto-hide and keeps notes until manually dismissed). A note is visible only while `now - note.at < timeout`; hidden notes remain in the shared ring buffer, so this is view-only and never changes the tool, store, or purge rules.
 
 Budget and cooldown skips return a result that points the agent at the `progress`
 tool for any further backchannel updates in that turn.
@@ -475,7 +476,9 @@ GUI composer layout has no tree, so `tree` falls back to the pill there.
 Toasts dedupe by note id and only fire for notes that appear after the view
 loaded; child-session notes roll up to the viewed session with
 `[Subagent (X)]` attribution, and `blocked`/`question` notes use the warning
-variant.
+variant. Every surface also applies `sayAutoHideTimeoutMs`: an expired latest
+note falls back to the next visible note, and the surface disappears when none
+remain. Expired notes are still in the shared state and never toasted.
 
 **Notes lane.** Every accepted note is also persisted in the shared state
 document (last 20 per author session, newest first) — independently of the

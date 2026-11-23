@@ -163,7 +163,9 @@ Multi-line titles and details accept real newlines, `\n` / `\r\n`, or `<br>`.
   showing them. Click the TUI line or open `/progress` → **Notes** / the pill
   popover for newest-first history; dismiss one note with its `×` or all notes
   at once. Dismissals delete the note from the shared ring buffer, so every
-  client updates. Notes survive clear-list, roll child sessions up to the
+  client updates. Notes also auto-hide from every surface after
+  `sayAutoHideTimeoutMs` (default 60s; `0` keeps them until dismissed) without
+  deleting them. Notes survive clear-list, roll child sessions up to the
   parent, and are purged with the session or a hard clear. A note never ends the
   turn.
 - **Subagents:** child sessions are mapped to their parent automatically
@@ -200,6 +202,7 @@ Multi-line titles and details accept real newlines, `\n` / `\r\n`, or `<br>`.
 | `refreshMs` | View refresh interval (default 1000) |
 | `say` | Enable the opt-in narration tool and notes lane (default off) |
 | `sayModes` | Note surfaces: string or array of `"pill"`, `"toast"`, `"tree"` (default `["tree"]`; `sayMode` is a scalar alias; `[]` records without showing) |
+| `sayAutoHideTimeoutMs` | Hide notes older than this from every surface (default `60000`, clamp `0..86400000`; `0` keeps until dismissed; view-only) |
 | `retainDeletedSessionProgress` | Keep store entries when a session is deleted (default off) |
 
 The optional task-list mirror is always written as `tasklist-<session>.md`. Add `tasklist-*.md` (and `.progress/` if you use location `0`) to your `.gitignore` — it contains plaintext task titles and details. When enabled, the palette command **Progress: task-list mirror view** switches between the UI view and the raw store view.

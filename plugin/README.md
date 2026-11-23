@@ -125,8 +125,10 @@ new note. The TUI maps `pill` to its tree line, and the GUI composer layout maps
 Child-session notes roll up to the parent with `[Subagent (X)]` attribution.
 Click the TUI line or `/progress` → **Notes** / the pill popover for newest-first
 history; dismiss one note with its `×` or all notes at once. Dismissals delete
-the note from the shared ring buffer, so every client updates. Notes survive
-clear-list and are removed with the session or a hard clear.
+the note from the shared ring buffer, so every client updates. Notes older than
+`sayAutoHideTimeoutMs` are hidden from every surface (default 60s; `0` keeps
+them until dismissed) without being deleted. Notes survive clear-list and are
+removed with the session or a hard clear.
 
 ```jsonc
 { "options": { "say": true } }
@@ -142,6 +144,7 @@ clear-list and are removed with the session or a hard clear.
 | `sayChatNotes` | `true` | `false` = progress line only, no synthetic note |
 | `sayFinalGuard` | `true` | if the agent posts a note and stops without concluding, resume once |
 | `sayModes` | `["tree"]` | surfaces: string/array of `"pill"`, `"toast"`, `"tree"`; `sayMode` alias; `[]` records only |
+| `sayAutoHideTimeoutMs` | `60000` | hide notes older than this from every surface; `0` keeps until dismissed; view-only |
 
 Length never skips a note. Budget and cooldown skips return a result that points
 the agent at the progress tool for any further backchannel updates in that turn.

@@ -810,6 +810,16 @@ function tuiSaySurfaces(modes = DEFAULT_SAY_MODES) {
     toast: enabled.has("toast")
   };
 }
+var DEFAULT_SAY_AUTO_HIDE_TIMEOUT_MS = 6e4;
+var MAX_SAY_AUTO_HIDE_TIMEOUT_MS = 864e5;
+function visibleSayNotes(notes, now, timeoutMs) {
+  const list = notes ?? [];
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return [...list];
+  return list.filter((note) => {
+    const at = typeof note.at === "number" && Number.isFinite(note.at) ? note.at : 0;
+    return now - at < timeoutMs;
+  });
+}
 function integerInRange(value, fallback, min, max) {
   if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
   return Math.min(max, Math.max(min, Math.floor(value)));
@@ -830,7 +840,13 @@ function normalizeSayOptions(raw) {
     cooldownMs: integerInRange(options.sayCooldownMs, DEFAULT_COOLDOWN_MS, 0, 12e4),
     chatNotes: options.sayChatNotes !== false,
     finalGuard: options.sayFinalGuard !== false,
-    modes: normalizeSayModes(modesSource)
+    modes: normalizeSayModes(modesSource),
+    autoHideTimeoutMs: integerInRange(
+      options.sayAutoHideTimeoutMs,
+      DEFAULT_SAY_AUTO_HIDE_TIMEOUT_MS,
+      0,
+      MAX_SAY_AUTO_HIDE_TIMEOUT_MS
+    )
   };
 }
 
@@ -858,6 +874,7 @@ var collapsedState = {
 };
 var setCollapsed;
 var sayLineEnabled = true;
+var autoHideTimeoutMs = 6e4;
 var sayToastHook;
 function refreshState() {
   const next = readProgressState();
@@ -1042,7 +1059,7 @@ function ProgressTree(props) {
   const stackedHeader = props.variant === "sidebar";
   const roots = () => rootsForSession(props.sessionID);
   const doneRoots = () => roots().filter((root) => root.status === "done");
-  const notes = () => sayNotesForSession(state(), props.sessionID);
+  const notes = () => visibleSayNotes(sayNotesForSession(state(), props.sessionID), Date.now(), autoHideTimeoutMs);
   const notesLine = () => buildNotesLine(notes(), props.sessionID);
   const latestNote = () => latestSayNote(notes());
   const showNotesLine = () => sayLineEnabled && notesLine().length > 0;
@@ -1465,7 +1482,7 @@ async function openNotesDialog(context, sessionIDOverride) {
     });
     return;
   }
-  const notes = sayNotesForSession(readProgressState(), sessionID);
+  const notes = visibleSayNotes(sayNotesForSession(readProgressState(), sessionID), Date.now(), autoHideTimeoutMs);
   if (notes.length === 0) {
     context.ui.toast.show({
       message: "No agent notes yet",
@@ -1549,7 +1566,7 @@ async function openProgressDialog(context) {
     return;
   }
   const roots = rootsForSession(sessionID);
-  const notes = sayNotesForSession(readProgressState(), sessionID);
+  const notes = visibleSayNotes(sayNotesForSession(readProgressState(), sessionID), Date.now(), autoHideTimeoutMs);
   if (roots.length === 0 && notes.length === 0) {
     context.ui.toast.show({
       message: "No progress to show",
@@ -1659,14 +1676,16 @@ var tui_default = Plugin.define({
     const configuredRows = context.options?.tuiMaxRows;
     maxRows = typeof configuredRows === "number" && configuredRows >= 1 ? Math.min(50, Math.floor(configuredRows)) : 8;
     sidebarRows = normalizeSidebarRows(context.options?.tuiSidebarRows);
-    const saySurfaces = tuiSaySurfaces(normalizeSayOptions(context.options).modes);
+    const sayOptions = normalizeSayOptions(context.options);
+    const saySurfaces = tuiSaySurfaces(sayOptions.modes);
     sayLineEnabled = saySurfaces.line;
+    autoHideTimeoutMs = sayOptions.autoHideTimeoutMs;
     const seenNotes = /* @__PURE__ */ new Map();
     sayToastHook = (next) => {
       if (!saySurfaces.toast) return;
       const sessionID = currentSessionID(context);
       if (!sessionID) return;
-      const notes = sayNotesForSession(next, sessionID);
+      const notes = visibleSayNotes(sayNotesForSession(next, sessionID), Date.now(), autoHideTimeoutMs);
       const current = new Set(notes.map((note) => note.id));
       const seen = seenNotes.get(sessionID);
       if (!seen) {
@@ -1840,6 +1859,7 @@ var tui_default = Plugin.define({
     return () => {
       sayToastHook = void 0;
       sayLineEnabled = true;
+      autoHideTimeoutMs = 6e4;
       unregisterComposer?.();
       unregisterSidebar?.();
       unregisterFooter?.();

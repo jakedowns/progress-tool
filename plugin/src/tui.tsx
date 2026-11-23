@@ -64,7 +64,7 @@ import {
   summarizeRoots,
   type TuiRow,
 } from "./tui-view.js";
-import { normalizeSayOptions, tuiSaySurfaces } from "./say.js";
+import { normalizeSayOptions, tuiSaySurfaces, visibleSayNotes } from "./say.js";
 import type { ProgressEntry, ProgressStatus, ProgressState, SayNote, TreeNode } from "./types.js";
 
 const [state, setState] = createSignal<ProgressState>(readProgressState());
@@ -95,6 +95,8 @@ let collapsedState: { value: boolean } = { value: false };
 let setCollapsed: ((mutation: (draft: { value: boolean }) => void) => void) | undefined;
 /** `sayModes` projection for the TUI (pill folds into the tree line). */
 let sayLineEnabled = true;
+/** Notes older than this are hidden from every TUI note surface. */
+let autoHideTimeoutMs = 60_000;
 /** Called after every poll with the fresh state so new notes can toast. */
 let sayToastHook: ((next: ProgressState) => void) | undefined;
 
@@ -291,7 +293,12 @@ function ProgressTree(props: { sessionID: string; capacity?: number; variant?: "
   const stackedHeader = props.variant === "sidebar";
   const roots = () => rootsForSession(props.sessionID);
   const doneRoots = () => roots().filter((root) => root.status === "done");
-  const notes = () => sayNotesForSession(state(), props.sessionID);
+  const notes = () =>
+    visibleSayNotes(
+      sayNotesForSession(state(), props.sessionID),
+      Date.now(),
+      autoHideTimeoutMs
+    );
   const notesLine = () => buildNotesLine(notes(), props.sessionID);
   const latestNote = () => latestSayNote(notes());
   const showNotesLine = () => sayLineEnabled && notesLine().length > 0;
@@ -676,7 +683,11 @@ async function openNotesDialog(context: TuiContext, sessionIDOverride?: string):
     context.ui.toast.show({ message: "Open a session to read agent notes", variant: "warning" });
     return;
   }
-  const notes = sayNotesForSession(readProgressState(), sessionID);
+  const notes = visibleSayNotes(
+    sayNotesForSession(readProgressState(), sessionID),
+    Date.now(),
+    autoHideTimeoutMs
+  );
   if (notes.length === 0) {
     context.ui.toast.show({ message: "No agent notes yet", variant: "info" });
     return;
@@ -760,7 +771,11 @@ async function openProgressDialog(context: TuiContext): Promise<void> {
     return;
   }
   const roots = rootsForSession(sessionID);
-  const notes = sayNotesForSession(readProgressState(), sessionID);
+  const notes = visibleSayNotes(
+    sayNotesForSession(readProgressState(), sessionID),
+    Date.now(),
+    autoHideTimeoutMs
+  );
   if (roots.length === 0 && notes.length === 0) {
     context.ui.toast.show({ message: "No progress to show", variant: "info" });
     return;
@@ -867,14 +882,20 @@ export default Plugin.define({
     // `sayModes` projection for this TUI view: `pill` folds into the tree line.
     // The first poll for a session only primes the seen set, so notes that
     // already existed when the view mounted never raise a toast.
-    const saySurfaces = tuiSaySurfaces(normalizeSayOptions(context.options).modes);
+    const sayOptions = normalizeSayOptions(context.options);
+    const saySurfaces = tuiSaySurfaces(sayOptions.modes);
     sayLineEnabled = saySurfaces.line;
+    autoHideTimeoutMs = sayOptions.autoHideTimeoutMs;
     const seenNotes = new Map<string, Set<string>>();
     sayToastHook = (next) => {
       if (!saySurfaces.toast) return;
       const sessionID = currentSessionID(context);
       if (!sessionID) return;
-      const notes = sayNotesForSession(next, sessionID);
+      const notes = visibleSayNotes(
+        sayNotesForSession(next, sessionID),
+        Date.now(),
+        autoHideTimeoutMs
+      );
       const current = new Set(notes.map((note) => note.id));
       const seen = seenNotes.get(sessionID);
       if (!seen) {
@@ -1036,6 +1057,7 @@ export default Plugin.define({
     return () => {
       sayToastHook = undefined;
       sayLineEnabled = true;
+      autoHideTimeoutMs = 60_000;
       unregisterComposer?.();
       unregisterSidebar?.();
       unregisterFooter?.();

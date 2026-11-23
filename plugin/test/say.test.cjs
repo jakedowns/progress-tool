@@ -33,6 +33,7 @@ const {
   sayResultMessage,
   sayToolDescription,
   tuiSaySurfaces,
+  visibleSayNotes,
 } = require(path.join(OUT, 'say.cjs'));
 
 const enabled = (overrides = {}) =>
@@ -51,6 +52,57 @@ test('say is opt-in and defaults are 180-260, 3 per turn, 15s cooldown', () => {
   assert.equal(options.chatNotes, true);
   assert.equal(options.finalGuard, true);
   assert.deepEqual(options.modes, ['tree']);
+  assert.equal(options.autoHideTimeoutMs, 60_000);
+});
+
+test('sayAutoHideTimeoutMs defaults to 60s and clamps to 0..24h', () => {
+  assert.equal(enabled().autoHideTimeoutMs, 60_000);
+  assert.equal(
+    normalizeSayOptions({ say: true, sayAutoHideTimeoutMs: 0 }).autoHideTimeoutMs,
+    0
+  );
+  assert.equal(
+    normalizeSayOptions({ say: true, sayAutoHideTimeoutMs: -5 }).autoHideTimeoutMs,
+    0
+  );
+  assert.equal(
+    normalizeSayOptions({ say: true, sayAutoHideTimeoutMs: 86_400_001 })
+      .autoHideTimeoutMs,
+    86_400_000
+  );
+  assert.equal(
+    normalizeSayOptions({ say: true, sayAutoHideTimeoutMs: 1234.9 })
+      .autoHideTimeoutMs,
+    1234
+  );
+  assert.equal(
+    normalizeSayOptions({ say: true, sayAutoHideTimeoutMs: 'nope' })
+      .autoHideTimeoutMs,
+    60_000
+  );
+});
+
+test('visibleSayNotes hides at the exact boundary and keeps 0 always visible', () => {
+  const notes = [
+    { id: 'at-timeout', at: 1_000 },
+    { id: 'still-visible', at: 1_001 },
+  ];
+  assert.deepEqual(
+    visibleSayNotes(notes, 61_000, 60_000).map((note) => note.id),
+    ['still-visible'],
+    'now - at === timeout is hidden'
+  );
+  assert.deepEqual(
+    visibleSayNotes(notes, 60_999, 60_000).map((note) => note.id),
+    ['at-timeout', 'still-visible'],
+    'order is preserved and one millisecond earlier is visible'
+  );
+  assert.deepEqual(
+    visibleSayNotes(notes, 999_999, 0).map((note) => note.id),
+    ['at-timeout', 'still-visible'],
+    '0 disables auto-hide'
+  );
+  assert.deepEqual(visibleSayNotes(undefined, 1, 60_000), []);
 });
 
 test('sayModes defaults to tree and accepts scalar, alias, dedupe, and empty', () => {

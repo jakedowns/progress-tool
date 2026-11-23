@@ -23,7 +23,7 @@ import {
   normalizeGuiSidebarWidth,
   type GuiLayout,
 } from "./gui-view.js";
-import { guiSaySurfaces, normalizeSayOptions } from "./say.js";
+import { guiSaySurfaces, normalizeSayOptions, visibleSayNotes } from "./say.js";
 import { buildNotesLine } from "./tui-view.js";
 import {
   buildTree,
@@ -454,8 +454,23 @@ export default Plugin.define({
     const taskListTimer = setInterval(() => void refreshTaskListStatus(), 10_000);
 
     const sayNotesEnabled = ctx.options?.say === true;
-    const sayModes = normalizeSayOptions(ctx.options).modes;
+    const sayOptions = normalizeSayOptions(ctx.options);
+    const sayModes = sayOptions.modes;
+    const autoHideTimeoutMs = sayOptions.autoHideTimeoutMs;
     const saySurfaces = () => guiSaySurfaces(sayModes, layoutMode());
+    // Notes expire by wall clock, but the GUI only refreshes on state changes.
+    // This clock re-renders the note surfaces only while notes exist.
+    const [notesClock, setNotesClock] = createSignal(Date.now());
+    let notesClockTimer: ReturnType<typeof setInterval> | undefined;
+    createEffect(() => {
+      const hasNotes = state().notes.length > 0;
+      if (hasNotes && !notesClockTimer) {
+        notesClockTimer = setInterval(() => setNotesClock(Date.now()), 5000);
+      } else if (!hasNotes && notesClockTimer) {
+        clearInterval(notesClockTimer);
+        notesClockTimer = undefined;
+      }
+    });
     // Optimistic note removals between the click and the next server state.
     // Note ids are stable, so a removed id stays filtered until it disappears
     // from the shared ring buffer.
@@ -468,13 +483,12 @@ export default Plugin.define({
     /** Notes rolled up to this session's root, newest first. */
     const notesForSession = (sessionID: string, all: GuiNote[] = state().notes) => {
       const pending = pendingNoteDismissals();
-      return all
-        .filter(
-          (note) =>
-            !pending[note.id] &&
-            (note.rootSessionId ?? note.sessionId) === sessionID
-        )
-        .slice(0, 20);
+      const scoped = all.filter(
+        (note) =>
+          !pending[note.id] &&
+          (note.rootSessionId ?? note.sessionId) === sessionID
+      );
+      return visibleSayNotes(scoped, notesClock(), autoHideTimeoutMs).slice(0, 20);
     };
 
     /**
@@ -1793,6 +1807,7 @@ export default Plugin.define({
     return () => {
       alive = false;
       clearInterval(timer);
+      if (notesClockTimer) clearInterval(notesClockTimer);
       unsubscribeUpdated?.();
       clearInterval(taskListTimer);
     };
