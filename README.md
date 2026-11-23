@@ -125,7 +125,10 @@ Multi-line titles and details accept real newlines, `\n` / `\r\n`, or `<br>`.
 ## What the views do
 
 - **Desktop/web pill:** one row per root, with `(N · agg%)` when several roots
-  exist, hover details, and a menu with the full tree.
+  exist, hover details, and a menu with the full tree. Set
+  `guiLayout: "sidebar"` to move the tree into a pinned tab in the session's
+  side panel (`guiSidebarWidth` sets its initial width), or use the pill's
+  `[Sidebar]` action / the "Progress: swap layout" command at runtime.
 - **TUI:** compact tree above the composer, roots collapsed, capped at
   `tuiMaxRoots` (default 3) and scrollable inside `tuiMaxRows` (default 8) so
   long lists never push the prompt away. A `--- scroll to see N more ---` hint
@@ -163,6 +166,8 @@ Multi-line titles and details accept real newlines, `\n` / `\r\n`, or `<br>`.
 | `tuiMaxRoots` | TUI root cap before the full-tree summary (default 3, max 50) |
 | `tuiLayout` | TUI placement: `"composer"` (default) or `"sidebar"` |
 | `tuiSidebarRows` | Sidebar viewport height in rows (default 0 = full tree, sidebar scrolls; max 100) |
+| `guiLayout` | Desktop/web placement: `"composer"` pill (default) or pinned `"sidebar"` panel |
+| `guiSidebarWidth` | Desktop sidebar initial width in CSS pixels (default 360, clamp 240-800) |
 | `taskListFile` | Mirror tasks to a local Markdown checklist (default off) |
 | `taskListPath` | Checklist path; empty = `<sessionID>-tasklist.md` in the MCP cwd |
 | `taskListOrder` | `"newest-first"` (default) or `"oldest-first"` |

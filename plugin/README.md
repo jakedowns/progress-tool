@@ -55,6 +55,9 @@ Prefer manual configuration? Add to `opencode.json`:
   done/error. Parses `OSC 9;4` progress sequences natively.
 - **Desktop pill** — `(N · agg%)` title, collapsible trees (animated),
   dismissals that persist, started/last-updated tooltips, nudge telemetry.
+  Set `guiLayout: "sidebar"` for a pinned tab in the session's side panel, or
+  flip placements from the pill's `[Sidebar]` action / the "Progress: swap
+  layout" command.
 - **Guidance that adapts** — injected rules, skill playbooks, pre-flight relay
   hints, strict-mode nudges (silent runs, stale progress with one synthetic
   escalation after 3 entry reminders), a turn-end idle reminder, and an
@@ -98,6 +101,8 @@ These options are passed to the MCP server when the plugin auto-registers it. If
 | `tuiMaxRoots` | `3` | root tasks shown before the full-tree summary; palette has "Progress: set root cap" |
 | `tuiLayout` | `"composer"` | TUI placement: `"composer"` (above the prompt) or `"sidebar"`; `/progress swap-layout` toggles it |
 | `tuiSidebarRows` | `0` | sidebar viewport height in rows (0-100); `0` renders the full tree and lets the sidebar scroll |
+| `guiLayout` | `"composer"` | Desktop/web placement: `"composer"` pill or a pinned `"sidebar"` panel; the "Progress: swap layout" command toggles it |
+| `guiSidebarWidth` | `360` | Desktop sidebar initial width in CSS pixels (clamp 240-800); dragging still wins |
 
 State lives in `~/.opencode-progress-state.json` (override with
 `PROGRESS_STATE_PATH`). Retention is opt-in (`PROGRESS_AUTO_PRUNE_S`); entries
