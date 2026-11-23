@@ -421,6 +421,9 @@ Both the TUI and GUI parts read these options.
 - `showDone`: set to `false` to drop completed tasks immediately.
 - `scope`: `"session"` (default) shows only the current chat's tasks; `"all"` shows every session sharing the state file.
 - `tuiMaxRows`: rows the TUI progress tree may occupy above the prompt (default `8`, max `50`). Roots are collapsed by default; `/progress` expands a tree or dismisses tasks.
+- `guiLayout`: desktop/web placement — `"composer"` (default) keeps the pill above the composer; `"sidebar"` registers a pinned Progress tab in the session's side region. The "Progress: swap layout (composer/sidebar)" command flips it at runtime.
+- `guiSidebarWidth`: desktop sidebar initial width in CSS pixels (default `360`, clamped to `240-800`). A user drag still overrides it.
+- `guiDetailLines`: detail text cap in the pill menu and sidebar rows (default `1` line, rendered with an ellipsis). `0` hides details for titles only; `-1` disables truncation and shows the full text; any positive number clamps to that many lines (max `100`).
 - `refreshMs`: how often the views re-read progress state in milliseconds (default `1000`, minimum `100`). Applies to the TUI poller, desktop GUI refresh loop, and the plugin's server-side state watcher. The standalone GUI server has the same knob via `PROGRESS_GUI_REFRESH_MS`.
 - `taskListFile`: set `true` to mirror the session's tasks to `tasklist-<session>.md` on every progress write. **Default `false`**. The file is plaintext and may contain sensitive detail; see the mirror section below.
 - `taskListLocation`: `1` (default) writes `<project>/tasklist-<session>.md`; `0` writes `<project>/.progress/tasklist-<session>.md`; `2` writes `~/.opencode-progress/tasklist-<session>.md`. There is no raw path option, so `..`/absolute paths are not part of the config.

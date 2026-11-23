@@ -55,6 +55,9 @@ Prefer manual configuration? Add to `opencode.json`:
   done/error. Parses `OSC 9;4` progress sequences natively.
 - **Desktop pill** — `(N · agg%)` title, collapsible trees (animated),
   dismissals that persist, started/last-updated tooltips, nudge telemetry.
+  Set `guiLayout: "sidebar"` for a pinned tab in the session's side panel, or
+  flip placements from the pill's `[Sidebar]` action / the "Progress: swap
+  layout" command.
 - **Optional Markdown mirror** — opt-in `tasklist-<session>.md` under the
   project, `.progress/`, or `~/.opencode-progress/`; UI/raw views, safe
   code-block detail, and a palette toggle.
@@ -101,6 +104,9 @@ Pass under the plugin entry's `options` in `opencode.json`:
 | `tuiMaxRoots` | `3` | root tasks shown before the full-tree summary; palette has "Progress: set root cap" |
 | `tuiLayout` | `"composer"` | TUI placement: `"composer"` (above the prompt) or `"sidebar"`; `/progress swap-layout` toggles it |
 | `tuiSidebarRows` | `0` | sidebar viewport height in rows (0-100); `0` renders the full tree and lets the sidebar scroll |
+| `guiLayout` | `"composer"` | Desktop/web placement: `"composer"` pill or a pinned `"sidebar"` panel; the "Progress: swap layout" command toggles it |
+| `guiSidebarWidth` | `360` | Desktop sidebar initial width in CSS pixels (clamp 240-800); dragging still wins |
+| `guiDetailLines` | `1` | Detail line cap in the pill menu and sidebar rows: `-1` full text, `0` titles only, `n` lines with `…` (max 100) |
 
 ### Experimental: `say` (opt-in)
 

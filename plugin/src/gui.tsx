@@ -6,12 +6,20 @@
  * tree, including nested children.
  */
 
-import { ComposerPill, Command, Plugin, Style } from "@opencode/plugin/gui";
+import { ComposerPill, Command, Panel, Plugin, Style } from "@opencode/plugin/gui";
 import type { MountedSession } from "@opencode/plugin/gui";
 import { For, Index, Show, batch, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import pkg from "../package.json";
 import { feedbackIssueUrl } from "./feedback.js";
 import { ProgressRpc } from "./rpc.js";
+import {
+  GUI_PROGRESS_PANEL_ID,
+  nextGuiLayout,
+  normalizeGuiDetailLines,
+  normalizeGuiLayout,
+  normalizeGuiSidebarWidth,
+  type GuiLayout,
+} from "./gui-view.js";
 import {
   buildTree,
   barParts,
@@ -123,6 +131,8 @@ function MenuRow(props: {
   hasChildren?: boolean;
   collapsed?: boolean;
   onToggle?: () => void;
+  /** Detail line cap: -1 full, 0 hidden, n>0 clamp with ellipsis. Default full. */
+  detailLines?: number;
 }) {
   const pct = () => progressLabel(props.node.progress);
   const parts = () => barParts(props.node.progress, props.options);
@@ -196,7 +206,7 @@ function MenuRow(props: {
             text={`${props.depth === 0 ? subagentPrefix(props.node) : ""}${props.node.title}`}
           />
         </div>
-        <Show when={props.node.detail}>
+        <Show when={props.node.detail && props.detailLines !== 0}>
           <div
             style={{
               "margin-top": "2px",
@@ -205,6 +215,15 @@ function MenuRow(props: {
               "white-space": "normal",
               "overflow-wrap": "anywhere",
               "word-break": "break-word",
+              ...(props.detailLines && props.detailLines > 0
+                ? {
+                    display: "-webkit-box",
+                    "-webkit-box-orient": "vertical",
+                    "-webkit-line-clamp": String(props.detailLines),
+                    "text-overflow": "ellipsis",
+                    overflow: "hidden",
+                  }
+                : {}),
             }}
             title={props.node.detail ? `${props.node.status}: ${oneLineText(props.node.detail)}` : ""}
           >
@@ -313,8 +332,55 @@ export default Plugin.define({
     const options = normalizeBarOptions(ctx.options);
     const visibility = normalizeVisibilityOptions(ctx.options);
     const refreshMs = normalizeRefreshMs(ctx.options);
+    // Placement is memory-backed like the TUI's `tuiLayout`; the configured
+    // value seeds it and the palette command / pill action flips it at runtime.
+    const [layoutStore, updateLayout] = ctx.storage.memory("guiLayout", {
+      initial: { mode: normalizeGuiLayout(ctx.options?.guiLayout) },
+    });
+    const layoutMode = (): GuiLayout => layoutStore.mode;
+    const setLayoutMode = (mode: GuiLayout) =>
+      updateLayout((draft) => {
+        draft.mode = mode;
+      });
+    const sidebarWidth = normalizeGuiSidebarWidth(ctx.options?.guiSidebarWidth);
+    const detailLines = normalizeGuiDetailLines(ctx.options?.guiDetailLines);
+    const sidebarPanelKey = `${ctx.id}:${GUI_PROGRESS_PANEL_ID}`;
     let alive = true;
     let inFlight = false;
+
+    /** Flip between the composer pill and the pinned side-region panel. */
+    const swapLayout = () => {
+      const next = nextGuiLayout(layoutMode());
+      setLayoutMode(next);
+      if (next === "sidebar") {
+        const session = ctx.sessions.current();
+        if (session) {
+          ctx.layout.open(sidebarPanelKey, session, { tab: "select", background: true });
+        }
+      }
+      ctx.toast.show({
+        title:
+          next === "sidebar"
+            ? "Progress moved to the sidebar"
+            : "Progress moved above the prompt",
+        variant: "default",
+        duration: 2500,
+      });
+    };
+
+    // A configured sidebar must be visible on startup, not just add a pinned
+    // tab to a closed region. Open it once per session; closing it later stays
+    // closed until the user asks again.
+    const sidebarOpenedFor = new Set<string>();
+    createEffect(() => {
+      if (layoutMode() !== "sidebar") return;
+      const session = ctx.sessions.current();
+      if (!session || sidebarOpenedFor.has(session.key)) return;
+      sidebarOpenedFor.add(session.key);
+      if (!ctx.layout.side.opened(session)) {
+        ctx.layout.open(sidebarPanelKey, session, { tab: "select", background: true });
+      }
+    });
     let lastRevision = "";
     let lastRevisionSession = "";
 
@@ -664,7 +730,36 @@ export default Plugin.define({
        .progress-pill-button:hover { background: rgba(127,127,127,0.18) !important; }`
     );
 
-    const ProgressMenu = (props: { session: MountedSession; sessionID: string }) => {
+    const footerButtonStyle = {
+      flex: "1 1 auto",
+      border: "none",
+      background: "transparent",
+      color: "inherit",
+      opacity: "0.65",
+      cursor: "pointer",
+      "text-align": "left",
+      padding: "3px 4px",
+      "font-size": "12px",
+    };
+
+    const sidebarHeaderButtonStyle = {
+      flex: "0 0 auto",
+      border: "1px solid rgba(127,127,127,0.35)",
+      background: "transparent",
+      color: "inherit",
+      opacity: "0.7",
+      "border-radius": "999px",
+      padding: "1px 8px",
+      cursor: "pointer",
+      "font-size": "11px",
+      "white-space": "nowrap",
+    };
+
+    const ProgressMenu = (props: {
+      session: MountedSession;
+      sessionID: string;
+      close?: () => void;
+    }) => {
       // The popover removes this component without a pointerleave; make sure
       // closing it never leaves refresh paused forever.
       onCleanup(() => setInteracting(false));
@@ -781,18 +876,6 @@ export default Plugin.define({
         );
       };
 
-      const footerButtonStyle = {
-        flex: "1 1 auto",
-        border: "none",
-        background: "transparent",
-        color: "inherit",
-        opacity: "0.65",
-        cursor: "pointer",
-        "text-align": "left",
-        padding: "3px 4px",
-        "font-size": "12px",
-      };
-
       return (
         <div
           onPointerEnter={() => setInteracting(true)}
@@ -851,6 +934,7 @@ export default Plugin.define({
                             node={node()}
                             depth={0}
                             options={options}
+                            detailLines={detailLines}
                             hasChildren={node().children.length > 0}
                             collapsed={isCollapsed()}
                             onToggle={() =>
@@ -879,7 +963,12 @@ export default Plugin.define({
                             <div style={{ overflow: "hidden", "min-height": "0" }}>
                               <For each={flattenTreeWithDepth(node().children, 1)}>
                                 {({ node: child, depth }) => (
-                                  <MenuRow node={child} depth={depth} options={options} />
+                                  <MenuRow
+                                    node={child}
+                                    depth={depth}
+                                    options={options}
+                                    detailLines={detailLines}
+                                  />
                                 )}
                               </For>
                             </div>
@@ -939,6 +1028,268 @@ export default Plugin.define({
             <button
               type="button"
               class="progress-pill-button"
+              title="Move progress into the sidebar"
+              onClick={() => {
+                swapLayout();
+                props.close?.();
+              }}
+              style={{
+                ...footerButtonStyle,
+                flex: "0 0 auto",
+                padding: "0",
+                opacity: "1",
+                "font-size": "10px",
+                "text-decoration": "underline",
+              }}
+            >
+              [Sidebar]
+            </button>
+            <button
+              type="button"
+              class="progress-pill-button"
+              onClick={() => ctx.system.openExternal(feedbackIssueUrl(pkg.version))}
+              style={{
+                ...footerButtonStyle,
+                flex: "0 0 auto",
+                padding: "0",
+                opacity: "1",
+                "font-size": "10px",
+                "text-decoration": "underline",
+              }}
+            >
+              [Feedback]
+            </button>
+          </div>
+        </div>
+      );
+    };
+
+    /**
+     * Full tree for the pinned side-region panel. Unlike the popover it has
+     * no height cap of its own; the panel body scrolls, and the header keeps
+     * the aggregate summary and a way back to the composer pill.
+     */
+    const ProgressSidebar = (props: {
+      session: () => MountedSession;
+      sessionID: () => string;
+    }) => {
+      const scoped = createMemo(() =>
+        scopeEntries(state().entries, props.sessionID(), visibility)
+      );
+      const dismissed = createMemo(() => {
+        const merged = dismissedFromEntries(scoped());
+        for (const [key, pending] of Object.entries(pendingDismissed())) {
+          const persisted = merged[key];
+          if (!persisted || pending.at > persisted.at) merged[key] = pending;
+        }
+        return merged;
+      });
+      const tree = createMemo(() =>
+        buildTree(visibleEntries(scoped(), Date.now(), visibility))
+      );
+      const visibleRoots = createMemo(() =>
+        tree().filter((root) => !isDismissed(root, dismissed()))
+      );
+      const [expandedOverrides, setExpandedOverrides] = createSignal<
+        Record<string, boolean>
+      >({});
+      const expandByDefault = ctx.options?.expandRootsByDefault === true;
+      const collapsedMap = createMemo(() =>
+        collapsedRootMap(visibleRoots(), expandByDefault, expandedOverrides())
+      );
+      const doneRoots = createMemo(() =>
+        visibleRoots().filter((root) => root.status === "done")
+      );
+      const rootKeys = createMemo(() => visibleRoots().map((root) => root.key));
+      const rootByKey = createMemo(() => {
+        const map = new Map<string, TreeNode>();
+        for (const root of visibleRoots()) map.set(root.key, root);
+        return map;
+      });
+      const summary = createMemo(() => {
+        const totals = summarizeEntries(scoped());
+        const parts: string[] = [];
+        if (totals.active > 0) parts.push(`${totals.active} active`);
+        if (totals.done > 0) parts.push(`${totals.done} done`);
+        if (totals.dismissed > 0) parts.push(`${totals.dismissed} dismissed`);
+        return parts.length > 0 ? parts.join(" · ") : "Agent progress";
+      });
+      const dismissAll = (roots: TreeNode[]) => {
+        for (const root of roots) {
+          dismissKey(props.session(), root.key, root.status ?? "");
+        }
+      };
+
+      return (
+        <div
+          style={{
+            display: "flex",
+            "flex-direction": "column",
+            height: "100%",
+            "min-height": "0",
+            gap: "4px",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              "align-items": "center",
+              gap: "8px",
+              "padding-bottom": "6px",
+              "border-bottom": "1px solid rgba(127,127,127,0.2)",
+              "flex": "0 0 auto",
+            }}
+          >
+            <span
+              title={summary()}
+              style={{
+                flex: "1 1 auto",
+                "min-width": "0",
+                "font-size": "12px",
+                opacity: "0.65",
+                "white-space": "nowrap",
+                overflow: "hidden",
+                "text-overflow": "ellipsis",
+              }}
+            >
+              {summary()}
+            </span>
+            <button
+              type="button"
+              class="progress-pill-button"
+              title="Move progress above the prompt"
+              onClick={() => swapLayout()}
+              style={sidebarHeaderButtonStyle}
+            >
+              → Composer
+            </button>
+          </div>
+          <Show
+            when={visibleRoots().length > 0}
+            fallback={
+              <div
+                style={{
+                  opacity: "0.6",
+                  "font-size": "13px",
+                  padding: "8px 2px",
+                  "flex": "1 1 auto",
+                }}
+              >
+                No active progress
+              </div>
+            }
+          >
+            <div
+              style={{
+                display: "flex",
+                "flex-direction": "column",
+                gap: "2px",
+                flex: "1 1 auto",
+                "min-height": "0",
+                "overflow-y": "auto",
+                "overflow-x": "hidden",
+                "padding-right": "2px",
+              }}
+            >
+              <For each={rootKeys()}>
+                {(key) => {
+                  const root = () => rootByKey().get(key);
+                  const isCollapsed = () => collapsedMap()[key] ?? false;
+                  return (
+                    <Show when={root()}>
+                      {(node) => (
+                        <div>
+                          <MenuRow
+                            node={node()}
+                            depth={0}
+                            options={options}
+                            detailLines={detailLines}
+                            hasChildren={node().children.length > 0}
+                            collapsed={isCollapsed()}
+                            onToggle={() =>
+                              setExpandedOverrides((prev) => ({
+                                ...prev,
+                                [key]: !(prev[key] ?? expandByDefault),
+                              }))
+                            }
+                            onDismiss={() =>
+                              dismissKey(props.session(), key, node().status ?? "")
+                            }
+                          />
+                          <div
+                            style={{
+                              display: "grid",
+                              "grid-template-rows": isCollapsed() ? "0fr" : "1fr",
+                              transition: "grid-template-rows 0.35s ease-in-out",
+                            }}
+                          >
+                            <div style={{ overflow: "hidden", "min-height": "0" }}>
+                              <For each={flattenTreeWithDepth(node().children, 1)}>
+                                {({ node: child, depth }) => (
+                                  <MenuRow
+                                    node={child}
+                                    depth={depth}
+                                    options={options}
+                                    detailLines={detailLines}
+                                  />
+                                )}
+                              </For>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </Show>
+                  );
+                }}
+              </For>
+            </div>
+          </Show>
+          <Show when={visibleRoots().length > 0}>
+            <div
+              style={{
+                display: "flex",
+                gap: "2px",
+                "padding-top": "2px",
+                "border-top": "1px solid rgba(127,127,127,0.2)",
+                "flex": "0 0 auto",
+              }}
+            >
+              <Show when={doneRoots().length > 0 && doneRoots().length < visibleRoots().length}>
+                <button
+                  type="button"
+                  class="progress-pill-button"
+                  onClick={() => dismissAll(doneRoots())}
+                  style={footerButtonStyle}
+                >
+                  ✓ Dismiss done ({doneRoots().length})
+                </button>
+              </Show>
+              <button
+                type="button"
+                class="progress-pill-button"
+                onClick={() => dismissAll(visibleRoots())}
+                style={footerButtonStyle}
+              >
+                ✕ Dismiss all ({visibleRoots().length})
+              </button>
+            </div>
+          </Show>
+          <div
+            style={{
+              display: "flex",
+              "align-items": "center",
+              gap: "4px",
+              "padding": "1px 2px 2px",
+              "font-size": "10px",
+              opacity: "0.45",
+              "user-select": "none",
+              "flex": "0 0 auto",
+            }}
+          >
+            <span>progress plugin desktop v{pkg.version}</span>
+            <button
+              type="button"
+              class="progress-pill-button"
               onClick={() => ctx.system.openExternal(feedbackIssueUrl(pkg.version))}
               style={{
                 ...footerButtonStyle,
@@ -959,6 +1310,7 @@ export default Plugin.define({
     ctx.add(ComposerPill, () => ({
       id: "progress",
       show: (input) => {
+        if (layoutMode() === "sidebar") return undefined;
         const current = state();
         const scoped = scopeEntries(current.entries, input.session.id, visibility);
         const empty = Object.keys(scoped).length === 0;
@@ -1053,7 +1405,11 @@ export default Plugin.define({
         };
       },
       menu: (input) => (
-        <ProgressMenu session={input.session} sessionID={input.session.id} />
+        <ProgressMenu
+          session={input.session}
+          sessionID={input.session.id}
+          close={input.close}
+        />
       ),
     }));
 
@@ -1085,6 +1441,45 @@ export default Plugin.define({
         return taskListStatus()?.enabled === true;
       },
       run: () => void toggleTaskListView(),
+    }));
+
+    const progressTab = {
+      id: GUI_PROGRESS_PANEL_ID,
+      title: "Progress",
+      pinned: true,
+      fallback: true,
+    };
+
+    // A pinned side-region tab: it is listed without being opened, sits before
+    // other tabs and cannot be closed or dragged, so sidebar mode behaves like
+    // the TUI's sidebar slot. Composer mode lists nothing and leaves no tab.
+    ctx.add(Panel, {
+      id: GUI_PROGRESS_PANEL_ID,
+      region: "side",
+      width: sidebarWidth,
+      mobile: {
+        title: "Progress",
+        order: 20,
+        kind: "menu",
+        icon: "checklist",
+      },
+      list: () => (layoutMode() === "sidebar" ? [progressTab] : []),
+      render: (input) => (
+        <ProgressSidebar
+          session={() => input.session}
+          sessionID={() => input.session.id}
+        />
+      ),
+    });
+
+    ctx.add(Command, () => ({
+      id: "progress.swap-layout",
+      title: "Progress: swap layout (composer/sidebar)",
+      description: "Move the progress tree above the prompt or into the sidebar",
+      group: "Progress",
+      section: "session" as const,
+      keywords: "progress sidebar composer layout move",
+      run: () => swapLayout(),
     }));
 
     return () => {
