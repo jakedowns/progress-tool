@@ -6,7 +6,11 @@
     "servers": {
       "progress-server": {
         "type": "local",
-        "command": ["node", "mcp-server/index.js"]
+        "command": ["node", "mcp-server/index.js"],
+        "environment": {
+          "PROGRESS_TASKLIST": "1",
+          "PROGRESS_TASKLIST_ORDER": "newest-first"
+        }
       }
     }
   }
