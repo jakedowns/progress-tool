@@ -2,7 +2,7 @@
 
 Back to the [main README](./README.md).
 
-**Versions:** MCP server `2.10.2` · OpenCode plugin `2.19.0`
+**Versions:** MCP server `2.11.0` · OpenCode plugin `2.20.0`
 
 This document is the reference half of the project: the portable contract, the
 relay's behaviour, state-store guarantees, architecture, testing, every plugin
@@ -293,7 +293,7 @@ Both the MCP server and the relay share [`mcp-server/state-store.js`](./mcp-serv
 - **Stale-lock recovery** — a lock older than 15 seconds is broken rather than wedging the command.
 - **TTL cleanup (opt-in)** — nothing is pruned by default; entries ride so the store doubles as a history/report. Enable completed-entry retention with `PROGRESS_AUTO_PRUNE_S=<seconds>` (legacy `PROGRESS_TTL_MS` also works), and the orphaned-`running` sweep with `PROGRESS_STALE_MS`.
 - **Session scoping** — when `sessionId` is resolved, keys are `${sessionId}:${id}` and entries carry `sessionId`; parent lookups stay within that namespace. With no session, keys remain flat (`build`) for backwards compatibility.
-- **Path override** — `PROGRESS_STATE_PATH` for tests, multiple harnesses, or fully isolated sessions.
+- **Path override** — `PROGRESS_STATE_PATH` for tests, multiple harnesses, or fully isolated sessions. It must end in `.json`, and an existing file must parse as a progress state document (an `entries` object); otherwise writes are refused rather than clobbering the file.
 - **Child→parent map** — `~/.opencode-progress-sessions.json` (`PROGRESS_SESSION_MAP_PATH`) records subagent attribution and is consumed by both the MCP server and the relay.
 
 State file shape (session-scoped example):
@@ -311,7 +311,8 @@ State file shape (session-scoped example):
       "parentId": null,
       "startedAt": 1794559267388,
       "createdAt": 1794559267388,
-      "updatedAt": 1794559267388
+      "updatedAt": 1794559267388,
+      "statusUpdatedAt": 1794559267388
     },
     "<sessionId>:link-lib": {
       "id": "link-lib",
@@ -323,7 +324,8 @@ State file shape (session-scoped example):
       "parentId": "build",
       "startedAt": 1794559267388,
       "createdAt": 1794559267388,
-      "updatedAt": 1794559267388
+      "updatedAt": 1794559267388,
+      "statusUpdatedAt": 1794559267388
     }
   },
   "version": 2
@@ -332,7 +334,7 @@ State file shape (session-scoped example):
 
 The object key is the internal composite key (`"<sessionId>:<id>"`), while `entry.id` and `entry.parentId` stay clean for display and relay commands. Entries written without a session keep the legacy flat key (`"build"`) and omit `sessionId`. Subagent-authored entries additionally carry `subagent: true` and `subagentAgent`.
 
-`startedAt` lets a GUI show true elapsed time even when no relay tick is writing `updatedAt` every second.
+`startedAt` lets a GUI show true elapsed time even when no relay tick is writing `updatedAt` every second. `statusUpdatedAt` is the last agent-plane update; relay ticks only advance it on a status transition, so the Markdown mirror's "updated" label does not churn at telemetry rates.
 
 The full normative spec, including conformance tests and harness integration notes, is in [`docs/out-of-band-relay-spec.md`](./docs/out-of-band-relay-spec.md).
 
@@ -420,6 +422,11 @@ Both the TUI and GUI parts read these options.
 - `scope`: `"session"` (default) shows only the current chat's tasks; `"all"` shows every session sharing the state file.
 - `tuiMaxRows`: rows the TUI progress tree may occupy above the prompt (default `8`, max `50`). Roots are collapsed by default; `/progress` expands a tree or dismisses tasks.
 - `refreshMs`: how often the views re-read progress state in milliseconds (default `1000`, minimum `100`). Applies to the TUI poller, desktop GUI refresh loop, and the plugin's server-side state watcher. The standalone GUI server has the same knob via `PROGRESS_GUI_REFRESH_MS`.
+- `taskListFile`: set `true` to mirror the session's tasks to `tasklist-<session>.md` on every progress write. **Default `false`**. The file is plaintext and may contain sensitive detail; see the mirror section below.
+- `taskListLocation`: `1` (default) writes `<project>/tasklist-<session>.md`; `0` writes `<project>/.progress/tasklist-<session>.md`; `2` writes `~/.opencode-progress/tasklist-<session>.md`. There is no raw path option, so `..`/absolute paths are not part of the config.
+- `taskListView`: `"ui"` (default) hides dismissed/cleared entries and rolls child status up so the Markdown matches the UI; `"raw"` keeps every entry and the stored status. The TUI/GUI palette command **Progress: task-list mirror view** toggles this when the mirror is active; the change applies to the next render, not to existing entries.
+- `taskListDetail`: `"code"` (default) renders detail in a fenced code block; `"escaped"` renders inline Markdown-escaped text; `"raw"` is an explicit opt-in for trusted content.
+- `taskListOrder`: `"newest-first"` (default; newest `createdAt` at the top) or `"oldest-first"` (append at the bottom).
 - `strictMode`: `"nudge"` (default), `"force"`, or `"off"`. Watches tool calls: without any task entry, or with pending tasks whose progress has not changed, it writes a self-identifying **authoritative** `progress-nudge` instruction (imperative, not a question) and clears it on compliance. `"force"` additionally sends one synthetic reminder per non-compliance run. Tune with `strictThreshold` (default `3` calls), `staleAfterMs` (default `5` min), `cooldownMs` (default `2` min), and `staleEscalateAfter` (default `3`). The first `staleEscalateAfter` stale reminders ride the context entry; the next one escalates **once** to a synthetic message so it is a real turn input rather than a discardable context value. Set `staleEscalateAfter: 0` to disable escalation.
 - `idleReminder`: set to `false` to disable the turn-end nudge. By default, when a session is about to go idle with running/waiting entries still open, the plugin admits **one synthetic message** ("you have a tree of todos pending") into the same execution, listing the open entries. Debounced by entry signature, a 2-minute cooldown, and a per-run cap.
 - `unhinged`: set to `true` to append `[did the user's message just change your workload? update your task list!]` to every user message. **Default `false`** — it edits user input text, so it is strictly opt-in.
@@ -453,16 +460,45 @@ tool for any further backchannel updates in that turn.
 
 ---
 
+### Local task-list mirror
+
+The optional mirror is enabled with `taskListFile: true` (or
+`PROGRESS_TASKLIST=1` when configuring the MCP server manually). It writes
+`tasklist-<session>.md` on progress writes; `tasklistLocation` chooses
+`<project>/` (default), `<project>/.progress/`, or `~/.opencode-progress/`.
+There is deliberately no free-form path, so project config cannot point it at
+`~/.bashrc` or `../outside`.
+
+- `ui` view (default) hides dismissed/cleared entries and rolls child status
+  up, matching the UI. `raw` keeps everything and shows stored status.
+- Detail is a fenced code block by default; `escaped` and `raw` are opt-ins.
+- The mirror never overwrites a non-empty file unless it begins with the
+  progress-tool mirror marker.
+- Runtime prefs/status live next to the state file
+  (`.opencode-progress-tasklist-prefs.json` and `-status.json`). The palette
+  command **Progress: task-list mirror view** appears only while the mirror is
+  active and toggles UI/raw.
+- The file is plaintext. Add `tasklist-*.md` (and `.progress/`) to
+  `.gitignore`, or use location `2`.
+- `relayMirrorLevel` defaults to `0` (omit relay-created command entries); `1`
+  mirrors every relay entry, and `2` mirrors only relay entries whose current
+  status is `error`. Agent-created tasks always mirror.
+- See [`mcp-server/README.md`](./mcp-server/README.md#local-task-list-mirror)
+  for the env vars and an example.
+
+---
+
 ## Components and files
 
 | Component | Path |
 |-----------|------|
 | MCP server (`progress`, `list` tools; stdio + CLI dispatch) | `mcp-server/index.js` |
 | Shared atomic, locked state store + tree roll-up | `mcp-server/state-store.js` |
+| Optional Markdown task-list mirror | `mcp-server/task-list.js` |
 | Out-of-band relay (pipe, wrap, emit) | `mcp-server/relay.js` |
 | Subagent usage report CLI | `mcp-server/report.js` |
 | `progress-relay` / `progress-emit` bin shims | `mcp-server/progress-relay.js`, `mcp-server/progress-emit.js` |
-| MCP smoke suite (39 tests) | `mcp-server/test/smoke.test.js` |
+| MCP test suite (55 tests) | `mcp-server/test/smoke.test.js`, `mcp-server/test/task-list.test.js` |
 | OpenCode plugin: server part (RPC, hooks, nudges) | `plugin/src/index.ts` |
 | Desktop/web composer pill | `plugin/src/gui.tsx` |
 | TUI composer footer + bounded tree | `plugin/src/tui.tsx`, `plugin/src/tui-view.ts` |
@@ -482,7 +518,7 @@ tool for any further backchannel updates in that turn.
 | Prebuilt desktop/web bundle | `plugin/dist/gui-experimental.cjs` |
 | Precompiled TUI entry | `plugin/dist/tui.js` |
 | TUI build script | `plugin/scripts/build-tui.mjs` |
-| Plugin test suite (94 tests) | `plugin/test/*.test.cjs` |
+| Plugin test suite (117 tests) | `plugin/test/*.test.cjs` |
 | Standalone desktop GUI server | `progress-gui-server.js` |
 | Launch / setup scripts | `launch-gui.sh`, `setup.sh` |
 | GUI build script (stages off the repo mount) | `scripts/build-gui.sh` |

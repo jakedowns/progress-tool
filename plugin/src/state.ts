@@ -17,6 +17,50 @@ export function stateFilePath(): string {
   );
 }
 
+const stateSafetyCache = new Map<string, { mtimeMs: number; size: number }>();
+
+/**
+ * Refuse to write over a file that is not a progress state document.
+ *
+ * The MCP server has the same guard. This one covers the plugin's direct
+ * writes (dismissals and child adoption), which bypass the MCP server's
+ * mutateState(). A project-level PROGRESS_STATE_PATH must not be able to
+ * clobber ~/.bashrc or package.json.
+ */
+function assertWritableStateFile(file: string): void {
+  if (path.extname(file).toLowerCase() !== ".json") {
+    throw new Error(`Refusing to write progress state to ${file}: expected a .json file`);
+  }
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(file);
+  } catch {
+    return; // Missing: the first write is allowed.
+  }
+  if (!stat.isFile()) {
+    throw new Error(`Refusing to write progress state to ${file}: not a regular file`);
+  }
+  if (stat.size === 0) return;
+  const hit = stateSafetyCache.get(file);
+  if (hit && hit.mtimeMs === stat.mtimeMs && hit.size === stat.size) return;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    throw new Error(
+      `Refusing to overwrite ${file}: not valid JSON (PROGRESS_STATE_PATH must point at a progress state file)`
+    );
+  }
+  const entries =
+    parsed && typeof parsed === "object" && "entries" in parsed
+      ? (parsed as { entries?: unknown }).entries
+      : undefined;
+  if (!entries || typeof entries !== "object" || Array.isArray(entries)) {
+    throw new Error(`Refusing to overwrite ${file}: missing a progress "entries" object`);
+  }
+  stateSafetyCache.set(file, { mtimeMs: stat.mtimeMs, size: stat.size });
+}
+
 export function readProgressState(): ProgressState {
   try {
     const parsed = JSON.parse(fs.readFileSync(stateFilePath(), "utf8"));
@@ -214,6 +258,7 @@ export function adoptChildEntries(
     }
     if (moved === 0) return 0;
     state.version = state.version ?? 2;
+    assertWritableStateFile(file);
     const tmp = `${file}.${process.pid}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
     fs.renameSync(tmp, file);
@@ -280,6 +325,7 @@ export function writeDismissal(key: string, status: string): boolean {
     if (!entry) return false;
     entry.dismissed = { status, at: Date.now() };
     state.version = state.version ?? 2;
+    assertWritableStateFile(file);
     const tmp = `${file}.${process.pid}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
     fs.renameSync(tmp, file);

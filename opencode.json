@@ -9,6 +9,9 @@
         "command": ["node", "mcp-server/index.js"],
         "environment": {
           "PROGRESS_TASKLIST": "1",
+          "PROGRESS_TASKLIST_LOCATION": "1",
+          "PROGRESS_TASKLIST_MODE": "raw",
+          "PROGRESS_TASKLIST_DETAIL": "code",
           "PROGRESS_TASKLIST_ORDER": "newest-first"
         }
       }

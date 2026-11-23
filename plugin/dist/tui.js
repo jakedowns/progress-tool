@@ -17,6 +17,37 @@ import path from "node:path";
 function stateFilePath() {
   return process.env.PROGRESS_STATE_PATH || path.join(process.env.HOME || process.env.USERPROFILE || os.tmpdir(), ".opencode-progress-state.json");
 }
+var stateSafetyCache = /* @__PURE__ */ new Map();
+function assertWritableStateFile(file) {
+  if (path.extname(file).toLowerCase() !== ".json") {
+    throw new Error(`Refusing to write progress state to ${file}: expected a .json file`);
+  }
+  let stat;
+  try {
+    stat = fs.statSync(file);
+  } catch {
+    return;
+  }
+  if (!stat.isFile()) {
+    throw new Error(`Refusing to write progress state to ${file}: not a regular file`);
+  }
+  if (stat.size === 0) return;
+  const hit = stateSafetyCache.get(file);
+  if (hit && hit.mtimeMs === stat.mtimeMs && hit.size === stat.size) return;
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    throw new Error(
+      `Refusing to overwrite ${file}: not valid JSON (PROGRESS_STATE_PATH must point at a progress state file)`
+    );
+  }
+  const entries = parsed && typeof parsed === "object" && "entries" in parsed ? parsed.entries : void 0;
+  if (!entries || typeof entries !== "object" || Array.isArray(entries)) {
+    throw new Error(`Refusing to overwrite ${file}: missing a progress "entries" object`);
+  }
+  stateSafetyCache.set(file, { mtimeMs: stat.mtimeMs, size: stat.size });
+}
 function readProgressState() {
   try {
     const parsed = JSON.parse(fs.readFileSync(stateFilePath(), "utf8"));
@@ -80,6 +111,7 @@ function writeDismissal(key, status) {
     if (!entry) return false;
     entry.dismissed = { status, at: Date.now() };
     state2.version = state2.version ?? 2;
+    assertWritableStateFile(file);
     const tmp = `${file}.${process.pid}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(state2, null, 2));
     fs.renameSync(tmp, file);
@@ -253,6 +285,81 @@ function removeSessionLinks(sessionID) {
     } catch {
     }
   }
+}
+
+// src/tasklist-prefs.ts
+import fs2 from "node:fs";
+import path2 from "node:path";
+function taskListPrefsPath(stateFile = stateFilePath()) {
+  return path2.join(path2.dirname(stateFile), ".opencode-progress-tasklist-prefs.json");
+}
+function taskListStatusPath(stateFile = stateFilePath()) {
+  return path2.join(path2.dirname(stateFile), ".opencode-progress-tasklist-status.json");
+}
+function normalizeTaskListView(raw) {
+  return raw === "raw" ? "raw" : "ui";
+}
+function normalizeTaskListDetail(raw) {
+  return raw === "raw" || raw === "escaped" ? raw : "code";
+}
+function normalizeTaskListLocation(raw) {
+  const numeric = Number(raw);
+  return numeric === 0 || numeric === 2 ? numeric : 1;
+}
+function normalizeTaskListOrder(raw) {
+  return raw === "oldest-first" ? "oldest-first" : "newest-first";
+}
+function readJson(file) {
+  try {
+    return JSON.parse(fs2.readFileSync(file, "utf8"));
+  } catch {
+    return void 0;
+  }
+}
+function readTaskListPrefs(stateFile = stateFilePath()) {
+  const parsed = readJson(taskListPrefsPath(stateFile));
+  if (!parsed || typeof parsed !== "object") return {};
+  const mode = parsed.mode;
+  return mode === "ui" || mode === "raw" ? { mode } : {};
+}
+function writeTaskListPrefs(prefs, stateFile = stateFilePath()) {
+  const file = taskListPrefsPath(stateFile);
+  try {
+    fs2.mkdirSync(path2.dirname(file), { recursive: true });
+    const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+    fs2.writeFileSync(tmp, `${JSON.stringify(prefs, null, 2)}
+`, {
+      encoding: "utf8",
+      mode: 384
+    });
+    fs2.renameSync(tmp, file);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function readTaskListStatus(stateFile = stateFilePath()) {
+  const parsed = readJson(taskListStatusPath(stateFile));
+  if (!parsed || typeof parsed !== "object") return null;
+  const raw = parsed;
+  return {
+    enabled: raw.enabled === true,
+    mode: normalizeTaskListView(raw.mode),
+    detail: normalizeTaskListDetail(raw.detail),
+    location: normalizeTaskListLocation(raw.location),
+    order: normalizeTaskListOrder(raw.order),
+    file: typeof raw.file === "string" ? raw.file : void 0,
+    sessionID: typeof raw.sessionID === "string" ? raw.sessionID : void 0,
+    updatedAt: typeof raw.updatedAt === "number" ? raw.updatedAt : void 0
+  };
+}
+function toggleTaskListMode(fallback = "ui", stateFile = stateFilePath()) {
+  const prefs = readTaskListPrefs(stateFile);
+  const status = readTaskListStatus(stateFile);
+  const current = prefs.mode ?? status?.mode ?? fallback;
+  const next = current === "raw" ? "ui" : "raw";
+  writeTaskListPrefs({ ...prefs, mode: next }, stateFile);
+  return next;
 }
 
 // src/tree.ts
@@ -542,6 +649,7 @@ function nextTuiLayout(current) {
 
 // src/tui.js
 var [state, setState] = createSignal(readProgressState());
+var [taskListStatus, setTaskListStatus] = createSignal(readTaskListStatus());
 var [expandedBySession, setExpandedBySession] = createSignal({});
 var pollers = 0;
 var timer;
@@ -565,8 +673,12 @@ var setCollapsed;
 function startPolling(refreshMs) {
   pollers += 1;
   setState(readProgressState());
+  setTaskListStatus(readTaskListStatus());
   if (!timer) {
-    timer = setInterval(() => setState(readProgressState()), refreshMs);
+    timer = setInterval(() => {
+      setState(readProgressState());
+      setTaskListStatus(readTaskListStatus());
+    }, refreshMs);
   }
   return () => {
     pollers -= 1;
@@ -1296,6 +1408,25 @@ var tui_default = Plugin.define({
         group: "progress",
         palette: true,
         run: () => hardClearStoreCommand(context)
+      }, {
+        id: "progress.toggle-tasklist-view",
+        title: "Progress: task-list mirror view (match UI/raw)",
+        description: "Toggle the Markdown task list between the UI view and the raw store view",
+        group: "progress",
+        palette: true,
+        enabled: () => taskListStatus()?.enabled === true,
+        run: () => {
+          const current = taskListStatus();
+          const mode = toggleTaskListMode(current?.mode ?? "ui");
+          if (current) setTaskListStatus({
+            ...current,
+            mode
+          });
+          context.ui.toast.show({
+            message: mode === "raw" ? "Task-list mirror: raw store view" : "Task-list mirror: matching the UI",
+            variant: "success"
+          });
+        }
       }]
     }));
     const unregisterComposer = context.ui.slot({

@@ -129,6 +129,44 @@ export const ProgressRpc = Rpc.define({
         additionalProperties: false,
       },
     },
+    taskListStatus: {
+      input: {
+        type: "object",
+        properties: {},
+        additionalProperties: false,
+      },
+      output: {
+        type: "object",
+        properties: {
+          enabled: { type: "boolean" },
+          mode: { type: "string", enum: ["ui", "raw"] },
+          detail: { type: "string", enum: ["code", "escaped", "raw"] },
+          location: { type: "number", enum: [0, 1, 2] },
+          order: { type: "string", enum: ["newest-first", "oldest-first"] },
+          file: { type: "string" },
+          sessionID: { type: "string" },
+          updatedAt: { type: "number" },
+        },
+        required: ["enabled", "mode", "detail", "location", "order"],
+        additionalProperties: false,
+      },
+    },
+    toggleTaskListMode: {
+      input: {
+        type: "object",
+        properties: {},
+        additionalProperties: false,
+      },
+      output: {
+        type: "object",
+        properties: {
+          ok: { type: "boolean" },
+          mode: { type: "string", enum: ["ui", "raw"] },
+        },
+        required: ["ok", "mode"],
+        additionalProperties: false,
+      },
+    },
   },
   events: {
     updated: {

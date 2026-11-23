@@ -266,7 +266,60 @@ function sleepSync(ms) {
   }
 }
 
+const safeStatePaths = new Set();
+
+/**
+ * Refuse to write progress state over a file that is not a progress state
+ * document. A project-level `PROGRESS_STATE_PATH` is trusted config; without
+ * this check it could point at ~/.bashrc or package.json and the state store
+ * would replace that file with JSON.
+ *
+ * Validated once per process: the state file is rewritten on every progress
+ * write, so re-parsing it on each call would double the hot-path read cost.
+ */
+function assertStatePathSafe(stateFile) {
+  if (safeStatePaths.has(stateFile)) return;
+  if (path.extname(stateFile).toLowerCase() !== '.json') {
+    throw new Error(
+      `Refusing to use PROGRESS_STATE_PATH "${stateFile}": expected a .json file`
+    );
+  }
+  let stat;
+  try {
+    stat = fs.statSync(stateFile);
+  } catch {
+    safeStatePaths.add(stateFile);
+    return; // Missing: the first write is allowed.
+  }
+  if (!stat.isFile()) {
+    throw new Error(`Refusing to use PROGRESS_STATE_PATH "${stateFile}": not a regular file`);
+  }
+  if (stat.size > 0) {
+    let parsed;
+    try {
+      parsed = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+    } catch {
+      throw new Error(
+        `Refusing to overwrite "${stateFile}": not valid JSON (PROGRESS_STATE_PATH must point at a progress state file)`
+      );
+    }
+    if (
+      !parsed ||
+      typeof parsed !== 'object' ||
+      !parsed.entries ||
+      typeof parsed.entries !== 'object' ||
+      Array.isArray(parsed.entries)
+    ) {
+      throw new Error(
+        `Refusing to overwrite "${stateFile}": missing a progress "entries" object`
+      );
+    }
+  }
+  safeStatePaths.add(stateFile);
+}
+
 function ensureStateFile(stateFile = DEFAULT_STATE_FILE) {
+  assertStatePathSafe(stateFile);
   fs.mkdirSync(path.dirname(stateFile), { recursive: true });
   try {
     // "wx" is important: never overwrite another process's fresh state.
@@ -285,6 +338,7 @@ function readState(stateFile = DEFAULT_STATE_FILE) {
 }
 
 function atomicWrite(stateFile, state) {
+  assertStatePathSafe(stateFile);
   const dir = path.dirname(stateFile);
   fs.mkdirSync(dir, { recursive: true });
   const tmp = path.join(
@@ -412,7 +466,7 @@ function prune(state, now) {
  * Serialized read-modify-write. The mutator receives the live state object
  * and may return any value, which is passed back to the caller.
  */
-function mutateState(mutator, stateFile = DEFAULT_STATE_FILE) {
+function mutateState(mutator, stateFile = DEFAULT_STATE_FILE, sessionHint) {
   ensureStateFile(stateFile);
   const release = acquireLock(stateFile);
   try {
@@ -422,12 +476,13 @@ function mutateState(mutator, stateFile = DEFAULT_STATE_FILE) {
     atomicWrite(stateFile, state);
     // Optional Markdown mirror; content-compared, so relay ticks are no-ops.
     // Prefer the session that just wrote (manual MCP configs don't always
-    // inject OPENCODE_SESSION_ID), then fall back to the environment.
+    // inject OPENCODE_SESSION_ID), then the caller's hint (clear/delete has
+    // no entry to derive a session from), then the environment.
     const writtenSession = Array.isArray(result)
       ? result.find((entry) => entry && entry.sessionId)?.sessionId
       : result && result.sessionId;
     try {
-      syncTaskList(state, { sessionID: writtenSession });
+      syncTaskList(state, { sessionID: writtenSession || sessionHint, stateFile });
     } catch {
       // The optional mirror is best-effort; never fail a progress write.
     }
@@ -672,7 +727,7 @@ function clearProgress(id, stateFile = DEFAULT_STATE_FILE, sessionId) {
   return mutateState((state) => {
     delete state.entries[key];
     return null;
-  }, stateFile);
+  }, stateFile, resolvedSessionId);
 }
 
 function getAllProgress(stateFile = DEFAULT_STATE_FILE) {

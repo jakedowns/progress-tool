@@ -29,4 +29,6 @@ plugin/node_modules.darwin*
 ses_*-tasklist.md
 
 # Local tasklists - New Format
-tasklist-ses*.md
+tasklist-*.md
+# location 0: hidden per-project mirror directory
+.progress/

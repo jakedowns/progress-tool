@@ -19,6 +19,11 @@
 import { existsSync, readdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import {
+  normalizeTaskListDetail,
+  normalizeTaskListLocation,
+  normalizeTaskListView,
+} from "./tasklist-prefs.js";
 
 /** Published companion package, used by the `npx` fallback. */
 export const MCP_PACKAGE = "@jakedowns/progress-tool-mcp";
@@ -171,6 +176,9 @@ export function resolveMcpLaunch(entry: string, probe: RuntimeProbe = {}): McpLa
 /**
  * Map the optional local task-list plugin options to MCP server environment
  * variables. Returns undefined when the mirror is disabled (the default).
+ *
+ * There is deliberately no path option: the location enum picks one of three
+ * fixed directories, and the filename is always `tasklist-<session>.md`.
  */
 function normalizeRelayMirrorLevel(value: unknown): 0 | 1 | 2 {
   const text = String(value ?? "").trim().toLowerCase();
@@ -184,18 +192,16 @@ export function taskListEnvironment(
   options: Record<string, unknown> | undefined
 ): Record<string, string> | undefined {
   const raw = options ?? {};
-  const configuredPath =
-    typeof raw.taskListPath === "string" ? raw.taskListPath.trim() : "";
-  const enabled = raw.taskListFile === true || configuredPath.length > 0;
-  if (!enabled) return undefined;
-  const environment: Record<string, string> = {
+  if (raw.taskListFile !== true) return undefined;
+  return {
     PROGRESS_TASKLIST: "1",
+    PROGRESS_TASKLIST_LOCATION: String(normalizeTaskListLocation(raw.taskListLocation)),
+    PROGRESS_TASKLIST_MODE: normalizeTaskListView(raw.taskListView),
+    PROGRESS_TASKLIST_DETAIL: normalizeTaskListDetail(raw.taskListDetail),
     PROGRESS_TASKLIST_ORDER:
       raw.taskListOrder === "oldest-first" ? "oldest-first" : "newest-first",
     PROGRESS_TASKLIST_RELAY_LEVEL: String(
       normalizeRelayMirrorLevel(raw.relayMirrorLevel)
     ),
   };
-  if (configuredPath) environment.PROGRESS_TASKLIST_PATH = configuredPath;
-  return environment;
 }

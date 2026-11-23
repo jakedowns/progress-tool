@@ -20,6 +20,7 @@ import {
   softClearSession,
   writeDismissal,
 } from "./state.js";
+import { readTaskListStatus, toggleTaskListMode } from "./tasklist-prefs.js";
 import { normalizeRefreshMs } from "./tree.js";
 import {
   PROGRESS_RULES,
@@ -277,6 +278,19 @@ export default Plugin.define({
           cleared,
           bytes: Buffer.byteLength(JSON.stringify(scoped)),
         };
+      },
+      taskListStatus: async () =>
+        readTaskListStatus() ?? {
+          enabled: false,
+          mode: "ui",
+          detail: "code",
+          location: 1,
+          order: "newest-first",
+        },
+      toggleTaskListMode: async () => {
+        const mode = toggleTaskListMode();
+        console.log(`[opencode-progress] v${pluginVersion} task-list mode=${mode}`);
+        return { ok: true, mode };
       },
     });
 
