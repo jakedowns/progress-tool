@@ -43,25 +43,18 @@ function probe(files, overrides = {}) {
   };
 }
 
-test('task-list mirror env is opt-in and maps order/path', () => {
+test('task-list mirror env is opt-in and maps the enum options', () => {
   assert.equal(taskListEnvironment(undefined), undefined);
   assert.equal(taskListEnvironment({}), undefined);
   assert.equal(taskListEnvironment({ taskListFile: false }), undefined);
+  assert.equal(taskListEnvironment({ taskListPath: '/tmp/tasks.md' }), undefined, 'raw paths are gone');
 
   assert.deepEqual(taskListEnvironment({ taskListFile: true }), {
     PROGRESS_TASKLIST: '1',
+    PROGRESS_TASKLIST_LOCATION: '1',
+    PROGRESS_TASKLIST_MODE: 'ui',
+    PROGRESS_TASKLIST_DETAIL: 'code',
     PROGRESS_TASKLIST_ORDER: 'newest-first',
-    PROGRESS_TASKLIST_RELAY_LEVEL: '0',
-  });
-  assert.deepEqual(taskListEnvironment({ taskListPath: '/tmp/tasks.md' }), {
-    PROGRESS_TASKLIST: '1',
-    PROGRESS_TASKLIST_ORDER: 'newest-first',
-    PROGRESS_TASKLIST_RELAY_LEVEL: '0',
-    PROGRESS_TASKLIST_PATH: '/tmp/tasks.md',
-  });
-  assert.deepEqual(taskListEnvironment({ taskListFile: true, taskListOrder: 'oldest-first' }), {
-    PROGRESS_TASKLIST: '1',
-    PROGRESS_TASKLIST_ORDER: 'oldest-first',
     PROGRESS_TASKLIST_RELAY_LEVEL: '0',
   });
   assert.equal(
@@ -83,6 +76,39 @@ test('task-list mirror env is opt-in and maps order/path', () => {
     taskListEnvironment({ taskListFile: true, relayMirrorLevel: 99 })
       .PROGRESS_TASKLIST_RELAY_LEVEL,
     '0'
+  );
+  assert.deepEqual(
+    taskListEnvironment({
+      taskListFile: true,
+      taskListLocation: 0,
+      taskListView: 'raw',
+      taskListDetail: 'escaped',
+      taskListOrder: 'oldest-first',
+    }),
+    {
+      PROGRESS_TASKLIST: '1',
+      PROGRESS_TASKLIST_LOCATION: '0',
+      PROGRESS_TASKLIST_MODE: 'raw',
+      PROGRESS_TASKLIST_DETAIL: 'escaped',
+      PROGRESS_TASKLIST_ORDER: 'oldest-first',
+      PROGRESS_TASKLIST_RELAY_LEVEL: '0',
+    }
+  );
+  assert.deepEqual(
+    taskListEnvironment({
+      taskListFile: true,
+      taskListLocation: 99,
+      taskListView: 'bogus',
+      taskListDetail: 'bogus',
+    }),
+    {
+      PROGRESS_TASKLIST: '1',
+      PROGRESS_TASKLIST_LOCATION: '1',
+      PROGRESS_TASKLIST_MODE: 'ui',
+      PROGRESS_TASKLIST_DETAIL: 'code',
+      PROGRESS_TASKLIST_ORDER: 'newest-first',
+      PROGRESS_TASKLIST_RELAY_LEVEL: '0',
+    }
   );
 });
 

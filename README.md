@@ -24,7 +24,7 @@ Implements the [Agent Progress Tool proposal](https://gist.github.com/jakedowns/
 for OpenCode 2, and is written as a portable reference implementation any
 harness can copy or adapt.
 
-**Versions:** MCP server `2.10.2` · OpenCode plugin `2.19.0`
+**Versions:** MCP server `2.11.0` · OpenCode plugin `2.20.0`
 
 > **Advanced docs:** [schema, relay internals, state store, architecture, all
 > options, file map →](./README-advanced.md)
@@ -164,7 +164,9 @@ Multi-line titles and details accept real newlines, `\n` / `\r\n`, or `<br>`.
 | `tuiLayout` | TUI placement: `"composer"` (default) or `"sidebar"` |
 | `tuiSidebarRows` | Sidebar viewport height in rows (default 0 = full tree, sidebar scrolls; max 100) |
 | `taskListFile` | Mirror tasks to a local Markdown checklist (default off) |
-| `taskListPath` | Checklist path; empty = `<sessionID>-tasklist.md` in the MCP cwd |
+| `taskListLocation` | `1` = project root (default), `0` = `.progress/`, `2` = `~/.opencode-progress/` |
+| `taskListView` | `"ui"` (hide dismissed + rolled-up status) or `"raw"` |
+| `taskListDetail` | `"code"` (safe fenced block), `"escaped"`, or `"raw"` |
 | `taskListOrder` | `"newest-first"` (default) or `"oldest-first"` |
 | `relayMirrorLevel` | `0` off (default), `1` all relay entries, `2` relay errors only |
 | `expandRootsByDefault` | Expand trees by default (default collapsed) |
@@ -175,6 +177,8 @@ Multi-line titles and details accept real newlines, `\n` / `\r\n`, or `<br>`.
 | `barStyle` | `"blocks"` or `"emoji"` |
 | `refreshMs` | View refresh interval (default 1000) |
 | `retainDeletedSessionProgress` | Keep store entries when a session is deleted (default off) |
+
+The optional task-list mirror is always written as `tasklist-<session>.md`. Add `tasklist-*.md` (and `.progress/` if you use location `0`) to your `.gitignore` — it contains plaintext task titles and details. When enabled, the palette command **Progress: task-list mirror view** switches between the UI view and the raw store view.
 
 [Full option list →](./README-advanced.md#plugin-options-full-list)
 

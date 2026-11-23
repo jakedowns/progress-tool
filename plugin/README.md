@@ -55,6 +55,9 @@ Prefer manual configuration? Add to `opencode.json`:
   done/error. Parses `OSC 9;4` progress sequences natively.
 - **Desktop pill** — `(N · agg%)` title, collapsible trees (animated),
   dismissals that persist, started/last-updated tooltips, nudge telemetry.
+- **Optional Markdown mirror** — opt-in `tasklist-<session>.md` under the
+  project, `.progress/`, or `~/.opencode-progress/`; UI/raw views, safe
+  code-block detail, and a palette toggle.
 - **Guidance that adapts** — injected rules, skill playbooks, pre-flight relay
   hints, strict-mode nudges (silent runs, stale progress with one synthetic
   escalation after 3 entry reminders), a turn-end idle reminder, and an
@@ -77,11 +80,11 @@ Pass under the plugin entry's `options` in `opencode.json`:
 | `demoSkills` | `false` | also register the demo skills (`osc-demo`, `tree-demo`) |
 | `autoRegisterMcp` | `true` | register `@jakedowns/progress-tool-mcp` automatically |
 | `taskListFile` | `false` | mirror the session's tasks to a local Markdown checklist |
-| `taskListPath` | `""` | checklist path; empty = `<sessionID>-tasklist.md` in the MCP working dir |
+| `taskListLocation` | `1` | `0` = `.progress/`, `1` = project root, `2` = `~/.opencode-progress/` |
+| `taskListView` | `"ui"` | `"ui"` hides dismissed entries and rolls status up; `"raw"` keeps everything |
+| `taskListDetail` | `"code"` | `"code"` fenced block, `"escaped"` inline, `"raw"` unescaped |
 | `taskListOrder` | `"newest-first"` | `"newest-first"` (new at top) or `"oldest-first"` (append at bottom) |
 | `relayMirrorLevel` | `0` | `0` omit relay-created entries, `1` mirror all relay entries, `2` relay errors only |
-
-These options are passed to the MCP server when the plugin auto-registers it. If you configure `progress-server` manually, put `PROGRESS_TASKLIST` / `PROGRESS_TASKLIST_PATH` / `PROGRESS_TASKLIST_ORDER` / `PROGRESS_TASKLIST_RELAY_LEVEL` in that server's `environment` instead (see the MCP README).
 | `mcpRuntime` | auto | absolute path to the `node`/`bun` used to spawn the MCP server (auto-detected; set this if detection picks wrong) |
 | `strictMode` | `"nudge"` | `"nudge"` / `"force"` / `"off"` tool-call monitor |
 | `staleEscalateAfter` | `3` | entry-based stale reminders before one synthetic escalation (`0` disables) |
@@ -123,6 +126,20 @@ cannot end on a note.
 
 Length never skips a note. Budget and cooldown skips return a result that points
 the agent at the progress tool for any further backchannel updates in that turn.
+
+---
+
+### Local task-list mirror
+
+`taskListFile: true` writes `tasklist-<session>.md` on progress writes. It is disabled by default and never calls the model.
+
+- **Location:** `0` → `<project>/.progress/tasklist-<session>.md`; `1` → `<project>/tasklist-<session>.md` (default); `2` → `~/.opencode-progress/tasklist-<session>.md`.
+- **View:** `ui` (default) hides dismissed/cleared entries and rolls child status up so the Markdown matches the UI. `raw` keeps everything and shows stored status. The palette command **Progress: task-list mirror view** appears once the mirror is active and toggles this; the change applies to the next render, not retroactively to existing entries.
+- **Detail:** a fenced code block by default. `taskListDetail: "escaped"` renders inline Markdown-escaped text; `"raw"` is an explicit opt-in for trusted content.
+- **Hygiene/security:** the file is plaintext and may contain sensitive task titles/details. Add `tasklist-*.md` (and `.progress/` if you use location `0`) to `.gitignore`, or use location `2` to keep it outside the repo. It never overwrites a non-empty file unless that file starts with the progress-tool mirror marker.
+- **Manual MCP config:** plugin options are only mapped when the plugin auto-registers `progress-server`. If you configure that server yourself, set `PROGRESS_TASKLIST` / `PROGRESS_TASKLIST_LOCATION` / `PROGRESS_TASKLIST_MODE` / `PROGRESS_TASKLIST_DETAIL` / `PROGRESS_TASKLIST_ORDER` / `PROGRESS_TASKLIST_RELAY_LEVEL` in its `environment` instead (see the MCP README).
+- **Relay entries:** `relayMirrorLevel` defaults to `0` (omit relay-created command entries); `1` mirrors every relay entry, and `2` mirrors only relay entries whose current status is `error`. Agent-created tasks always mirror.
+- **Custom state path:** prefs/status live next to the state file. If you override `PROGRESS_STATE_PATH` only in the MCP server's environment, also export it for the OpenCode/plugin process, or the palette toggle will write its preference beside the default state file.
 
 State lives in `~/.opencode-progress-state.json` (override with
 `PROGRESS_STATE_PATH`). Retention is opt-in (`PROGRESS_AUTO_PRUNE_S`); entries

@@ -355,6 +355,26 @@ export default Plugin.define({
     const globalRpc = () =>
       ctx.client.rpc(ProgressRpc) as unknown as ProgressClient;
 
+    type TaskListViewStatus = {
+      enabled: boolean;
+      mode: "ui" | "raw";
+      detail: "code" | "escaped" | "raw";
+      location: 0 | 1 | 2;
+      order: "newest-first" | "oldest-first";
+    };
+    const [taskListStatus, setTaskListStatus] = createSignal<TaskListViewStatus | null>(null);
+    const refreshTaskListStatus = async () => {
+      try {
+        const status = await withTimeout(ctx.client.rpc(ProgressRpc).taskListStatus({}), 4000);
+        if (!alive) return;
+        setTaskListStatus(status as TaskListViewStatus);
+      } catch {
+        // Status is optional; the mirror may simply be disabled.
+      }
+    };
+    void refreshTaskListStatus();
+    const taskListTimer = setInterval(() => void refreshTaskListStatus(), 10_000);
+
     const refresh = async () => {
       if (inFlight || interacting() || Date.now() < suspendUntil) return;
       inFlight = true;
@@ -1037,10 +1057,41 @@ export default Plugin.define({
       ),
     }));
 
+    const toggleTaskListView = async () => {
+      try {
+        const result = await ctx.client.rpc(ProgressRpc).toggleTaskListMode({});
+        setTaskListStatus((prev) => (prev ? { ...prev, mode: result.mode } : prev));
+        ctx.toast.show({
+          title: "Task-list mirror",
+          description: result.mode === "raw" ? "Raw store view" : "Matching the UI",
+          variant: "success",
+        });
+      } catch (error) {
+        ctx.toast.show({
+          title: "Task-list toggle failed",
+          description: String(error),
+          variant: "error",
+        });
+      }
+    };
+
+    ctx.add(Command, () => ({
+      id: "progress.toggle-tasklist-view",
+      title: "Progress: task-list mirror view (match UI/raw)",
+      description: "Toggle the Markdown task list between the UI view and the raw store view",
+      keywords: "progress tasklist markdown mirror raw ui",
+      section: "general",
+      get enabled() {
+        return taskListStatus()?.enabled === true;
+      },
+      run: () => void toggleTaskListView(),
+    }));
+
     return () => {
       alive = false;
       clearInterval(timer);
       unsubscribeUpdated?.();
+      clearInterval(taskListTimer);
     };
   },
 });

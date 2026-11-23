@@ -18,6 +18,11 @@ import { Plugin, usePlugin } from "@opencode/plugin/tui";
 type TuiContext = Parameters<Parameters<typeof Plugin.define>[0]["setup"]>[0];
 import { readProgressState, writeDismissal, softClearSession, hardDeleteSession, hardDeleteAll } from "./state.js";
 import {
+  readTaskListStatus,
+  toggleTaskListMode as toggleTaskListModePref,
+  type TaskListStatus,
+} from "./tasklist-prefs.js";
+import {
   buildTree,
   barParts,
   countActive,
@@ -48,6 +53,10 @@ import {
 import type { ProgressEntry, ProgressStatus, ProgressState, TreeNode } from "./types.js";
 
 const [state, setState] = createSignal<ProgressState>(readProgressState());
+/** Mirror status is written by the MCP server next to the state file. */
+const [taskListStatus, setTaskListStatus] = createSignal<TaskListStatus | null>(
+  readTaskListStatus()
+);
 /** Root keys expanded per session; replaced wholesale so Solid sees the change. */
 const [expandedBySession, setExpandedBySession] = createSignal<
   Record<string, Set<string>>
@@ -73,8 +82,12 @@ let setCollapsed: ((mutation: (draft: { value: boolean }) => void) => void) | un
 function startPolling(refreshMs: number): () => void {
   pollers += 1;
   setState(readProgressState());
+  setTaskListStatus(readTaskListStatus());
   if (!timer) {
-    timer = setInterval(() => setState(readProgressState()), refreshMs);
+    timer = setInterval(() => {
+      setState(readProgressState());
+      setTaskListStatus(readTaskListStatus());
+    }, refreshMs);
   }
   return () => {
     pollers -= 1;
@@ -780,6 +793,26 @@ export default Plugin.define({
           group: "progress",
           palette: true,
           run: () => hardClearStoreCommand(context),
+        },
+        {
+          id: "progress.toggle-tasklist-view",
+          title: "Progress: task-list mirror view (match UI/raw)",
+          description: "Toggle the Markdown task list between the UI view and the raw store view",
+          group: "progress",
+          palette: true,
+          enabled: () => taskListStatus()?.enabled === true,
+          run: () => {
+            const current = taskListStatus();
+            const mode = toggleTaskListModePref(current?.mode ?? "ui");
+            if (current) setTaskListStatus({ ...current, mode });
+            context.ui.toast.show({
+              message:
+                mode === "raw"
+                  ? "Task-list mirror: raw store view"
+                  : "Task-list mirror: matching the UI",
+              variant: "success",
+            });
+          },
         },
       ],
     }));
