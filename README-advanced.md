@@ -373,10 +373,10 @@ There is no requirement that the data plane be this CLI. A harness can implement
 
 ```bash
 # MCP server, relay, concurrency, attribution
-cd mcp-server && npm test        # 39 tests
+cd mcp-server && npm test        # 57 tests
 
 # Plugin: view helpers, lifecycle, skills, TUI packaging
-cd plugin && npm test            # 78 tests
+cd plugin && npm test            # 138 tests
 ```
 
 The MCP smoke suite covers one-shot emits, session resolution and isolation, subagent mapping and adoption, pipe mode, wrap mode with a failing exit code, field preservation when attaching a relay, the MCP handshake and relay hint, and 16 concurrent writers against one state file.
@@ -461,6 +461,21 @@ Because it is a tool call, the turn cannot end on a note.
 Budget and cooldown skips return a result that points the agent at the `progress`
 tool for any further backchannel updates in that turn.
 
+**Notes lane.** Every accepted note is also persisted in the shared state
+document (last 20 per author session, newest first) — independently of the
+transcript and of `sayChatNotes`:
+
+- **TUI:** a dim latest-note line above the tree (`notes: … (N notes)`); click
+  it, or pick **Notes (N)** in `/progress`, to read the history.
+- **Desktop/web:** a second, optional composer pill showing the latest snippet,
+  warning-tinted for `blocked`/`question`, with the full history in its popover.
+  It is composer-mode only; sidebar mode stays task-tree-only.
+- **Subagents:** child-session notes roll up to the parent view (prefixed
+  `[Subagent (Explore)]`), and each child keeps its own note budget.
+- **Lifecycle:** notes survive **Progress: clear list**; they are deleted with
+  the session and by the hard-clear commands. The per-session ring buffer keeps
+  the store bounded.
+
 ---
 
 ### Local task-list mirror
@@ -501,7 +516,7 @@ There is deliberately no free-form path, so project config cannot point it at
 | Out-of-band relay (pipe, wrap, emit) | `mcp-server/relay.js` |
 | Subagent usage report CLI | `mcp-server/report.js` |
 | `progress-relay` / `progress-emit` bin shims | `mcp-server/progress-relay.js`, `mcp-server/progress-emit.js` |
-| MCP test suite (55 tests) | `mcp-server/test/smoke.test.js`, `mcp-server/test/task-list.test.js` |
+| MCP test suite (57 tests) | `mcp-server/test/smoke.test.js`, `mcp-server/test/task-list.test.js` |
 | OpenCode plugin: server part (RPC, hooks, nudges) | `plugin/src/index.ts` |
 | Desktop/web composer pill | `plugin/src/gui.tsx` |
 | TUI composer footer + bounded tree | `plugin/src/tui.tsx`, `plugin/src/tui-view.ts` |
@@ -513,6 +528,7 @@ There is deliberately no free-form path, so project config cannot point it at
 | Subagent prompt stamping | `plugin/src/subagent.ts` |
 | Skill registry tiers | `plugin/src/skills.ts` |
 | MCP launch resolution | `plugin/src/mcp.ts` |
+| `say` narration tool + notes persistence | `plugin/src/say.ts`, `plugin/src/state.ts` |
 | Nudge telemetry | `plugin/src/telemetry.ts` |
 | Feedback record/read | `plugin/src/feedback.ts` |
 | Types | `plugin/src/types.ts` |
@@ -521,7 +537,7 @@ There is deliberately no free-form path, so project config cannot point it at
 | Prebuilt desktop/web bundle | `plugin/dist/gui-experimental.cjs` |
 | Precompiled TUI entry | `plugin/dist/tui.js` |
 | TUI build script | `plugin/scripts/build-tui.mjs` |
-| Plugin test suite (117 tests) | `plugin/test/*.test.cjs` |
+| Plugin test suite (138 tests) | `plugin/test/*.test.cjs` |
 | Standalone desktop GUI server | `progress-gui-server.js` |
 | Launch / setup scripts | `launch-gui.sh`, `setup.sh` |
 | GUI build script (stages off the repo mount) | `scripts/build-gui.sh` |

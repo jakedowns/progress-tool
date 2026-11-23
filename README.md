@@ -24,7 +24,7 @@ Implements the [Agent Progress Tool proposal](https://gist.github.com/jakedowns/
 for OpenCode 2, and is written as a portable reference implementation any
 harness can copy or adapt.
 
-**Versions:** MCP server `2.12.0` · OpenCode plugin `2.21.0`
+**Versions:** MCP server `2.12.0` · OpenCode plugin `2.22.0`
 
 > **Advanced docs:** [schema, relay internals, state store, architecture, all
 > options, file map →](./README-advanced.md)
@@ -152,6 +152,13 @@ Multi-line titles and details accept real newlines, `\n` / `\r\n`, or `<br>`.
   entire progress store* requires typing `DELETE`. Deleting a chat purges its
   store entries unless `retainDeletedSessionProgress` is enabled; the mirrored
   Markdown tasklist is never removed.
+- **Narration (`say`, opt-in):** set `say: true` to give the agent a mid-turn
+  note tool. The TUI shows a dim latest-note line above the tree (click it, or
+  `/progress` → **Notes**, for history); desktop/web get a second composer pill
+  with the latest snippet and a history popover (warning-tinted for
+  `blocked`/`question`). Notes survive clear-list, roll child sessions up to the
+  parent, and are purged with the session or a hard clear. A note never ends the
+  turn.
 - **Subagents:** child sessions are mapped to their parent automatically
   (`session.created` → `~/.opencode-progress-sessions.json`), and the parent id
   is stamped into subagent prompts as a fallback. Roots created by a child
@@ -184,6 +191,7 @@ Multi-line titles and details accept real newlines, `\n` / `\r\n`, or `<br>`.
 | `demoSkills` | Register the demo skills (default off) |
 | `barStyle` | `"blocks"` or `"emoji"` |
 | `refreshMs` | View refresh interval (default 1000) |
+| `say` | Enable the opt-in narration tool and notes lane (default off) |
 | `retainDeletedSessionProgress` | Keep store entries when a session is deleted (default off) |
 
 The optional task-list mirror is always written as `tasklist-<session>.md`. Add `tasklist-*.md` (and `.progress/` if you use location `0`) to your `.gitignore` — it contains plaintext task titles and details. When enabled, the palette command **Progress: task-list mirror view** switches between the UI view and the raw store view.
@@ -210,12 +218,15 @@ Register the checkout (desktop/browsers read the **global** config):
 }
 ```
 
-For the TUI, add the same entry to `~/.config/opencode/cli.json`. `opencode
-plugin add` only accepts npm/Git specifiers, so a local checkout must be
-registered via config. Build details and the precompiled-TUI rationale live in
-the [advanced guide](./README-advanced.md#build-notes).
+No separate `cli.json` entry is needed in V2: the TUI part loads with the
+server plugin. `opencode plugin add` only accepts npm/Git specifiers, so a local
+checkout must be registered via config. Build details and the precompiled-TUI
+rationale live in the [advanced guide](./README-advanced.md#build-notes).
 
-Verify with `opencode plugin list` (features `server`, `tui`, `rpc`, `gui`).
+Reload the window or restart the service. The plugin server log shows
+`loading plugin … entrypoint=…/src/index.ts`, and the pill appears above the
+composer. (`opencode plugin list` only lists registry-installed packages, not
+local checkouts.)
 
 **Standalone GUI:** `./launch-gui.sh`, then open `http://localhost:8765`.
 
@@ -243,8 +254,9 @@ The value is the plugin id, not the package name. Only `setup` runs on the web
 opencode mcp remove progress-server
 ```
 
-Remove the plugin entry from `~/.config/opencode/opencode.json` and, if used,
-`~/.config/opencode/cli.json`. For a published package,
+Remove the plugin entry from `~/.config/opencode/opencode.json`. V2 needs no
+`cli.json` entry; remove the old one if an earlier version added it. For a
+published package,
 `opencode plugin remove <package>` also works. If you linked the relay:
 `cd mcp-server && npm unlink -g progress-mcp-server`.
 

@@ -116,6 +116,12 @@ admitted as a durable synthetic note (`resume: false`), so the user does not hav
 to open the thought trace while a long tool runs. It is a tool call, so the turn
 cannot end on a note.
 
+Accepted notes also feed a small persistent lane (last 20 per session): the TUI
+renders the latest note above the tree and lists history in `/progress`, while
+desktop/web get a second composer pill with the latest snippet and a popover.
+Child-session notes roll up to the parent. Notes survive clear-list and are
+removed with the session or a hard clear.
+
 ```jsonc
 { "options": { "say": true } }
 ```
