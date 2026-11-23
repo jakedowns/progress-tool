@@ -47,8 +47,26 @@ export interface ProgressEntry {
   subagentAgent?: string | null;
 }
 
+export type SayNoteKind = "intent" | "update" | "blocked" | "question";
+
+/** One durable mid-turn narration note; rendered outside the task tree. */
+export interface SayNote {
+  /** Stable id, unique within the store. */
+  id: string;
+  /** Session that authored the note (may be a subagent). */
+  sessionId: string;
+  text: string;
+  kind: SayNoteKind;
+  eta?: string | null;
+  /** Subagent type when the author is a child session. */
+  agent?: string | null;
+  at: number;
+}
+
 export interface ProgressState {
   entries: Record<string, ProgressEntry>;
+  /** Newest-first note ring buffer per author session (see state.ts). */
+  notes?: Record<string, SayNote[]>;
   version?: number;
 }
 

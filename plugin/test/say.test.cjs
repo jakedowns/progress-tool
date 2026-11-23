@@ -195,6 +195,46 @@ test('controller fans out to progress then synthetic with resume:false', async (
   assert.equal(controller.get('ses_say_1').count, 1);
 });
 
+test('accepted notes persist through recordNote with kind and eta', async () => {
+  const recorded = [];
+  const controller = createSayController(
+    enabled({ sayCooldownMs: 0 }),
+    { synthetic: async () => {}, recordNote: (note) => recorded.push(note) }
+  );
+
+  const result = await controller.tool.execute(
+    { text: 'Persisting this note for the notes lane.', kind: 'update', eta: '~2 min' },
+    { sessionID: 'ses_say_notes', progress: async () => {} }
+  );
+
+  assert.match(result.content, /Noted/);
+  assert.equal(recorded.length, 1);
+  assert.equal(recorded[0].sessionID, 'ses_say_notes');
+  assert.equal(recorded[0].text, 'Persisting this note for the notes lane.');
+  assert.equal(recorded[0].kind, 'update');
+  assert.equal(recorded[0].eta, '~2 min');
+  assert.equal(typeof recorded[0].at, 'number');
+});
+
+test('recordNote still runs when chat notes are disabled, and skips on budget', async () => {
+  const recorded = [];
+  const controller = createSayController(
+    enabled({ sayChatNotes: false, sayBudgetPerTurn: 1, sayCooldownMs: 0 }),
+    { recordNote: (note) => recorded.push(note) }
+  );
+
+  await controller.tool.execute(
+    { text: 'First and only accepted note.' },
+    { sessionID: 'ses_say_notes2', progress: async () => {} }
+  );
+  await controller.tool.execute(
+    { text: 'Second note is over budget.' },
+    { sessionID: 'ses_say_notes2', progress: async () => {} }
+  );
+
+  assert.equal(recorded.length, 1, 'only accepted notes are persisted');
+});
+
 test('controller skips synthetic when chat notes are disabled', async () => {
   const calls = [];
   const controller = createSayController(

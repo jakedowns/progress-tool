@@ -16,7 +16,11 @@ import {
   hardDeleteAll,
   hardDeleteSession,
   readProgressState,
+  readSessionMap,
   recordChildSession,
+  recordSayNote,
+  rootSessionFor,
+  sayNotesForSession,
   softClearSession,
   writeDismissal,
 } from "./state.js";
@@ -151,6 +155,17 @@ export default Plugin.define({
         sayController = createSayController(
           sayOptions,
           {
+            recordNote: (note) => {
+              const link = readSessionMap()[note.sessionID];
+              recordSayNote({
+                sessionID: note.sessionID,
+                text: note.text,
+                kind: note.kind,
+                eta: note.eta ?? null,
+                agent: link?.agent ?? null,
+                at: note.at,
+              });
+            },
             synthetic: (input) => ctx.session.synthetic(input),
             log: (message, error) =>
               console.warn(`[opencode-progress] ${message}`, error ?? ""),
@@ -181,7 +196,9 @@ export default Plugin.define({
     const hasProgressTool = (tools: Record<string, unknown> | undefined): boolean =>
       Boolean(tools) && Object.keys(tools ?? {}).some((name) => /progress/i.test(name));
 
-    let signature = JSON.stringify(readProgressState().entries ?? {});
+    const stateSignature = (state: ReturnType<typeof readProgressState>) =>
+      JSON.stringify([state.entries ?? {}, state.notes ?? {}]);
+    let signature = stateSignature(readProgressState());
 
     const registration = await ctx.rpc.register(ProgressRpc, {
       list: async (input) => {
@@ -204,6 +221,27 @@ export default Plugin.define({
           }
           entries[key] = entry;
         }
+        const links = readSessionMap();
+        const allNotes = Object.values(state.notes ?? {})
+          .flatMap((list) => (Array.isArray(list) ? list : []))
+          .sort((a, b) => (b.at ?? 0) - (a.at ?? 0));
+        const selectedNotes =
+          scope === "all"
+            ? allNotes.slice(0, 200)
+            : sayNotesForSession(state, sessionID, { links });
+        const notes = selectedNotes.map((note) => {
+          const wire: Record<string, unknown> = {
+            id: note.id,
+            sessionId: note.sessionId,
+            rootSessionId: rootSessionFor(note.sessionId, links),
+            text: note.text,
+            kind: note.kind,
+            at: note.at,
+          };
+          if (note.eta) wire.eta = note.eta;
+          if (note.agent) wire.agent = note.agent;
+          return wire;
+        });
         let maxUpdated = 0;
         let cleared = 0;
         for (const entry of Object.values(entries)) {
@@ -218,8 +256,9 @@ export default Plugin.define({
         }
         return {
           entries,
+          notes,
           updatedAt: Date.now(),
-          revision: `${Object.keys(entries).length}:${maxUpdated}:${cleared}`,
+          revision: `${Object.keys(entries).length}:${maxUpdated}:${cleared}:${allNotes.length}:${allNotes[0]?.at ?? 0}`,
         };
       },
       dismiss: async ({ key, status }) => {
@@ -298,7 +337,7 @@ export default Plugin.define({
     const retainDeletedSessionProgress = ctx.options?.retainDeletedSessionProgress === true;
 
     const timer = setInterval(() => {
-      const next = JSON.stringify(readProgressState().entries ?? {});
+      const next = stateSignature(readProgressState());
       if (next === signature) return;
       signature = next;
       void registration.events.emit("updated", { updatedAt: Date.now() }).catch(() => {});

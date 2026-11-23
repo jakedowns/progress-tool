@@ -64,6 +64,13 @@ export interface SayToolContext {
 }
 
 export interface SayDeps {
+  recordNote?: (input: {
+    sessionID: string;
+    text: string;
+    kind: SayKind;
+    eta?: string | null;
+    at: number;
+  }) => void;
   synthetic?: (input: {
     sessionID: string;
     text: string;
@@ -282,6 +289,19 @@ export function createSayController(
           await context.progress?.({ status: decision.text });
         } catch (error) {
           deps.log?.("say progress update failed", error);
+        }
+
+        try {
+          deps.recordNote?.({
+            sessionID: context.sessionID,
+            text: decision.text,
+            kind: input?.kind ?? "intent",
+            eta: input?.eta ?? null,
+            at: now,
+          });
+        } catch (error) {
+          // The note lanes are additive; never fail the tool on persistence.
+          deps.log?.("say note persistence failed", error);
         }
 
         if (options.chatNotes && deps.synthetic) {

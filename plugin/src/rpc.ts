@@ -23,10 +23,31 @@ export const ProgressRpc = Rpc.define({
         type: "object",
         properties: {
           entries: { type: "object", additionalProperties: true },
+          notes: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "string" },
+                sessionId: { type: "string" },
+                rootSessionId: { type: "string" },
+                text: { type: "string" },
+                kind: {
+                  type: "string",
+                  enum: ["intent", "update", "blocked", "question"],
+                },
+                eta: { type: "string" },
+                agent: { type: "string" },
+                at: { type: "number" },
+              },
+              required: ["id", "sessionId", "rootSessionId", "text", "kind", "at"],
+              additionalProperties: false,
+            },
+          },
           updatedAt: { type: "number" },
           revision: { type: "string" },
         },
-        required: ["entries", "updatedAt"],
+        required: ["entries", "notes", "updatedAt"],
         additionalProperties: false,
       },
     },

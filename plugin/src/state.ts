@@ -8,7 +8,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { ProgressEntry, ProgressState } from "./types.js";
+import type { ProgressEntry, ProgressState, SayNote, SayNoteKind } from "./types.js";
 
 export function stateFilePath(): string {
   return (
@@ -397,6 +397,92 @@ function mutateStateFile<T>(
   }
 }
 
+export const SAY_NOTES_PER_SESSION = 20;
+const SAY_NOTE_KINDS: readonly SayNoteKind[] = ["intent", "update", "blocked", "question"];
+
+/** Append one note to its author session's ring buffer (newest first). */
+export function recordSayNote(input: {
+  sessionID: string;
+  text: string;
+  kind?: SayNoteKind;
+  eta?: string | null;
+  agent?: string | null;
+  at?: number;
+  limit?: number;
+}): SayNote | undefined {
+  const sessionID = String(input.sessionID ?? "");
+  const text = String(input.text ?? "").trim();
+  if (!sessionID || !text) return undefined;
+  const at = typeof input.at === "number" ? input.at : Date.now();
+  const limit = Math.max(
+    1,
+    Math.min(100, Math.floor(input.limit ?? SAY_NOTES_PER_SESSION))
+  );
+  const kind = SAY_NOTE_KINDS.includes(input.kind as SayNoteKind)
+    ? (input.kind as SayNoteKind)
+    : "intent";
+  const note: SayNote = {
+    id: `${sessionID}:${at.toString(36)}:${Math.random().toString(36).slice(2, 8)}`,
+    sessionId: sessionID,
+    text,
+    kind,
+    eta: input.eta ?? null,
+    agent: input.agent ?? null,
+    at,
+  };
+  return mutateStateFile((state) => {
+    const notes = (state.notes ??= {});
+    notes[sessionID] = [note, ...(notes[sessionID] ?? [])].slice(0, limit);
+    return { value: note, write: true };
+  });
+}
+
+/** Follow child→parent links to the root session (cycle-safe). */
+export function rootSessionFor(
+  sessionID: string,
+  links: Record<string, SessionLink> = readSessionMap()
+): string {
+  let current = sessionID;
+  const seen = new Set<string>();
+  while (current && !seen.has(current) && seen.size < 32) {
+    seen.add(current);
+    const parent = links[current]?.parentId;
+    if (!parent) break;
+    current = parent;
+  }
+  return current;
+}
+
+/**
+ * Notes for one session, newest first. Child-session notes roll up to their
+ * root; `scope: "all"` (without a session) returns every note in the store.
+ */
+export function sayNotesForSession(
+  state: ProgressState,
+  sessionID?: string,
+  options: {
+    scope?: "session" | "all";
+    limit?: number;
+    links?: Record<string, SessionLink>;
+  } = {}
+): SayNote[] {
+  const limit = Math.max(
+    1,
+    Math.min(200, Math.floor(options.limit ?? SAY_NOTES_PER_SESSION))
+  );
+  const all: SayNote[] = [];
+  for (const list of Object.values(state.notes ?? {})) {
+    if (Array.isArray(list)) all.push(...list);
+  }
+  all.sort((a, b) => (b.at ?? 0) - (a.at ?? 0));
+  if (options.scope === "all" || !sessionID) return all.slice(0, limit);
+  const links = options.links ?? readSessionMap();
+  const root = rootSessionFor(sessionID, links);
+  return all
+    .filter((note) => rootSessionFor(note.sessionId, links) === root)
+    .slice(0, limit);
+}
+
 function belongsToSession(key: string, entry: ProgressEntry, sessionID: string): boolean {
   return entry.sessionId === sessionID || key.startsWith(`${sessionID}:`);
 }
@@ -450,9 +536,16 @@ export function hardDeleteSession(sessionID: string): { removed: number; freedBy
       delete state.entries[key];
       removed++;
     }
+    let notesRemoved = 0;
+    if (state.notes && state.notes[sessionID]) {
+      notesRemoved = Array.isArray(state.notes[sessionID])
+        ? state.notes[sessionID].length
+        : 1;
+      delete state.notes[sessionID];
+    }
     return {
       value: { removed, freedBytes: Math.max(0, before - stateBytes(state)) },
-      write: removed > 0,
+      write: removed > 0 || notesRemoved > 0,
     };
   });
   if (result) {
@@ -473,9 +566,14 @@ export function hardDeleteAll(): { removed: number; freedBytes: number } {
     const before = stateBytes(state);
     removed = Object.keys(state.entries).length;
     state.entries = {};
+    const notesRemoved = Object.values(state.notes ?? {}).reduce(
+      (total, list) => total + (Array.isArray(list) ? list.length : 0),
+      0
+    );
+    state.notes = {};
     return {
       value: { removed, freedBytes: Math.max(0, before - stateBytes(state)) },
-      write: removed > 0,
+      write: removed > 0 || notesRemoved > 0,
     };
   });
   if (result) {
