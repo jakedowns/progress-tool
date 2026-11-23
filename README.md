@@ -7,7 +7,12 @@
 [![license](https://img.shields.io/npm/l/@jakedowns/progress-tool-opencode-plugin?style=flat-square)](./LICENSE)
 
 <img src="https://raw.githubusercontent.com/jakedowns/progress-tool/master/screenshots/1.png" width="300" alt="Progress pill showing a live task tree">
+
 <img src="https://raw.githubusercontent.com/jakedowns/progress-tool/master/screenshots/subagents.png" width="300" alt="Progress pill showing subagent rows">
+
+<img src="https://raw.githubusercontent.com/jakedowns/progress-tool/master/screenshots/tui.png" width="600" alt="Progress pill showing a live task tree with subagent work callouts"> 
+
+<img src="https://raw.githubusercontent.com/jakedowns/progress-tool/master/screenshots/tui2.png" width="600" alt="Progress pill showing a live task tree with subagent work callouts">
 
 Enhanced version of todowrite so coding agents can signal long-running work
 without looking dead, plus a **zero-token-burn out-of-band relay** so the agent
