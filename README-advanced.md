@@ -452,27 +452,52 @@ watching a spinner or digging through the thought trace while a long tool runs.
 Because it is a tool call, the turn cannot end on a note.
 
 - `say`: register the tool and inject its rules. **Default `false`**.
-- `sayMinChars` / `sayMaxChars`: soft target and hard cap (default `180` / `260`). Over-max is clamped at a word boundary; under-min is accepted with a warning. Length never skips a note.
+- `sayMinChars` / `sayMaxChars`: soft target and hard cap (default `180` / `260`). Over-max is clamped at a word boundary; under-min is accepted with a warning. Length never skips a note. Both clamp to `20..600`, with `sayMaxChars` raised to `sayMinChars` when inverted.
 - `sayBudgetPerTurn`: accepted notes per user turn (default `3`).
 - `sayCooldownMs`: minimum gap between accepted notes (default `15000`).
 - `sayChatNotes`: set to `false` for the instant progress line only, without the durable synthetic note.
 - `sayFinalGuard`: if the agent posts a note and then stops without a conclusion, resume the turn once (default `true`).
+- `sayModes`: where note surfaces appear. **Default `["tree"]`**. Accepts a string or an array of `"pill"`, `"toast"`, `"tree"`; `sayMode` is a scalar alias. Unknown values are dropped, duplicates collapse, and an explicit `[]` records notes with no surface. This is view config only: the tool, its budget, and `sayChatNotes` stay independent.
 
 Budget and cooldown skips return a result that points the agent at the `progress`
 tool for any further backchannel updates in that turn.
+
+**Mode matrix.** `pill` is a desktop/web composer capsule; the TUI has no pills,
+so it maps `pill` to the tree line and dedupes when `tree` is also enabled. The
+GUI composer layout has no tree, so `tree` falls back to the pill there.
+
+| mode | TUI | GUI composer layout | GUI sidebar layout |
+|---|---|---|---|
+| `tree` | dim latest-note line above the tree | falls back to the notes pill | latest-note line above the panel tree (plus the pill popover when `pill` is also on) |
+| `pill` | latest-note line (pill has no TUI equivalent) | notes composer pill | notes composer pill |
+| `toast` | one toast per new note | one toast per new note | one toast per new note |
+
+Toasts dedupe by note id and only fire for notes that appear after the view
+loaded; child-session notes roll up to the viewed session with
+`[Subagent (X)]` attribution, and `blocked`/`question` notes use the warning
+variant.
 
 **Notes lane.** Every accepted note is also persisted in the shared state
 document (last 20 per author session, newest first) — independently of the
 transcript and of `sayChatNotes`:
 
-- **TUI:** a dim latest-note line above the tree (`notes: … (N notes)`); click
-  it, or pick **Notes (N)** in `/progress`, to read the history.
-- **Desktop/web:** a second, optional composer pill showing the latest snippet,
-  warning-tinted for `blocked`/`question`, with the full history in its popover.
-  Pills float above the timeline, so it stays visible in both composer and
-  sidebar layouts (sidebar mode adds no notes panel of its own).
+- **TUI:** a dim latest-note line above the tree (`notes: … (N notes)`) when
+  `sayModes` includes `tree` or `pill`. Click the line (or pick **Notes (N)** in
+  `/progress`) for the newest-first history; the trailing `✕` on the line
+  dismisses the latest note, and each note in the history can be dismissed
+  individually or with **Dismiss all notes**.
+- **Desktop/web:** the `pill` mode adds a composer pill showing the latest
+  snippet, warning-tinted for `blocked`/`question`; its popover lists
+  newest-first history with a `×` per note and **Dismiss all notes**. `tree`
+  adds the latest-note line above the sidebar panel tree and in the pill
+  popover. Pills float above the timeline, so they stay visible in both
+  composer and sidebar layouts; `toast` works independently of layout.
 - **Subagents:** child-session notes roll up to the parent view (prefixed
-  `[Subagent (Explore)]`), and each child keeps its own note budget.
+  `[Subagent (Explore)]`), including toasts, and each child keeps its own note
+  budget.
+- **Dismissal:** dismissing removes the note from the shared ring buffer, so
+  every open client updates on its next poll/event. **Dismiss all notes** is
+  root-scoped: it clears the same rolled-up tree the viewer is reading.
 - **Lifecycle:** notes survive **Progress: clear list**; they are deleted with
   the session and by the hard-clear commands. The per-session ring buffer keeps
   the store bounded.

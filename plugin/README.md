@@ -116,12 +116,17 @@ admitted as a durable synthetic note (`resume: false`), so the user does not hav
 to open the thought trace while a long tool runs. It is a tool call, so the turn
 cannot end on a note.
 
-Accepted notes also feed a small persistent lane (last 20 per session): the TUI
-renders the latest note above the tree and lists history in `/progress`, while
-desktop/web get a second composer pill with the latest snippet and a popover
-(visible in both composer and sidebar layouts).
-Child-session notes roll up to the parent. Notes survive clear-list and are
-removed with the session or a hard clear.
+Accepted notes also feed a small persistent lane (last 20 per session). Pick
+the surfaces with `sayModes` (default `["tree"]`; `sayMode` is a scalar alias):
+`tree` renders the latest note above the tree (TUI; GUI sidebar panel and pill
+popover), `pill` adds the notes composer pill, and `toast` raises one toast per
+new note. The TUI maps `pill` to its tree line, and the GUI composer layout maps
+`tree` back to the pill. An empty array records notes without showing them.
+Child-session notes roll up to the parent with `[Subagent (X)]` attribution.
+Click the TUI line or `/progress` → **Notes** / the pill popover for newest-first
+history; dismiss one note with its `×` or all notes at once. Dismissals delete
+the note from the shared ring buffer, so every client updates. Notes survive
+clear-list and are removed with the session or a hard clear.
 
 ```jsonc
 { "options": { "say": true } }
@@ -136,6 +141,7 @@ removed with the session or a hard clear.
 | `sayCooldownMs` | `15000` | minimum gap between accepted notes |
 | `sayChatNotes` | `true` | `false` = progress line only, no synthetic note |
 | `sayFinalGuard` | `true` | if the agent posts a note and stops without concluding, resume once |
+| `sayModes` | `["tree"]` | surfaces: string/array of `"pill"`, `"toast"`, `"tree"`; `sayMode` alias; `[]` records only |
 
 Length never skips a note. Budget and cooldown skips return a result that points
 the agent at the progress tool for any further backchannel updates in that turn.

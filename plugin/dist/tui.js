@@ -167,6 +167,47 @@ function mutateStateFile(mutator) {
   }
 }
 var SAY_NOTES_PER_SESSION = 20;
+function dismissSayNote(noteID) {
+  const id = String(noteID ?? "");
+  if (!id) return false;
+  const result = mutateStateFile((state2) => {
+    let removed = false;
+    for (const [author, list] of Object.entries(state2.notes ?? {})) {
+      if (!Array.isArray(list)) continue;
+      const next = list.filter((note) => note?.id !== id);
+      if (next.length === list.length) continue;
+      removed = true;
+      if (next.length === 0) delete state2.notes[author];
+      else state2.notes[author] = next;
+    }
+    return { value: removed, write: removed };
+  });
+  if (result) console.log(`[opencode-progress] dismissed note ${id}`);
+  return result === true;
+}
+function clearSayNotes(sessionID) {
+  const id = String(sessionID ?? "");
+  if (!id) return 0;
+  const links = readSessionMap();
+  const root = rootSessionFor(id, links);
+  const result = mutateStateFile((state2) => {
+    let removed = 0;
+    for (const [author, list] of Object.entries(state2.notes ?? {})) {
+      if (!Array.isArray(list)) continue;
+      const keep = list.filter(
+        (note) => rootSessionFor(note?.sessionId ?? author, links) !== root
+      );
+      const count = list.length - keep.length;
+      if (count === 0) continue;
+      removed += count;
+      if (keep.length === 0) delete state2.notes[author];
+      else state2.notes[author] = keep;
+    }
+    return { value: removed, write: removed > 0 };
+  });
+  if (result) console.log(`[opencode-progress] cleared ${result} note(s) root=${root}`);
+  return result ?? 0;
+}
 function rootSessionFor(sessionID, links = readSessionMap()) {
   let current = sessionID;
   const seen = /* @__PURE__ */ new Set();
@@ -697,10 +738,17 @@ function truncateNote(text, maxChars) {
   if (oneLine.length <= maxChars) return oneLine;
   return `${oneLine.slice(0, Math.max(1, maxChars - 1)).trimEnd()}\u2026`;
 }
+function latestSayNote(notes) {
+  const list = (notes ?? []).filter((note) => note && oneLineText(note.text));
+  if (list.length === 0) return void 0;
+  return list.reduce(
+    (newest, note) => (note.at ?? 0) > (newest.at ?? 0) ? note : newest
+  );
+}
 function buildNotesLine(notes, viewerSessionID, options = {}) {
   const list = (notes ?? []).filter((note) => note && oneLineText(note.text));
-  if (list.length === 0) return "";
-  const latest = list.reduce((newest, note) => (note.at ?? 0) > (newest.at ?? 0) ? note : newest);
+  const latest = latestSayNote(list);
+  if (!latest) return "";
   const maxChars = Math.max(
     20,
     Math.min(200, Math.floor(options.maxChars ?? NOTES_LINE_MAX_CHARS))
@@ -711,6 +759,16 @@ function buildNotesLine(notes, viewerSessionID, options = {}) {
     maxChars
   )}${count}`;
 }
+function sayNoteWarns(note) {
+  return note.kind === "blocked" || note.kind === "question";
+}
+function buildNoteToast(note, viewerSessionID) {
+  const eta = note.eta ? ` \xB7 ETA ${note.eta}` : "";
+  return {
+    message: `${noteAuthorPrefix(note, viewerSessionID)}${oneLineText(note.text)}${eta}`,
+    warning: sayNoteWarns(note)
+  };
+}
 function formatNotesDialog(notes, options = {}) {
   const limit = Math.max(1, Math.min(100, Math.floor(options.limit ?? 20)));
   const list = [...notes ?? []].filter((note) => note && oneLineText(note.text)).sort((a, b) => (b.at ?? 0) - (a.at ?? 0)).slice(0, limit);
@@ -720,6 +778,60 @@ function formatNotesDialog(notes, options = {}) {
     const prefix = noteAuthorPrefix(note, options.viewerSessionID);
     return `${time ? `[${time}] ` : ""}${note.kind}${eta}: ${prefix}${oneLineText(note.text)}`;
   }).join("\n");
+}
+
+// src/say.ts
+var DEFAULT_MIN_CHARS = 180;
+var DEFAULT_MAX_CHARS = 260;
+var DEFAULT_BUDGET = 3;
+var DEFAULT_COOLDOWN_MS = 15e3;
+var SAY_MODES = ["pill", "toast", "tree"];
+var DEFAULT_SAY_MODES = ["tree"];
+function sayModeValues(value) {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) {
+    return value.filter((entry) => typeof entry === "string");
+  }
+  return [];
+}
+function normalizeSayModes(value) {
+  if (value === void 0 || value === null) return [...DEFAULT_SAY_MODES];
+  const modes = [];
+  for (const raw of sayModeValues(value)) {
+    const mode = raw.trim();
+    if (SAY_MODES.includes(mode) && !modes.includes(mode)) modes.push(mode);
+  }
+  return modes;
+}
+function tuiSaySurfaces(modes = DEFAULT_SAY_MODES) {
+  const enabled = new Set(modes);
+  return {
+    line: enabled.has("tree") || enabled.has("pill"),
+    toast: enabled.has("toast")
+  };
+}
+function integerInRange(value, fallback, min, max) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, Math.floor(value)));
+}
+function normalizeSayOptions(raw) {
+  const options = raw ?? {};
+  const minChars = integerInRange(options.sayMinChars, DEFAULT_MIN_CHARS, 20, 600);
+  const maxChars = Math.max(
+    minChars,
+    integerInRange(options.sayMaxChars, DEFAULT_MAX_CHARS, 20, 600)
+  );
+  const modesSource = options.sayModes === void 0 || options.sayModes === null ? options.sayMode : options.sayModes;
+  return {
+    enabled: options.say === true,
+    minChars,
+    maxChars,
+    budgetPerTurn: integerInRange(options.sayBudgetPerTurn, DEFAULT_BUDGET, 1, 10),
+    cooldownMs: integerInRange(options.sayCooldownMs, DEFAULT_COOLDOWN_MS, 0, 12e4),
+    chatNotes: options.sayChatNotes !== false,
+    finalGuard: options.sayFinalGuard !== false,
+    modes: normalizeSayModes(modesSource)
+  };
 }
 
 // src/tui.js
@@ -745,13 +857,21 @@ var collapsedState = {
   value: false
 };
 var setCollapsed;
+var sayLineEnabled = true;
+var sayToastHook;
+function refreshState() {
+  const next = readProgressState();
+  setState(next);
+  sayToastHook?.(next);
+  return next;
+}
 function startPolling(refreshMs) {
   pollers += 1;
-  setState(readProgressState());
+  refreshState();
   setTaskListStatus(readTaskListStatus());
   if (!timer) {
     timer = setInterval(() => {
-      setState(readProgressState());
+      refreshState();
       setTaskListStatus(readTaskListStatus());
     }, refreshMs);
   }
@@ -924,6 +1044,26 @@ function ProgressTree(props) {
   const doneRoots = () => roots().filter((root) => root.status === "done");
   const notes = () => sayNotesForSession(state(), props.sessionID);
   const notesLine = () => buildNotesLine(notes(), props.sessionID);
+  const latestNote = () => latestSayNote(notes());
+  const showNotesLine = () => sayLineEnabled && notesLine().length > 0;
+  const onDismissNote = (event) => {
+    if (!leftClick(event)) return;
+    event.stopPropagation();
+    const note = latestNote();
+    if (!note) return;
+    if (dismissSayNote(note.id)) {
+      setState(readProgressState());
+      ctx.ui.toast.show({
+        message: "Note dismissed",
+        variant: "success"
+      });
+    } else {
+      ctx.ui.toast.show({
+        message: "Note already dismissed",
+        variant: "info"
+      });
+    }
+  };
   const view = () => buildTuiView(roots(), {
     maxRows,
     maxRoots: rootCapState.value,
@@ -987,7 +1127,7 @@ function ProgressTree(props) {
     const entries = state().entries ?? {};
     return summarizeRoots(allRootsForSession(props.sessionID), (root) => isDismissed(root, dismissedMap(entries)));
   };
-  const hasContent = () => notesLine().length > 0 || (collapsed() ? summary().length > 0 : view().rows.length > 0);
+  const hasContent = () => showNotesLine() || (collapsed() ? summary().length > 0 : view().rows.length > 0);
   return _$createComponent(Show, {
     get when() {
       return hasContent();
@@ -1000,15 +1140,32 @@ function ProgressTree(props) {
       _$setProp(_el$14, "paddingTop", 1);
       _$insert(_el$14, _$createComponent(Show, {
         get when() {
-          return notesLine();
+          return showNotesLine();
         },
         get children() {
-          var _el$15 = _$createElement("text");
-          _$setProp(_el$15, "selectable", false);
-          _$setProp(_el$15, "wrapMode", "word");
-          _$setProp(_el$15, "onMouseUp", () => openNotesDialog(ctx, props.sessionID));
-          _$insert(_el$15, notesLine);
-          _$effect((_$p) => _$setProp(_el$15, "fg", ctx.theme.text.muted, _$p));
+          var _el$15 = _$createElement("box"), _el$16 = _$createElement("text"), _el$17 = _$createElement("text");
+          _$insertNode(_el$15, _el$16);
+          _$insertNode(_el$15, _el$17);
+          _$setProp(_el$15, "flexDirection", "row");
+          _$setProp(_el$15, "alignItems", "flex-start");
+          _$setProp(_el$16, "selectable", false);
+          _$setProp(_el$16, "wrapMode", "word");
+          _$setProp(_el$16, "flexGrow", 1);
+          _$setProp(_el$16, "flexShrink", 1);
+          _$setProp(_el$16, "onMouseUp", () => openNotesDialog(ctx, props.sessionID));
+          _$insert(_el$16, notesLine);
+          _$insertNode(_el$17, _$createTextNode(`  \u2715`));
+          _$setProp(_el$17, "selectable", false);
+          _$setProp(_el$17, "onMouseUp", onDismissNote);
+          _$effect((_p$) => {
+            var _v$4 = ctx.theme.text.muted, _v$5 = ctx.theme.text.muted;
+            _v$4 !== _p$.e && (_p$.e = _$setProp(_el$16, "fg", _v$4, _p$.e));
+            _v$5 !== _p$.t && (_p$.t = _$setProp(_el$17, "fg", _v$5, _p$.t));
+            return _p$;
+          }, {
+            e: void 0,
+            t: void 0
+          });
           return _el$15;
         }
       }), null);
@@ -1017,24 +1174,24 @@ function ProgressTree(props) {
           return collapsed();
         },
         get children() {
-          var _el$16 = _$createElement("text"), _el$17 = _$createElement("span");
-          _$insertNode(_el$16, _el$17);
-          _$setProp(_el$16, "selectable", false);
-          _$setProp(_el$16, "onMouseUp", () => setCollapsed?.((draft) => {
+          var _el$19 = _$createElement("text"), _el$20 = _$createElement("span");
+          _$insertNode(_el$19, _el$20);
+          _$setProp(_el$19, "selectable", false);
+          _$setProp(_el$19, "onMouseUp", () => setCollapsed?.((draft) => {
             draft.value = false;
           }));
-          _$insertNode(_el$17, _$createTextNode(`progress: `));
-          _$insert(_el$16, summary, null);
+          _$insertNode(_el$20, _$createTextNode(`progress: `));
+          _$insert(_el$19, summary, null);
           _$effect((_p$) => {
-            var _v$4 = ctx.theme.text.base, _v$5 = ctx.theme.text.muted;
-            _v$4 !== _p$.e && (_p$.e = _$setProp(_el$16, "fg", _v$4, _p$.e));
-            _v$5 !== _p$.t && (_p$.t = _$setProp(_el$17, "fg", _v$5, _p$.t));
+            var _v$6 = ctx.theme.text.base, _v$7 = ctx.theme.text.muted;
+            _v$6 !== _p$.e && (_p$.e = _$setProp(_el$19, "fg", _v$6, _p$.e));
+            _v$7 !== _p$.t && (_p$.t = _$setProp(_el$20, "fg", _v$7, _p$.t));
             return _p$;
           }, {
             e: void 0,
             t: void 0
           });
-          return _el$16;
+          return _el$19;
         }
       }), null);
       _$insert(_el$14, _$createComponent(Show, {
@@ -1046,12 +1203,12 @@ function ProgressTree(props) {
             when: stackedHeader,
             get fallback() {
               return (() => {
-                var _el$22 = _$createElement("box");
-                _$setProp(_el$22, "flexDirection", "row");
-                _$setProp(_el$22, "justifyContent", "space-between");
-                _$insert(_el$22, title, null);
-                _$insert(_el$22, actions, null);
-                return _el$22;
+                var _el$25 = _$createElement("box");
+                _$setProp(_el$25, "flexDirection", "row");
+                _$setProp(_el$25, "justifyContent", "space-between");
+                _$insert(_el$25, title, null);
+                _$insert(_el$25, actions, null);
+                return _el$25;
               })();
             },
             get children() {
@@ -1073,11 +1230,11 @@ function ProgressTree(props) {
               });
             },
             get children() {
-              var _el$19 = _$createElement("scrollbox");
-              _$setProp(_el$19, "scrollY", true);
-              _$setProp(_el$19, "stickyStart", "top");
-              _$setProp(_el$19, "focusable", false);
-              _$insert(_el$19, _$createComponent(For, {
+              var _el$22 = _$createElement("scrollbox");
+              _$setProp(_el$22, "scrollY", true);
+              _$setProp(_el$22, "stickyStart", "top");
+              _$setProp(_el$22, "focusable", false);
+              _$insert(_el$22, _$createComponent(For, {
                 get each() {
                   return view().rows;
                 },
@@ -1088,31 +1245,31 @@ function ProgressTree(props) {
                   }
                 })
               }));
-              _$effect((_$p) => _$setProp(_el$19, "height", viewportHeight(), _$p));
-              return _el$19;
+              _$effect((_$p) => _$setProp(_el$22, "height", viewportHeight(), _$p));
+              return _el$22;
             }
           }), _$createComponent(Show, {
             get when() {
               return capacity > 0 && overflowLines() > 0;
             },
             get children() {
-              var _el$20 = _$createElement("text");
-              _$setProp(_el$20, "selectable", false);
-              _$insert(_el$20, () => `--- scroll to see ${overflowLines()} more ---`);
-              _$effect((_$p) => _$setProp(_el$20, "fg", ctx.theme.text.muted, _$p));
-              return _el$20;
+              var _el$23 = _$createElement("text");
+              _$setProp(_el$23, "selectable", false);
+              _$insert(_el$23, () => `--- scroll to see ${overflowLines()} more ---`);
+              _$effect((_$p) => _$setProp(_el$23, "fg", ctx.theme.text.muted, _$p));
+              return _el$23;
             }
           }), _$createComponent(Show, {
             get when() {
               return view().hiddenRoots > 0;
             },
             get children() {
-              var _el$21 = _$createElement("text");
-              _$setProp(_el$21, "selectable", false);
-              _$setProp(_el$21, "onMouseUp", () => openProgressDialog(ctx));
-              _$insert(_el$21, () => `view full progress tree (${statusSummary(roots())})`);
-              _$effect((_$p) => _$setProp(_el$21, "fg", ctx.theme.text.base, _$p));
-              return _el$21;
+              var _el$24 = _$createElement("text");
+              _$setProp(_el$24, "selectable", false);
+              _$setProp(_el$24, "onMouseUp", () => openProgressDialog(ctx));
+              _$insert(_el$24, () => `view full progress tree (${statusSummary(roots())})`);
+              _$effect((_$p) => _$setProp(_el$24, "fg", ctx.theme.text.base, _$p));
+              return _el$24;
             }
           })];
         }
@@ -1316,11 +1473,70 @@ async function openNotesDialog(context, sessionIDOverride) {
     });
     return;
   }
-  void context.ui.dialog.alert({
+  const choice = await context.ui.dialog.select({
     title: `Agent notes (${notes.length})`,
-    message: formatNotesDialog(notes, {
+    placeholder: "Filter notes\u2026",
+    options: [{
+      title: `Dismiss all notes (${notes.length})`,
+      value: {
+        kind: "all"
+      },
+      description: "Remove every note in this session tree"
+    }, ...notes.map((note) => {
+      const time = Number.isFinite(note.at) ? new Date(note.at).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit"
+      }) : "";
+      const eta = note.eta ? ` \xB7 ETA ${note.eta}` : "";
+      const prefix = noteAuthorPrefix(note, sessionID);
+      return {
+        title: `\u2715 ${time ? `[${time}] ` : ""}${note.kind}: ${prefix}${oneLineText(note.text)}`,
+        value: {
+          kind: "note",
+          note
+        },
+        description: `${note.kind}${eta}${prefix ? ` \xB7 ${prefix.trim()}` : ""} \xB7 select to dismiss`
+      };
+    })],
+    search: (query, options) => {
+      const needle = query.trim().toLowerCase();
+      if (!needle) return options;
+      return options.filter((option) => option.title.toLowerCase().includes(needle) || (option.description ?? "").toLowerCase().includes(needle));
+    }
+  });
+  if (!choice) return;
+  if (choice.kind === "all") {
+    const confirmed2 = await context.ui.dialog.confirm({
+      title: "Dismiss all notes?",
+      message: `${notes.length} note${notes.length === 1 ? "" : "s"} will be removed for every client.`,
+      label: {
+        confirm: "Dismiss all notes"
+      }
+    });
+    if (!confirmed2) return;
+    const removed = clearSayNotes(sessionID);
+    setState(readProgressState());
+    context.ui.toast.show({
+      message: removed > 0 ? `Dismissed ${removed} note${removed === 1 ? "" : "s"}` : "No notes to dismiss",
+      variant: removed > 0 ? "success" : "info"
+    });
+    return;
+  }
+  const confirmed = await context.ui.dialog.confirm({
+    title: "Dismiss this note?",
+    message: formatNotesDialog([choice.note], {
       viewerSessionID: sessionID
-    })
+    }),
+    label: {
+      confirm: "Dismiss note"
+    }
+  });
+  if (!confirmed) return;
+  const ok = dismissSayNote(choice.note.id);
+  setState(readProgressState());
+  context.ui.toast.show({
+    message: ok ? "Note dismissed" : "Note already dismissed",
+    variant: ok ? "success" : "info"
   });
 }
 async function openProgressDialog(context) {
@@ -1427,10 +1643,10 @@ function FooterStatus() {
       return summary();
     },
     get children() {
-      var _el$23 = _$createElement("text");
-      _$insert(_el$23, summary);
-      _$effect((_$p) => _$setProp(_el$23, "fg", ctx.theme.text.muted, _$p));
-      return _el$23;
+      var _el$26 = _$createElement("text");
+      _$insert(_el$26, summary);
+      _$effect((_$p) => _$setProp(_el$26, "fg", ctx.theme.text.muted, _$p));
+      return _el$26;
     }
   });
 }
@@ -1443,6 +1659,33 @@ var tui_default = Plugin.define({
     const configuredRows = context.options?.tuiMaxRows;
     maxRows = typeof configuredRows === "number" && configuredRows >= 1 ? Math.min(50, Math.floor(configuredRows)) : 8;
     sidebarRows = normalizeSidebarRows(context.options?.tuiSidebarRows);
+    const saySurfaces = tuiSaySurfaces(normalizeSayOptions(context.options).modes);
+    sayLineEnabled = saySurfaces.line;
+    const seenNotes = /* @__PURE__ */ new Map();
+    sayToastHook = (next) => {
+      if (!saySurfaces.toast) return;
+      const sessionID = currentSessionID(context);
+      if (!sessionID) return;
+      const notes = sayNotesForSession(next, sessionID);
+      const current = new Set(notes.map((note) => note.id));
+      const seen = seenNotes.get(sessionID);
+      if (!seen) {
+        seenNotes.set(sessionID, current);
+        return;
+      }
+      for (const id of [...seen]) {
+        if (!current.has(id)) seen.delete(id);
+      }
+      const fresh = notes.filter((note) => !seen.has(note.id)).sort((a, b) => (a.at ?? 0) - (b.at ?? 0));
+      for (const note of fresh) {
+        seen.add(note.id);
+        const toast = buildNoteToast(note, sessionID);
+        context.ui.toast.show({
+          message: toast.message,
+          variant: toast.warning ? "warning" : "info"
+        });
+      }
+    };
     const [capStore, updateCap] = context.storage.memory("tuiMaxRoots", {
       initial: {
         value: normalizeMaxRoots(context.options?.tuiMaxRoots)
@@ -1595,6 +1838,8 @@ var tui_default = Plugin.define({
       render: () => _$createComponent(FooterStatus, {})
     });
     return () => {
+      sayToastHook = void 0;
+      sayLineEnabled = true;
       unregisterComposer?.();
       unregisterSidebar?.();
       unregisterFooter?.();

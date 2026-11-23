@@ -24,7 +24,7 @@ Implements the [Agent Progress Tool proposal](https://gist.github.com/jakedowns/
 for OpenCode 2, and is written as a portable reference implementation any
 harness can copy or adapt.
 
-**Versions:** MCP server `2.12.0` · OpenCode plugin `2.22.0`
+**Versions:** MCP server `2.12.0` · OpenCode plugin `2.23.0`
 
 > **Advanced docs:** [schema, relay internals, state store, architecture, all
 > options, file map →](./README-advanced.md)
@@ -153,10 +153,17 @@ Multi-line titles and details accept real newlines, `\n` / `\r\n`, or `<br>`.
   store entries unless `retainDeletedSessionProgress` is enabled; the mirrored
   Markdown tasklist is never removed.
 - **Narration (`say`, opt-in):** set `say: true` to give the agent a mid-turn
-  note tool. The TUI shows a dim latest-note line above the tree (click it, or
-  `/progress` → **Notes**, for history); desktop/web get a second composer pill
-  with the latest snippet and a history popover (warning-tinted for
-  `blocked`/`question`; shown in composer and sidebar layouts). Notes survive clear-list, roll child sessions up to the
+  note tool. `sayModes` chooses the surfaces (default `["tree"]`; `sayMode` is a
+  scalar alias): `tree` shows a dim latest-note line above the tree (TUI;
+  GUI sidebar panel and pill popover), `pill` shows the notes composer pill,
+  and `toast` raises one toast per new note (warning tone for
+  `blocked`/`question`, with `[Subagent (X)]` attribution). The TUI has no
+  pills, so `pill` maps to its tree line; the GUI composer layout has no tree,
+  so `tree` falls back to the pill. An empty array records notes without
+  showing them. Click the TUI line or open `/progress` → **Notes** / the pill
+  popover for newest-first history; dismiss one note with its `×` or all notes
+  at once. Dismissals delete the note from the shared ring buffer, so every
+  client updates. Notes survive clear-list, roll child sessions up to the
   parent, and are purged with the session or a hard clear. A note never ends the
   turn.
 - **Subagents:** child sessions are mapped to their parent automatically
@@ -192,6 +199,7 @@ Multi-line titles and details accept real newlines, `\n` / `\r\n`, or `<br>`.
 | `barStyle` | `"blocks"` or `"emoji"` |
 | `refreshMs` | View refresh interval (default 1000) |
 | `say` | Enable the opt-in narration tool and notes lane (default off) |
+| `sayModes` | Note surfaces: string or array of `"pill"`, `"toast"`, `"tree"` (default `["tree"]`; `sayMode` is a scalar alias; `[]` records without showing) |
 | `retainDeletedSessionProgress` | Keep store entries when a session is deleted (default off) |
 
 The optional task-list mirror is always written as `tasklist-<session>.md`. Add `tasklist-*.md` (and `.progress/` if you use location `0`) to your `.gitignore` — it contains plaintext task titles and details. When enabled, the palette command **Progress: task-list mirror view** switches between the UI view and the raw store view.
