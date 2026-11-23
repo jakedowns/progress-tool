@@ -469,7 +469,8 @@ transcript and of `sayChatNotes`:
   it, or pick **Notes (N)** in `/progress`, to read the history.
 - **Desktop/web:** a second, optional composer pill showing the latest snippet,
   warning-tinted for `blocked`/`question`, with the full history in its popover.
-  It is composer-mode only; sidebar mode stays task-tree-only.
+  Pills float above the timeline, so it stays visible in both composer and
+  sidebar layouts (sidebar mode adds no notes panel of its own).
 - **Subagents:** child-session notes roll up to the parent view (prefixed
   `[Subagent (Explore)]`), and each child keeps its own note budget.
 - **Lifecycle:** notes survive **Progress: clear list**; they are deleted with

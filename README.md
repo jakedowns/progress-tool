@@ -156,7 +156,7 @@ Multi-line titles and details accept real newlines, `\n` / `\r\n`, or `<br>`.
   note tool. The TUI shows a dim latest-note line above the tree (click it, or
   `/progress` → **Notes**, for history); desktop/web get a second composer pill
   with the latest snippet and a history popover (warning-tinted for
-  `blocked`/`question`). Notes survive clear-list, roll child sessions up to the
+  `blocked`/`question`; shown in composer and sidebar layouts). Notes survive clear-list, roll child sessions up to the
   parent, and are purged with the session or a hard clear. A note never ends the
   turn.
 - **Subagents:** child sessions are mapped to their parent automatically

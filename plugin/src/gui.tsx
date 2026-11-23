@@ -448,6 +448,8 @@ export default Plugin.define({
     void refreshTaskListStatus();
     const taskListTimer = setInterval(() => void refreshTaskListStatus(), 10_000);
 
+    const sayNotesEnabled = ctx.options?.say === true;
+
     /** Notes rolled up to this session's root, newest first. */
     const notesForSession = (sessionID: string) =>
       state()
@@ -494,6 +496,7 @@ export default Plugin.define({
           setState({ entries, notes, loaded: true });
           if (pendingChanged) setPendingDismissed(nextPending);
         });
+
       } catch (error) {
         if (!alive) return;
         setState((prev) => ({ ...prev, loaded: true, error: String(error) }));
@@ -1480,15 +1483,14 @@ export default Plugin.define({
       ),
     }));
 
-    // Optional second pill for `say` notes. Opt in with { options: { say: true } };
-    // composer mode only — sidebar mode is the task tree's surface.
-    const sayNotesEnabled = ctx.options?.say === true;
+    // Optional second pill for `say` notes. Opt in with { options: { say: true } }.
+    // Pills float above the timeline, so this stays visible in both composer
+    // and sidebar layouts; sidebar mode simply has no notes panel of its own.
     ctx.add(ComposerPill, {
       id: "say-notes",
       order: 1,
       show: (input) => {
         if (!sayNotesEnabled) return undefined;
-        if (layoutMode() === "sidebar") return undefined;
         const view = buildNotesPill(notesForSession(input.session.id));
         if (!view) return undefined;
         return {
