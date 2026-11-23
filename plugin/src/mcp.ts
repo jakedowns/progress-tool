@@ -167,3 +167,24 @@ export function resolveMcpLaunch(entry: string, probe: RuntimeProbe = {}): McpLa
 
   return null;
 }
+
+/**
+ * Map the optional local task-list plugin options to MCP server environment
+ * variables. Returns undefined when the mirror is disabled (the default).
+ */
+export function taskListEnvironment(
+  options: Record<string, unknown> | undefined
+): Record<string, string> | undefined {
+  const raw = options ?? {};
+  const configuredPath =
+    typeof raw.taskListPath === "string" ? raw.taskListPath.trim() : "";
+  const enabled = raw.taskListFile === true || configuredPath.length > 0;
+  if (!enabled) return undefined;
+  const environment: Record<string, string> = {
+    PROGRESS_TASKLIST: "1",
+    PROGRESS_TASKLIST_ORDER:
+      raw.taskListOrder === "oldest-first" ? "oldest-first" : "newest-first",
+  };
+  if (configuredPath) environment.PROGRESS_TASKLIST_PATH = configuredPath;
+  return environment;
+}

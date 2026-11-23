@@ -65,6 +65,34 @@ Reads the local OpenCode database read-only (requires `python3`) and prints the
 | `PROGRESS_AUTO_PRUNE_S` | off | completed-entry retention in seconds |
 | `PROGRESS_STALE_MS` | off | sweep `running` entries untouched this long |
 | `PROGRESS_RELAY_MAX_HZ` | `4` | relay write throttle |
+| `PROGRESS_TASKLIST` | off | mirror the session's tasks to a local Markdown checklist |
+| `PROGRESS_TASKLIST_PATH` | `<cwd>/<sessionID>-tasklist.md` | checklist path (relative paths resolve from the MCP server's cwd) |
+| `PROGRESS_TASKLIST_ORDER` | `newest-first` | `newest-first` (new tasks at top) or `oldest-first` (append at bottom) |
+
+## Local task-list mirror
+
+Set `PROGRESS_TASKLIST=1` to keep a Markdown checklist in sync with every
+progress write. It is disabled by default and never calls the model.
+
+```jsonc
+{
+  "mcp": {
+    "servers": {
+      "progress-server": {
+        "type": "local",
+        "command": ["npx", "-y", "@jakedowns/progress-tool-mcp"],
+        "environment": { "PROGRESS_TASKLIST": "1" }
+      }
+    }
+  }
+}
+```
+
+The mirror rewrites only when the rendered checklist changes — relay telemetry
+ticks that only update percentages or `updatedAt` do not touch the file. Each
+task includes its checkbox, status, creation time, and last status-change time;
+children are nested under their parent. New tasks appear at the top by default,
+or append at the bottom with `PROGRESS_TASKLIST_ORDER=oldest-first`.
 
 ## Links
 

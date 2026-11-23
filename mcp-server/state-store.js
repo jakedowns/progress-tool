@@ -20,6 +20,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { syncTaskList } = require('./task-list');
 
 const STATE_VERSION = 3;
 const DEFAULT_TTL_MS = 60 * 60 * 1000;
@@ -419,6 +420,17 @@ function mutateState(mutator, stateFile = DEFAULT_STATE_FILE) {
     const result = mutator(state);
     prune(state, Date.now());
     atomicWrite(stateFile, state);
+    // Optional Markdown mirror; content-compared, so relay ticks are no-ops.
+    // Prefer the session that just wrote (manual MCP configs don't always
+    // inject OPENCODE_SESSION_ID), then fall back to the environment.
+    const writtenSession = Array.isArray(result)
+      ? result.find((entry) => entry && entry.sessionId)?.sessionId
+      : result && result.sessionId;
+    try {
+      syncTaskList(state, { sessionID: writtenSession });
+    } catch {
+      // The optional mirror is best-effort; never fail a progress write.
+    }
     return result;
   } finally {
     release();
@@ -493,6 +505,12 @@ function applyUpsert(state, input, now) {
     startedAt: isRestart ? now : prev?.startedAt || prev?.createdAt || now,
     createdAt: prev?.createdAt || now,
     updatedAt: now,
+    // Timestamp shown in the optional task-list mirror. Agent-plane writes
+    // advance it; high-frequency relay ticks only advance it on a transition.
+    statusUpdatedAt:
+      !prev || prev.status !== status || !fromRelay
+        ? now
+        : prev.statusUpdatedAt || prev.updatedAt || now,
   };
   delete entry.source;
 
@@ -590,6 +608,7 @@ function cascadeCloseDescendants(state, parentId, sessionId, now) {
         ? `${normalizeProgressText(entry.detail)} (auto-closed: parent ${parentId} completed)`
         : `auto-closed: parent ${parentId} completed`;
       entry.updatedAt = now;
+      entry.statusUpdatedAt = now;
       next.push(entry.id);
     }
     frontier = next;

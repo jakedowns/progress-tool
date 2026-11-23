@@ -157,6 +157,9 @@ Multi-line titles and details accept real newlines, `\n` / `\r\n`, or `<br>`.
 | `tuiMaxRoots` | TUI root cap before the full-tree summary (default 3, max 50) |
 | `tuiLayout` | TUI placement: `"composer"` (default) or `"sidebar"` |
 | `tuiSidebarRows` | Sidebar viewport height in rows (default 0 = full tree, sidebar scrolls; max 100) |
+| `taskListFile` | Mirror tasks to a local Markdown checklist (default off) |
+| `taskListPath` | Checklist path; empty = `<sessionID>-tasklist.md` in the MCP cwd |
+| `taskListOrder` | `"newest-first"` (default) or `"oldest-first"` |
 | `expandRootsByDefault` | Expand trees by default (default collapsed) |
 | `strictMode` | `"nudge"` / `"force"` / `"off"` silent-work nudges |
 | `staleEscalateAfter` | Entry reminders before one synthetic escalation (default 3; `0` disables) |

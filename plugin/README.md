@@ -76,6 +76,11 @@ Pass under the plugin entry's `options` in `opencode.json`:
 | `registerSkills` | `true` | register the default skills (usage + delegation) |
 | `demoSkills` | `false` | also register the demo skills (`osc-demo`, `tree-demo`) |
 | `autoRegisterMcp` | `true` | register `@jakedowns/progress-tool-mcp` automatically |
+| `taskListFile` | `false` | mirror the session's tasks to a local Markdown checklist |
+| `taskListPath` | `""` | checklist path; empty = `<sessionID>-tasklist.md` in the MCP working dir |
+| `taskListOrder` | `"newest-first"` | `"newest-first"` (new at top) or `"oldest-first"` (append at bottom) |
+
+These options are passed to the MCP server when the plugin auto-registers it. If you configure `progress-server` manually, put `PROGRESS_TASKLIST` / `PROGRESS_TASKLIST_PATH` / `PROGRESS_TASKLIST_ORDER` in that server's `environment` instead (see the MCP README).
 | `mcpRuntime` | auto | absolute path to the `node`/`bun` used to spawn the MCP server (auto-detected; set this if detection picks wrong) |
 | `strictMode` | `"nudge"` | `"nudge"` / `"force"` / `"off"` tool-call monitor |
 | `staleEscalateAfter` | `3` | entry-based stale reminders before one synthetic escalation (`0` disables) |

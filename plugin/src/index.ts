@@ -42,7 +42,7 @@ import {
   type WallClockState,
 } from "./monitor.js";
 import { logNudge, nudgeLoggingEnabled, diffStatuses, type StatusSnapshot } from "./telemetry.js";
-import { resolveMcpLaunch } from "./mcp.js";
+import { resolveMcpLaunch, taskListEnvironment } from "./mcp.js";
 import { injectParentSession, isSubagentTool } from "./subagent.js";
 import {
   PACKAGED_SKILLS,
@@ -97,11 +97,13 @@ export default Plugin.define({
           );
         } else {
           let registered = false;
+          const taskListEnv = taskListEnvironment(ctx.options);
           await ctx.mcp.transform((editor) => {
             if (editor.get("progress-server")) return;
             editor.set("progress-server", {
               type: "local",
               command: launch.command,
+              ...(taskListEnv ? { environment: taskListEnv } : {}),
             });
             registered = true;
           });

@@ -24,7 +24,9 @@ execFileSync(
   [path.join(ROOT, 'src', 'mcp.ts'), '--bundle', '--format=cjs', '--platform=node', `--outfile=${path.join(OUT, 'mcp.cjs')}`],
   { stdio: 'pipe' }
 );
-const { isJsRuntime, resolveMcpLaunch, MCP_PACKAGE } = require(path.join(OUT, 'mcp.cjs'));
+const { isJsRuntime, resolveMcpLaunch, taskListEnvironment, MCP_PACKAGE } = require(
+  path.join(OUT, 'mcp.cjs')
+);
 
 const ENTRY = '/Users/tester/.cache/opencode/npm/@jakedowns/progress-tool-mcp/index.js';
 const HOME = '/Users/tester';
@@ -40,6 +42,26 @@ function probe(files, overrides = {}) {
     ...overrides,
   };
 }
+
+test('task-list mirror env is opt-in and maps order/path', () => {
+  assert.equal(taskListEnvironment(undefined), undefined);
+  assert.equal(taskListEnvironment({}), undefined);
+  assert.equal(taskListEnvironment({ taskListFile: false }), undefined);
+
+  assert.deepEqual(taskListEnvironment({ taskListFile: true }), {
+    PROGRESS_TASKLIST: '1',
+    PROGRESS_TASKLIST_ORDER: 'newest-first',
+  });
+  assert.deepEqual(taskListEnvironment({ taskListPath: '/tmp/tasks.md' }), {
+    PROGRESS_TASKLIST: '1',
+    PROGRESS_TASKLIST_ORDER: 'newest-first',
+    PROGRESS_TASKLIST_PATH: '/tmp/tasks.md',
+  });
+  assert.deepEqual(taskListEnvironment({ taskListFile: true, taskListOrder: 'oldest-first' }), {
+    PROGRESS_TASKLIST: '1',
+    PROGRESS_TASKLIST_ORDER: 'oldest-first',
+  });
+});
 
 test('only real JS runtimes are accepted as an interpreter', () => {
   assert.equal(isJsRuntime('/usr/local/bin/node'), true);
