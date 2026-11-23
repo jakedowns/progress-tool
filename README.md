@@ -129,6 +129,8 @@ Multi-line titles and details accept real newlines, `\n` / `\r\n`, or `<br>`.
   `guiLayout: "sidebar"` to move the tree into a pinned tab in the session's
   side panel (`guiSidebarWidth` sets its initial width), or use the pill's
   `[Sidebar]` action / the "Progress: swap layout" command at runtime.
+  `guiDetailLines` caps detail text in both the pill menu and sidebar
+  (default `1` line with `…`; `0` hides details; `-1` shows full text).
 - **TUI:** compact tree above the composer, roots collapsed, capped at
   `tuiMaxRoots` (default 3) and scrollable inside `tuiMaxRows` (default 8) so
   long lists never push the prompt away. A `--- scroll to see N more ---` hint
@@ -168,6 +170,7 @@ Multi-line titles and details accept real newlines, `\n` / `\r\n`, or `<br>`.
 | `tuiSidebarRows` | Sidebar viewport height in rows (default 0 = full tree, sidebar scrolls; max 100) |
 | `guiLayout` | Desktop/web placement: `"composer"` pill (default) or pinned `"sidebar"` panel |
 | `guiSidebarWidth` | Desktop sidebar initial width in CSS pixels (default 360, clamp 240-800) |
+| `guiDetailLines` | Detail line cap in pill menu and sidebar: `-1` full, `0` hidden, `n` lines (default 1) |
 | `taskListFile` | Mirror tasks to a local Markdown checklist (default off) |
 | `taskListPath` | Checklist path; empty = `<sessionID>-tasklist.md` in the MCP cwd |
 | `taskListOrder` | `"newest-first"` (default) or `"oldest-first"` |

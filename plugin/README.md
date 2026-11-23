@@ -103,6 +103,7 @@ These options are passed to the MCP server when the plugin auto-registers it. If
 | `tuiSidebarRows` | `0` | sidebar viewport height in rows (0-100); `0` renders the full tree and lets the sidebar scroll |
 | `guiLayout` | `"composer"` | Desktop/web placement: `"composer"` pill or a pinned `"sidebar"` panel; the "Progress: swap layout" command toggles it |
 | `guiSidebarWidth` | `360` | Desktop sidebar initial width in CSS pixels (clamp 240-800); dragging still wins |
+| `guiDetailLines` | `1` | Detail line cap in the pill menu and sidebar rows: `-1` full text, `0` titles only, `n` lines with `…` (max 100) |
 
 State lives in `~/.opencode-progress-state.json` (override with
 `PROGRESS_STATE_PATH`). Retention is opt-in (`PROGRESS_AUTO_PRUNE_S`); entries

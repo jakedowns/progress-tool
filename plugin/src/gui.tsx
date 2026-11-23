@@ -15,6 +15,7 @@ import { ProgressRpc } from "./rpc.js";
 import {
   GUI_PROGRESS_PANEL_ID,
   nextGuiLayout,
+  normalizeGuiDetailLines,
   normalizeGuiLayout,
   normalizeGuiSidebarWidth,
   type GuiLayout,
@@ -130,6 +131,8 @@ function MenuRow(props: {
   hasChildren?: boolean;
   collapsed?: boolean;
   onToggle?: () => void;
+  /** Detail line cap: -1 full, 0 hidden, n>0 clamp with ellipsis. Default full. */
+  detailLines?: number;
 }) {
   const pct = () => progressLabel(props.node.progress);
   const parts = () => barParts(props.node.progress, props.options);
@@ -203,7 +206,7 @@ function MenuRow(props: {
             text={`${props.depth === 0 ? subagentPrefix(props.node) : ""}${props.node.title}`}
           />
         </div>
-        <Show when={props.node.detail}>
+        <Show when={props.node.detail && props.detailLines !== 0}>
           <div
             style={{
               "margin-top": "2px",
@@ -212,6 +215,15 @@ function MenuRow(props: {
               "white-space": "normal",
               "overflow-wrap": "anywhere",
               "word-break": "break-word",
+              ...(props.detailLines && props.detailLines > 0
+                ? {
+                    display: "-webkit-box",
+                    "-webkit-box-orient": "vertical",
+                    "-webkit-line-clamp": String(props.detailLines),
+                    "text-overflow": "ellipsis",
+                    overflow: "hidden",
+                  }
+                : {}),
             }}
             title={props.node.detail ? `${props.node.status}: ${oneLineText(props.node.detail)}` : ""}
           >
@@ -331,6 +343,7 @@ export default Plugin.define({
         draft.mode = mode;
       });
     const sidebarWidth = normalizeGuiSidebarWidth(ctx.options?.guiSidebarWidth);
+    const detailLines = normalizeGuiDetailLines(ctx.options?.guiDetailLines);
     const sidebarPanelKey = `${ctx.id}:${GUI_PROGRESS_PANEL_ID}`;
     let alive = true;
     let inFlight = false;
@@ -901,6 +914,7 @@ export default Plugin.define({
                             node={node()}
                             depth={0}
                             options={options}
+                            detailLines={detailLines}
                             hasChildren={node().children.length > 0}
                             collapsed={isCollapsed()}
                             onToggle={() =>
@@ -933,7 +947,8 @@ export default Plugin.define({
                                     node={child}
                                     depth={depth}
                                     options={options}
-                                          />
+                                    detailLines={detailLines}
+                                  />
                                 )}
                               </For>
                             </div>
@@ -1168,6 +1183,7 @@ export default Plugin.define({
                             node={node()}
                             depth={0}
                             options={options}
+                            detailLines={detailLines}
                             hasChildren={node().children.length > 0}
                             collapsed={isCollapsed()}
                             onToggle={() =>
@@ -1194,7 +1210,8 @@ export default Plugin.define({
                                     node={child}
                                     depth={depth}
                                     options={options}
-                                          />
+                                    detailLines={detailLines}
+                                  />
                                 )}
                               </For>
                             </div>

@@ -29,6 +29,7 @@ execFileSync(
 const {
   GUI_PROGRESS_PANEL_ID,
   nextGuiLayout,
+  normalizeGuiDetailLines,
   normalizeGuiLayout,
   normalizeGuiSidebarWidth,
 } = require(path.join(OUT, 'gui-view.cjs'));
@@ -47,6 +48,17 @@ test('sidebar width defaults to 360 and clamps to 240..800', () => {
   assert.equal(normalizeGuiSidebarWidth(100), 240);
   assert.equal(normalizeGuiSidebarWidth(2000), 800);
   assert.equal(normalizeGuiSidebarWidth(420), 420);
+});
+
+test('detail lines default to 1, allow -1/0, floor fractions and cap at 100', () => {
+  assert.equal(normalizeGuiDetailLines(undefined), 1);
+  assert.equal(normalizeGuiDetailLines('nope'), 1);
+  assert.equal(normalizeGuiDetailLines(-1), -1);
+  assert.equal(normalizeGuiDetailLines(-5), -1);
+  assert.equal(normalizeGuiDetailLines(0), 0);
+  assert.equal(normalizeGuiDetailLines(2), 2);
+  assert.equal(normalizeGuiDetailLines(2.9), 2);
+  assert.equal(normalizeGuiDetailLines(200), 100);
 });
 
 test('the progress panel id is stable', () => {

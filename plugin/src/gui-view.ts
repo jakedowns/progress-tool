@@ -23,5 +23,15 @@ export function normalizeGuiSidebarWidth(value: unknown): number {
   return Math.max(240, Math.min(800, numeric));
 }
 
+/**
+ * Detail line cap for the pill menu and sidebar rows.
+ * `-1` shows the full detail, `0` hides detail (titles only), and `n > 0`
+ * clamps to n lines with an ellipsis. Defaults to 1 line; capped at 100.
+ */
+export function normalizeGuiDetailLines(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 1;
+  return Math.max(-1, Math.min(100, Math.floor(value)));
+}
+
 /** The panel tab id; the host key is `${plugin}:${id}`. */
 export const GUI_PROGRESS_PANEL_ID = "progress";
