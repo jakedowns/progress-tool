@@ -36,8 +36,10 @@ const {
   rootDetailLines,
   sortRootsByUrgency,
   summarizeRoots,
+  buildNoteToast,
   buildNotesLine,
   formatNotesDialog,
+  latestSayNote,
 } = require(path.join(OUT, 'tui-view.cjs'));
 
 const root = (id, status, children = []) => ({ id, key: id, status, title: id, children });
@@ -198,6 +200,25 @@ test('buildNotesLine shows the latest note, child author, and history count', ()
     buildNotesLine([note('child note', 3, { sessionId: 'c', agent: 'explore' })], 's'),
     'notes: [Subagent (explore)] child note'
   );
+});
+
+test('latestSayNote picks the newest non-empty note', () => {
+  assert.equal(latestSayNote([]), undefined);
+  assert.equal(latestSayNote([note('   ', 9)]), undefined);
+  assert.equal(latestSayNote([note('old', 1), note('new', 2)])?.text, 'new');
+});
+
+test('buildNoteToast keeps child attribution, ETA, and the warning tone', () => {
+  const child = buildNoteToast(
+    note('child note', 3, { sessionId: 'c', agent: 'explore', kind: 'blocked', eta: '~5 min' }),
+    's'
+  );
+  assert.equal(child.message, '[Subagent (explore)] child note · ETA ~5 min');
+  assert.equal(child.warning, true);
+
+  const root = buildNoteToast(note('root note', 1, { kind: 'intent' }), 's');
+  assert.equal(root.message, 'root note');
+  assert.equal(root.warning, false);
 });
 
 test('buildNotesLine truncates long notes with an ellipsis', () => {

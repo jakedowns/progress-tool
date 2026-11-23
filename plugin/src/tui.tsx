@@ -16,7 +16,16 @@ import { Plugin, usePlugin } from "@opencode/plugin/tui";
 
 /** Setup context; the package does not re-export the Context type. */
 type TuiContext = Parameters<Parameters<typeof Plugin.define>[0]["setup"]>[0];
-import { readProgressState, sayNotesForSession, writeDismissal, softClearSession, hardDeleteSession, hardDeleteAll } from "./state.js";
+import {
+  clearSayNotes,
+  dismissSayNote,
+  readProgressState,
+  sayNotesForSession,
+  writeDismissal,
+  softClearSession,
+  hardDeleteSession,
+  hardDeleteAll,
+} from "./state.js";
 import {
   readTaskListStatus,
   toggleTaskListMode as toggleTaskListModePref,
@@ -41,18 +50,22 @@ import {
   type VisibilityOptions,
 } from "./tree.js";
 import {
+  buildNoteToast,
   buildNotesLine,
   buildTuiView,
   formatNotesDialog,
+  latestSayNote,
   nextTuiLayout,
   normalizeMaxRoots,
   normalizeSidebarRows,
   normalizeTuiLayout,
+  noteAuthorPrefix,
   rootDetailLines,
   summarizeRoots,
   type TuiRow,
 } from "./tui-view.js";
-import type { ProgressEntry, ProgressStatus, ProgressState, TreeNode } from "./types.js";
+import { normalizeSayOptions, tuiSaySurfaces } from "./say.js";
+import type { ProgressEntry, ProgressStatus, ProgressState, SayNote, TreeNode } from "./types.js";
 
 const [state, setState] = createSignal<ProgressState>(readProgressState());
 /** Mirror status is written by the MCP server next to the state file. */
@@ -80,14 +93,25 @@ let setLayout: ((mutation: (draft: { mode: "composer" | "sidebar" }) => void) =>
 /** Runtime collapsed view; the palette toggles it between the tree and one summary row. */
 let collapsedState: { value: boolean } = { value: false };
 let setCollapsed: ((mutation: (draft: { value: boolean }) => void) => void) | undefined;
+/** `sayModes` projection for the TUI (pill folds into the tree line). */
+let sayLineEnabled = true;
+/** Called after every poll with the fresh state so new notes can toast. */
+let sayToastHook: ((next: ProgressState) => void) | undefined;
+
+function refreshState(): ProgressState {
+  const next = readProgressState();
+  setState(next);
+  sayToastHook?.(next);
+  return next;
+}
 
 function startPolling(refreshMs: number): () => void {
   pollers += 1;
-  setState(readProgressState());
+  refreshState();
   setTaskListStatus(readTaskListStatus());
   if (!timer) {
     timer = setInterval(() => {
-      setState(readProgressState());
+      refreshState();
       setTaskListStatus(readTaskListStatus());
     }, refreshMs);
   }
@@ -269,6 +293,22 @@ function ProgressTree(props: { sessionID: string; capacity?: number; variant?: "
   const doneRoots = () => roots().filter((root) => root.status === "done");
   const notes = () => sayNotesForSession(state(), props.sessionID);
   const notesLine = () => buildNotesLine(notes(), props.sessionID);
+  const latestNote = () => latestSayNote(notes());
+  const showNotesLine = () => sayLineEnabled && notesLine().length > 0;
+
+  /** The trailing ✕ on the notes line dismisses just the latest note. */
+  const onDismissNote = (event: TuiMouseEvent) => {
+    if (!leftClick(event)) return;
+    event.stopPropagation();
+    const note = latestNote();
+    if (!note) return;
+    if (dismissSayNote(note.id)) {
+      setState(readProgressState());
+      ctx.ui.toast.show({ message: "Note dismissed", variant: "success" });
+    } else {
+      ctx.ui.toast.show({ message: "Note already dismissed", variant: "info" });
+    }
+  };
   const view = () =>
     buildTuiView(roots(), {
       maxRows,
@@ -329,21 +369,32 @@ function ProgressTree(props: { sessionID: string; capacity?: number; variant?: "
     );
   };
   const hasContent = () =>
-    notesLine().length > 0 ||
+    showNotesLine() ||
     (collapsed() ? summary().length > 0 : view().rows.length > 0);
 
   return (
     <Show when={hasContent()}>
       <box flexDirection="column" paddingLeft={1} paddingRight={1} paddingTop={1}>
-        <Show when={notesLine()}>
-          <text
-            selectable={false}
-            fg={ctx.theme.text.muted}
-            wrapMode="word"
-            onMouseUp={() => openNotesDialog(ctx, props.sessionID)}
-          >
-            {notesLine()}
-          </text>
+        <Show when={showNotesLine()}>
+          <box flexDirection="row" alignItems="flex-start">
+            <text
+              selectable={false}
+              fg={ctx.theme.text.muted}
+              wrapMode="word"
+              flexGrow={1}
+              flexShrink={1}
+              onMouseUp={() => openNotesDialog(ctx, props.sessionID)}
+            >
+              {notesLine()}
+            </text>
+            <text
+              selectable={false}
+              fg={ctx.theme.text.muted}
+              onMouseUp={onDismissNote}
+            >
+              {"  ✕"}
+            </text>
+          </box>
         </Show>
         <Show when={collapsed()}>
           <text
@@ -617,6 +668,8 @@ async function confirmDismissAll(context: TuiContext, roots: TreeNode[]): Promis
   if (confirmed) dismissRoots(context, roots);
 }
 
+type NotesChoice = { kind: "all" } | { kind: "note"; note: SayNote };
+
 async function openNotesDialog(context: TuiContext, sessionIDOverride?: string): Promise<void> {
   const sessionID = sessionIDOverride ?? currentSessionID(context);
   if (!sessionID) {
@@ -628,9 +681,75 @@ async function openNotesDialog(context: TuiContext, sessionIDOverride?: string):
     context.ui.toast.show({ message: "No agent notes yet", variant: "info" });
     return;
   }
-  void context.ui.dialog.alert({
+  const choice = await context.ui.dialog.select<NotesChoice>({
     title: `Agent notes (${notes.length})`,
-    message: formatNotesDialog(notes, { viewerSessionID: sessionID }),
+    placeholder: "Filter notes…",
+    options: [
+      {
+        title: `Dismiss all notes (${notes.length})`,
+        value: { kind: "all" as const },
+        description: "Remove every note in this session tree",
+      },
+      ...notes.map((note) => {
+        const time = Number.isFinite(note.at)
+          ? new Date(note.at).toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            })
+          : "";
+        const eta = note.eta ? ` · ETA ${note.eta}` : "";
+        const prefix = noteAuthorPrefix(note, sessionID);
+        return {
+          title: `✕ ${time ? `[${time}] ` : ""}${note.kind}: ${prefix}${oneLineText(
+            note.text
+          )}`,
+          value: { kind: "note" as const, note },
+          description: `${note.kind}${eta}${prefix ? ` · ${prefix.trim()}` : ""} · select to dismiss`,
+        };
+      }),
+    ],
+    search: (query, options) => {
+      const needle = query.trim().toLowerCase();
+      if (!needle) return options;
+      return options.filter(
+        (option) =>
+          option.title.toLowerCase().includes(needle) ||
+          (option.description ?? "").toLowerCase().includes(needle)
+      );
+    },
+  });
+  if (!choice) return;
+
+  if (choice.kind === "all") {
+    const confirmed = await context.ui.dialog.confirm({
+      title: "Dismiss all notes?",
+      message: `${notes.length} note${notes.length === 1 ? "" : "s"} will be removed for every client.`,
+      label: { confirm: "Dismiss all notes" },
+    });
+    if (!confirmed) return;
+    const removed = clearSayNotes(sessionID);
+    setState(readProgressState());
+    context.ui.toast.show({
+      message:
+        removed > 0
+          ? `Dismissed ${removed} note${removed === 1 ? "" : "s"}`
+          : "No notes to dismiss",
+      variant: removed > 0 ? "success" : "info",
+    });
+    return;
+  }
+
+  const confirmed = await context.ui.dialog.confirm({
+    title: "Dismiss this note?",
+    message: formatNotesDialog([choice.note], { viewerSessionID: sessionID }),
+    label: { confirm: "Dismiss note" },
+  });
+  if (!confirmed) return;
+  const ok = dismissSayNote(choice.note.id);
+  setState(readProgressState());
+  context.ui.toast.show({
+    message: ok ? "Note dismissed" : "Note already dismissed",
+    variant: ok ? "success" : "info",
   });
 }
 
@@ -744,6 +863,39 @@ export default Plugin.define({
         : 8;
 
     sidebarRows = normalizeSidebarRows(context.options?.tuiSidebarRows);
+
+    // `sayModes` projection for this TUI view: `pill` folds into the tree line.
+    // The first poll for a session only primes the seen set, so notes that
+    // already existed when the view mounted never raise a toast.
+    const saySurfaces = tuiSaySurfaces(normalizeSayOptions(context.options).modes);
+    sayLineEnabled = saySurfaces.line;
+    const seenNotes = new Map<string, Set<string>>();
+    sayToastHook = (next) => {
+      if (!saySurfaces.toast) return;
+      const sessionID = currentSessionID(context);
+      if (!sessionID) return;
+      const notes = sayNotesForSession(next, sessionID);
+      const current = new Set(notes.map((note) => note.id));
+      const seen = seenNotes.get(sessionID);
+      if (!seen) {
+        seenNotes.set(sessionID, current);
+        return;
+      }
+      for (const id of [...seen]) {
+        if (!current.has(id)) seen.delete(id);
+      }
+      const fresh = notes
+        .filter((note) => !seen.has(note.id))
+        .sort((a, b) => (a.at ?? 0) - (b.at ?? 0));
+      for (const note of fresh) {
+        seen.add(note.id);
+        const toast = buildNoteToast(note, sessionID);
+        context.ui.toast.show({
+          message: toast.message,
+          variant: toast.warning ? "warning" : "info",
+        });
+      }
+    };
 
     const [capStore, updateCap] = context.storage.memory("tuiMaxRoots", {
       initial: { value: normalizeMaxRoots(context.options?.tuiMaxRoots) },
@@ -882,6 +1034,8 @@ export default Plugin.define({
     });
 
     return () => {
+      sayToastHook = undefined;
+      sayLineEnabled = true;
       unregisterComposer?.();
       unregisterSidebar?.();
       unregisterFooter?.();

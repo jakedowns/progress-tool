@@ -185,6 +185,17 @@ function truncateNote(text: string, maxChars: number): string {
   return `${oneLine.slice(0, Math.max(1, maxChars - 1)).trimEnd()}…`;
 }
 
+/** Newest non-empty note, or undefined when the roll-up is empty. */
+export function latestSayNote(
+  notes: readonly SayNote[] | undefined
+): SayNote | undefined {
+  const list = (notes ?? []).filter((note) => note && oneLineText(note.text));
+  if (list.length === 0) return undefined;
+  return list.reduce((newest, note) =>
+    (note.at ?? 0) > (newest.at ?? 0) ? note : newest
+  );
+}
+
 /**
  * The dim line above the TUI tree: newest note, its author when it came from
  * a child session, and a count when there is more history in `/progress`.
@@ -195,8 +206,8 @@ export function buildNotesLine(
   options: { maxChars?: number } = {}
 ): string {
   const list = (notes ?? []).filter((note) => note && oneLineText(note.text));
-  if (list.length === 0) return "";
-  const latest = list.reduce((newest, note) => ((note.at ?? 0) > (newest.at ?? 0) ? note : newest));
+  const latest = latestSayNote(list);
+  if (!latest) return "";
   const maxChars = Math.max(
     20,
     Math.min(200, Math.floor(options.maxChars ?? NOTES_LINE_MAX_CHARS))
@@ -206,6 +217,26 @@ export function buildNotesLine(
     latest.text,
     maxChars
   )}${count}`;
+}
+
+/** Warning tone for notes that need the user's attention. */
+export function sayNoteWarns(note: Pick<SayNote, "kind">): boolean {
+  return note.kind === "blocked" || note.kind === "question";
+}
+
+/**
+ * TUI toast copy for one note. Child notes keep their `[Subagent (X)]`
+ * attribution so the roll-up never looks like the root agent spoke.
+ */
+export function buildNoteToast(
+  note: SayNote,
+  viewerSessionID?: string
+): { message: string; warning: boolean } {
+  const eta = note.eta ? ` · ETA ${note.eta}` : "";
+  return {
+    message: `${noteAuthorPrefix(note, viewerSessionID)}${oneLineText(note.text)}${eta}`,
+    warning: sayNoteWarns(note),
+  };
 }
 
 /** `/progress` → Notes: newest-first history with time, kind, and author. */
