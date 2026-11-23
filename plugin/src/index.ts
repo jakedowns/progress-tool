@@ -40,6 +40,13 @@ import {
   type SayController,
 } from "./say.js";
 import {
+  decideSayNudge,
+  emptySayNudgeState,
+  normalizeSayNudgeOptions,
+  recordSayNudge,
+  type SayNudgeState,
+} from "./say-monitor.js";
+import {
   observeToolCall,
   normalizeStrictMode,
   normalizeStaleAfterMs,
@@ -145,6 +152,9 @@ export default Plugin.define({
     // It is a regular plugin tool, so the turn cannot end on a note; its result
     // always tells the model to keep working.
     const sayOptions = normalizeSayOptions(ctx.options);
+    const sayNudgeOptions = normalizeSayNudgeOptions(ctx.options);
+    const sayNudgeStates = new Map<string, SayNudgeState>();
+    const toolStartedAt = new Map<string, number>();
     let sayController: SayController | undefined;
     let sayToolName = "say";
     let sayRegistration: Awaited<ReturnType<typeof ctx.tool.transform>> | undefined;
@@ -167,6 +177,9 @@ export default Plugin.define({
                 agent: link?.agent ?? null,
                 at: note.at,
               });
+              void ctx.session.instructions.entry
+                .remove({ sessionID: note.sessionID, key: 'say-nudge' })
+                .catch(() => {});
             },
             synthetic: (input) => ctx.session.synthetic(input),
             log: (message, error) =>
@@ -473,6 +486,7 @@ export default Plugin.define({
       }
     };
     const lastSeenProgress = new Map<string, number>();
+    const progressNudgeStanding = new Set<string>();
     const NUDGE_KEY = 'progress-nudge';
     let promptReminderHook: Awaited<ReturnType<typeof ctx.session.hook>> | undefined;
 
@@ -588,6 +602,7 @@ export default Plugin.define({
             step.action === 'stale-nudge' ||
             step.action === 'stale-escalate'
           ) {
+            progressNudgeStanding.add(event.sessionID);
             void ctx.session.instructions.entry
               .put({ sessionID: event.sessionID, key: NUDGE_KEY, value: text })
               .catch(() => {});
@@ -598,6 +613,7 @@ export default Plugin.define({
               .catch(() => {});
           }
           if (step.action === 'clear') {
+            progressNudgeStanding.delete(event.sessionID);
             void ctx.session.instructions.entry
               .remove({ sessionID: event.sessionID, key: NUDGE_KEY })
               .catch(() => {});
@@ -695,7 +711,17 @@ export default Plugin.define({
     if (sayController) {
       sayPromptHook = await ctx.session.hook("prompt", (event) => {
         const sessionID = (event as { sessionID?: string }).sessionID;
-        if (sessionID) sayController?.reset(sessionID);
+        if (sessionID) {
+          sayController?.reset(sessionID);
+          const previous = sayNudgeStates.get(sessionID);
+          sayNudgeStates.set(sessionID, {
+            lastNudgeAt: previous?.lastNudgeAt ?? 0,
+            nudgesThisTurn: 0,
+          });
+          void ctx.session.instructions.entry
+            .remove({ sessionID, key: 'say-nudge' })
+            .catch(() => {});
+        }
       });
 
       if (sayOptions.finalGuard) {
@@ -737,6 +763,71 @@ export default Plugin.define({
           }
         });
       }
+    }
+
+    // Opt-in say nudge: after a tool runs long with no narration this turn,
+    // leave a one-shot context hint for the NEXT step. A nudge cannot reach
+    // the model while the tool is still running, so this is deliberately
+    // retrospective and never a synthetic message.
+    let sayNudgeBeforeHook: Awaited<ReturnType<typeof ctx.tool.hook>> | undefined;
+    let sayNudgeAfterHook: Awaited<ReturnType<typeof ctx.tool.hook>> | undefined;
+    if (sayOptions.enabled && sayNudgeOptions.mode !== 'off') {
+      sayNudgeBeforeHook = await ctx.tool.hook('execute.before', (event) => {
+        toolStartedAt.set(String(event.id), Date.now());
+      });
+      sayNudgeAfterHook = await ctx.tool.hook('execute.after', (event) => {
+        try {
+          const started = toolStartedAt.get(String(event.id));
+          toolStartedAt.delete(String(event.id));
+          if (started === undefined) return;
+          if (event.tool === sayToolName || /(^|_)progress$/.test(event.tool)) return;
+          const now = Date.now();
+          const controller = sayController?.get(event.sessionID);
+          const state = sayNudgeStates.get(event.sessionID) ?? emptySayNudgeState();
+          const decision = decideSayNudge(
+            state,
+            {
+              sessionID: event.sessionID,
+              tool: event.tool,
+              durationMs: now - started,
+              saidThisTurn: controller?.accepted === true,
+              sayCount: controller?.count ?? 0,
+              sayBudget: sayOptions.budgetPerTurn,
+              progressNudgeActive: progressNudgeStanding.has(event.sessionID),
+              now,
+            },
+            sayNudgeOptions
+          );
+          if (!decision.nudge || !decision.message) return;
+          sayNudgeStates.set(event.sessionID, recordSayNudge(state, now));
+          void ctx.session.instructions.entry
+            .put({ sessionID: event.sessionID, key: 'say-nudge', value: decision.message })
+            .catch(() => {});
+          if (verbose) {
+            logNudge({
+              event: 'say-nudge',
+              sessionID: event.sessionID,
+              tool: event.tool,
+              durationMs: now - started,
+              reason: decision.reason,
+            });
+          }
+        } catch (error) {
+          console.warn('[opencode-progress] say nudge failed', String(error));
+        }
+      });
+      if (verbose) {
+        logNudge({
+          event: 'config',
+          sayNudge: sayNudgeOptions.mode,
+          sayNudgeAfterMs: sayNudgeOptions.afterMs,
+          sayNudgeCooldownMs: sayNudgeOptions.cooldownMs,
+          sayNudgeMaxPerTurn: sayNudgeOptions.maxPerTurn,
+        });
+      }
+      console.log(
+        `[opencode-progress] v${pluginVersion} say nudge: ${sayNudgeOptions.mode} after ${sayNudgeOptions.afterMs}ms`
+      );
     }
 
     // "Unhinged" mode (opt-in): append a progress reminder to every user
@@ -879,6 +970,8 @@ export default Plugin.define({
       void promptReminderHook?.dispose();
       void activityHook?.dispose();
       void relayHintHook?.dispose();
+      void sayNudgeBeforeHook?.dispose();
+      void sayNudgeAfterHook?.dispose();
       void sayRegistration?.dispose();
       void sayPromptHook?.dispose();
       void sayIdleHook?.dispose();

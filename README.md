@@ -24,7 +24,7 @@ Implements the [Agent Progress Tool proposal](https://gist.github.com/jakedowns/
 for OpenCode 2, and is written as a portable reference implementation any
 harness can copy or adapt.
 
-**Versions:** MCP server `2.12.0` · OpenCode plugin `2.23.0`
+**Versions:** MCP server `2.12.0` · OpenCode plugin `2.24.0`
 
 > **Advanced docs:** [schema, relay internals, state store, architecture, all
 > options, file map →](./README-advanced.md)
@@ -164,10 +164,13 @@ Multi-line titles and details accept real newlines, `\n` / `\r\n`, or `<br>`.
   popover for newest-first history; dismiss one note with its `×` or all notes
   at once. Dismissals delete the note from the shared ring buffer, so every
   client updates. Notes also auto-hide from every surface after
-  `sayAutoHideTimeoutMs` (default 60s; `0` keeps them until dismissed) without
-  deleting them. Notes survive clear-list, roll child sessions up to the
-  parent, and are purged with the session or a hard clear. A note never ends the
-  turn.
+  `sayAutoHideTimeoutMs` (default 60s; `0` keeps them until dismissed). An
+  opt-in `sayNudge` reminds a silent agent after a long tool, without
+  deleting them. **Recommended note length: 20–80 characters** for terse
+  intent/status pings; set `sayMinChars: 20` and `sayMaxChars: 80`. The
+  shipped defaults stay `180`/`260` for longer intent-plus-ETA notes. Notes
+  survive clear-list, roll child sessions up to the parent, and are purged with
+  the session or a hard clear. A note never ends the turn.
 - **Subagents:** child sessions are mapped to their parent automatically
   (`session.created` → `~/.opencode-progress-sessions.json`), and the parent id
   is stamped into subagent prompts as a fallback. Roots created by a child
@@ -203,6 +206,7 @@ Multi-line titles and details accept real newlines, `\n` / `\r\n`, or `<br>`.
 | `say` | Enable the opt-in narration tool and notes lane (default off) |
 | `sayModes` | Note surfaces: string or array of `"pill"`, `"toast"`, `"tree"` (default `["tree"]`; `sayMode` is a scalar alias; `[]` records without showing) |
 | `sayAutoHideTimeoutMs` | Hide notes older than this from every surface (default `60000`, clamp `0..86400000`; `0` keeps until dismissed; view-only) |
+| `sayNudge` | Opt-in long-tool reminder: `"long-tool"` or `true` (default off; context-only, never synthetic) |
 | `retainDeletedSessionProgress` | Keep store entries when a session is deleted (default off) |
 
 The optional task-list mirror is always written as `tasklist-<session>.md`. Add `tasklist-*.md` (and `.progress/` if you use location `0`) to your `.gitignore` — it contains plaintext task titles and details. When enabled, the palette command **Progress: task-list mirror view** switches between the UI view and the raw store view.

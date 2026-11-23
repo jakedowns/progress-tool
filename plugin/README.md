@@ -145,6 +145,10 @@ removed with the session or a hard clear.
 | `sayFinalGuard` | `true` | if the agent posts a note and stops without concluding, resume once |
 | `sayModes` | `["tree"]` | surfaces: string/array of `"pill"`, `"toast"`, `"tree"`; `sayMode` alias; `[]` records only |
 | `sayAutoHideTimeoutMs` | `60000` | hide notes older than this from every surface; `0` keeps until dismissed; view-only |
+| `sayNudge` | `off` | opt-in long-tool reminder: `"long-tool"` or `true`; context-only, never synthetic |
+| `sayNudgeAfterMs` | `20000` | minimum tool duration before a reminder |
+| `sayNudgeCooldownMs` | `120000` | minimum gap between say reminders |
+| `sayNudgeMaxPerTurn` | `1` | max reminders per user turn (max `3`) |
 
 Length never skips a note. Budget and cooldown skips return a result that points
 the agent at the progress tool for any further backchannel updates in that turn.
