@@ -529,7 +529,7 @@ There is deliberately no free-form path, so project config cannot point it at
 | Relay spec / status-shim notes | `docs/out-of-band-relay-spec.md`, `docs/desktop-status-shim.md` |
 | Text/CLI guide | `tui-progress-guide.md` |
 
-Legacy V1 entrypoints (`plugin/index.js`, `plugin/gui-experimental.js`) are kept for older hosts and are not loaded by V2.
+V2 loads the server part from `plugin/src/index.ts` (via the package `exports` map) and the prebuilt GUI/TUI bundles from `plugin/dist/`. The legacy V1 entrypoints (`plugin/index.js`, `plugin/gui-experimental.js`) have been removed; they were never loaded by V2.
 
 ### Build notes
 
