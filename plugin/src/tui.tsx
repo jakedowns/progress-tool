@@ -34,12 +34,14 @@ import {
 import {
   buildTree,
   barParts,
+  compactTreeSuffix,
   countActive,
   countDescendants,
   dismissedMap,
   isDismissed,
   normalizeBarOptions,
   normalizeRefreshMs,
+  normalizeTreeTheme,
   normalizeVisibilityOptions,
   oneLineText,
   progressLabel,
@@ -47,6 +49,7 @@ import {
   subagentPrefix,
   visibleEntries,
   type BarOptions,
+  type TreeTheme,
   type VisibilityOptions,
 } from "./tree.js";
 import {
@@ -81,6 +84,8 @@ let pollers = 0;
 let timer: ReturnType<typeof setInterval> | undefined;
 let barOptions: BarOptions = {};
 let visibilityOptions: VisibilityOptions = {};
+/** Tree row theme; `compact` drops progress-bar glyphs from tree rows. */
+let treeTheme: TreeTheme = "default";
 let maxRows = 8;
 let sidebarRows = 0;
 let expandRootsByDefault = false;
@@ -232,6 +237,10 @@ function ProgressRow(props: { row: TuiRow; sessionID: string }) {
   };
 
   const label = () => {
+    if (treeTheme === "compact") {
+      const meta = compactTreeSuffix(props.row.node.progress, props.row.hiddenChildren);
+      return `${glyph(props.row.node.status)} ${title()}${meta ? ` ${meta}` : ""}`;
+    }
     const parts = barParts(props.row.node.progress, barOptions);
     if (parts.style === "emoji") {
       const done =
@@ -870,6 +879,7 @@ export default Plugin.define({
   setup(context) {
     barOptions = normalizeBarOptions(context.options);
     visibilityOptions = normalizeVisibilityOptions(context.options);
+    treeTheme = normalizeTreeTheme(context.options?.treeTheme);
     expandRootsByDefault = context.options?.expandRootsByDefault === true;
     const configuredRows = context.options?.tuiMaxRows;
     maxRows =
@@ -1058,6 +1068,7 @@ export default Plugin.define({
       sayToastHook = undefined;
       sayLineEnabled = true;
       autoHideTimeoutMs = 60_000;
+      treeTheme = "default";
       unregisterComposer?.();
       unregisterSidebar?.();
       unregisterFooter?.();
