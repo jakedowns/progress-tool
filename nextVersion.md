@@ -18,6 +18,23 @@ Ideas and reminders that are **not yet implemented** (notes dated 2026-11-23).
   buttons; cover both `MenuRow` dismiss buttons and any host `rows` dismiss
   actions. Test with rapid state updates and compact tree mode.
 
+## Configurable concise entry copy
+
+- **Idea.** Add a configurable target for progress entry title/description
+  length — e.g. a `treeCopyMode: "default" | "concise"` preset, with
+  `titleChars` / `detailChars` knobs. The concise preset nudges agents toward
+  **20–60 character** titles and one-line descriptions.
+- **Scope.** Guidance only: injected progress rules, the `progress` tool
+  description and hints, relay hints, and optional view-side caps. Do not
+  silently truncate stored title/detail; remind or warn instead, matching
+  `say`'s length-as-preference behavior.
+- **Why.** Compact/barless tree rows read best with short copy. Current rules
+  say "short" but give no measurable target, and the 20–80 `say` experiment is a
+  useful precedent.
+- **Open questions.** One target for both title and detail vs separate; global
+  vs per-entry; palette-exposed or config-only; how to phrase the nudge without
+  encouraging lost detail.
+
 ## Other candidates (brainstorming — not commitments)
 
 - Revisit parent→child steer behavior.
