@@ -10,10 +10,11 @@
  *   2. `ctx.session.synthetic({ resume: false })` — a durable prose note that
  *      does not schedule a new execution.
  *
- * Length is never a reason to skip a note. Over-max is clamped at a word
- * boundary; under-min is accepted and returns a warning. Budget and cooldown
- * can skip, and their result points the agent at the progress tool for further
- * backchannel updates in that turn.
+ * Length is never a reason to skip a note and never shortens one. Over-max and
+ * under-min notes are accepted unchanged with a warning about the preferred
+ * range for the next call. Budget and cooldown can skip, and their result
+ * points the agent at the progress tool for further backchannel updates in
+ * that turn.
  *
  * Pure helpers live here so they can be unit-tested without an OpenCode server.
  */
@@ -255,8 +256,9 @@ export function normalizeSayText(text: unknown): string {
 }
 
 /**
- * Hard cap at a word boundary. Length is never a rejection: an over-long note
- * is trimmed rather than dropped.
+ * Explicit hard-cap helper for callers that want one. `decideSay` never uses
+ * it: `say` accepts notes at any length and only warns about the preferred
+ * range, so note text is never mutated.
  */
 export function clampSayText(text: string, maxChars: number): string {
   if (text.length <= maxChars) return text;
@@ -276,7 +278,8 @@ export function emptySayState(): SaySessionState {
  * decision, so the caller owns the per-session map.
  *
  * Order: empty -> budget -> cooldown -> duplicate -> accept.
- * Length is handled after acceptance (clamp + warning).
+ * Length is advisory only: an out-of-range note is accepted unchanged and the
+ * result carries a warning about the preferred range for the next call.
  */
 export function decideSay(
   state: SaySessionState,
@@ -286,37 +289,44 @@ export function decideSay(
   if (!text) {
     return { state, decision: { accept: false, reason: "empty", text: "" } };
   }
-  const clamped = clampSayText(text, input.options.maxChars);
   if (state.count >= input.options.budgetPerTurn) {
     return { state, decision: { accept: false, reason: "budget", text } };
   }
   if (state.lastAt > 0 && input.now - state.lastAt < input.options.cooldownMs) {
     return { state, decision: { accept: false, reason: "cooldown", text } };
   }
-  if (clamped === state.lastText) {
+  if (text === state.lastText) {
     return { state, decision: { accept: false, reason: "duplicate", text } };
   }
 
+  const { minChars, maxChars } = input.options;
+  const range = `${minChars}–${maxChars}`;
   const warnings: string[] = [];
-  if (clamped !== text) warnings.push(`trimmed to ${input.options.maxChars} chars`);
-  if (text.length < input.options.minChars) {
-    warnings.push(`shorter than the preferred ${input.options.minChars} chars`);
+  // Length never rejects and never shortens the note; the warning is guidance
+  // for the next call. Long and short are mutually exclusive.
+  if (text.length > maxChars) {
+    warnings.push(
+      `Heads-up: that note was longer than the preferred ${maxChars} chars; aim for ${range} next time.`
+    );
+  }
+  if (text.length < minChars) {
+    warnings.push(
+      `Heads-up: that note was shorter than the preferred ${minChars} chars; aim for ${range} next time.`
+    );
   }
 
   return {
     state: {
       count: state.count + 1,
       lastAt: input.now,
-      lastText: clamped,
+      lastText: text,
       accepted: true,
       guarded: state.guarded,
     },
     decision: {
       accept: true,
-      text: clamped,
-      warning: warnings.length
-        ? `Heads-up: that note was ${warnings.join(" and ")}; keep the next one in range.`
-        : undefined,
+      text,
+      warning: warnings.length ? warnings.join(" ") : undefined,
     },
   };
 }
@@ -368,8 +378,9 @@ export function createSayController(
       properties: {
         text: {
           type: "string",
-          maxLength: options.maxChars,
-          description: `${options.minChars}–${options.maxChars} character summary of what you're about to do and a rough ETA.`,
+          // No `maxLength`: the host rejects an over-long argument before
+          // execute runs, and a note must never fail for length.
+          description: `${options.minChars}–${options.maxChars} chars preferred; longer notes are accepted with a reminder.`,
         },
         kind: {
           type: "string",

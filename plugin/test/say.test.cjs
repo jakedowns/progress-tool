@@ -194,7 +194,7 @@ test('text is normalized to one line', () => {
   assert.equal(normalizeSayText(undefined), '');
 });
 
-test('over-max notes are clamped at a word boundary and never rejected', () => {
+test('clampSayText still caps at a word boundary for explicit callers', () => {
   const text = 'word '.repeat(100).trim();
   const clamped = clampSayText(text, 40);
   assert.ok(clamped.length <= 40, `expected <= 40, got ${clamped.length}`);
@@ -215,16 +215,20 @@ test('under-min notes are accepted with a warning', () => {
   assert.equal(state.accepted, true);
 });
 
-test('over-max notes are accepted, trimmed, and warned', () => {
+test('over-max notes are accepted unchanged and warned', () => {
   const options = enabled({ sayMinChars: 80, sayMaxChars: 100 });
+  const text = 'x '.repeat(200);
   const { decision } = decideSay(emptySayState(), {
-    text: 'x '.repeat(200),
+    text,
     now: 1_000,
     options,
   });
   assert.equal(decision.accept, true);
-  assert.ok(decision.text.length <= 100);
-  assert.match(decision.warning, /trimmed to 100 chars/);
+  assert.equal(decision.text, text.trim(), 'the note text is never shortened');
+  assert.match(
+    decision.warning,
+    /Heads-up: that note was longer than the preferred 100 chars; aim for 80–100 next time\./
+  );
 });
 
 test('budget caps accepted notes per turn', () => {
@@ -288,6 +292,84 @@ test('tool description carries the length range and budget', () => {
   assert.match(description, /3 notes per turn/);
   assert.match(description, /ETA/);
   assert.match(description, /Not the final answer/);
+});
+
+test('tool schema has no text.maxLength so the host cannot reject long notes', () => {
+  const controller = createSayController(enabled({ sayMinChars: 20, sayMaxChars: 80 }));
+  const text = controller.tool.input.properties.text;
+  assert.equal(text.type, 'string');
+  assert.equal('maxLength' in text, false);
+  assert.match(text.description, /20–80 chars preferred/);
+  assert.match(text.description, /longer notes are accepted with a reminder/);
+  assert.doesNotMatch(text.description, /trim/);
+});
+
+test('execute accepts an over-max note unchanged and warns for the next call', async () => {
+  const options = enabled({ sayMinChars: 20, sayMaxChars: 80, sayCooldownMs: 0 });
+  const seen = { progress: [], synthetic: [], recorded: [] };
+  const controller = createSayController(options, {
+    synthetic: async (input) => seen.synthetic.push(input.text),
+    recordNote: (note) => seen.recorded.push(note.text),
+  });
+  const long = `${'a'.repeat(40)} ${'b'.repeat(41)}`;
+  assert.equal(long.length, 82, 'the fixture is longer than max');
+
+  const result = await controller.tool.execute(
+    { text: long },
+    {
+      sessionID: 'ses_say_long',
+      progress: async (input) => seen.progress.push(input.status),
+    }
+  );
+
+  assert.match(result.content, /^Noted/);
+  assert.match(
+    result.content,
+    /Heads-up: that note was longer than the preferred 80 chars; aim for 20–80 next time\./
+  );
+  assert.match(result.content, /Continue working; this is not the final answer\./);
+  assert.doesNotMatch(result.content, /trim/);
+  assert.deepEqual(seen.progress, [long], 'progress gets the full note');
+  assert.deepEqual(seen.synthetic, [long], 'the synthetic note gets the full note');
+  assert.deepEqual(seen.recorded, [long], 'recordNote gets the full note');
+  assert.equal(controller.get('ses_say_long').lastText, long);
+});
+
+test('execute accepts an under-min note as-is and warns with the range', async () => {
+  const seen = [];
+  const controller = createSayController(
+    enabled({ sayMinChars: 80, sayMaxChars: 100, sayCooldownMs: 0 }),
+    { synthetic: async (input) => seen.push(input.text) }
+  );
+
+  const result = await controller.tool.execute(
+    { text: 'short note' },
+    { sessionID: 'ses_say_short', progress: async () => {} }
+  );
+
+  assert.match(result.content, /^Noted/);
+  assert.match(
+    result.content,
+    /Heads-up: that note was shorter than the preferred 80 chars; aim for 80–100 next time\./
+  );
+  assert.deepEqual(seen, ['short note'], 'under-min notes are passed through unchanged');
+  assert.equal(controller.get('ses_say_short').count, 1);
+});
+
+test('execute accepts a note of exactly max chars without a length warning', async () => {
+  const controller = createSayController(
+    enabled({ sayMinChars: 20, sayMaxChars: 80, sayCooldownMs: 0 }),
+    { synthetic: async () => {} }
+  );
+
+  const result = await controller.tool.execute(
+    { text: 'x'.repeat(80) },
+    { sessionID: 'ses_say_boundary', progress: async () => {} }
+  );
+
+  assert.match(result.content, /^Noted/);
+  assert.doesNotMatch(result.content, /Heads-up/);
+  assert.doesNotMatch(result.content, /longer than|shorter than/);
 });
 
 test('controller fans out to progress then synthetic with resume:false', async () => {
