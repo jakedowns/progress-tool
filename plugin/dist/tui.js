@@ -569,6 +569,16 @@ function dismissedMap(entries) {
   }
   return map;
 }
+function normalizeTreeTheme(value) {
+  return value === "compact" ? "compact" : "default";
+}
+function compactTreeSuffix(progress, hiddenChildren = 0) {
+  const parts = [];
+  const pct = progressLabel(progress);
+  if (pct) parts.push(pct);
+  if (hiddenChildren > 0) parts.push(`& ${hiddenChildren} more`);
+  return parts.join(" \xB7 ");
+}
 function clampProgress(progress) {
   return progress == null ? 0 : Math.max(0, Math.min(1, progress));
 }
@@ -858,6 +868,7 @@ var pollers = 0;
 var timer;
 var barOptions = {};
 var visibilityOptions = {};
+var treeTheme = "default";
 var maxRows = 8;
 var sidebarRows = 0;
 var expandRootsByDefault = false;
@@ -976,6 +987,10 @@ function ProgressRow(props) {
     return full.length > 120 ? `${full.slice(0, 120)}\u2026` : full;
   };
   const label = () => {
+    if (treeTheme === "compact") {
+      const meta = compactTreeSuffix(props.row.node.progress, props.row.hiddenChildren);
+      return `${glyph(props.row.node.status)} ${title()}${meta ? ` ${meta}` : ""}`;
+    }
     const parts = barParts(props.row.node.progress, barOptions);
     if (parts.style === "emoji") {
       const done = props.row.node.status === "done" ? " \u2713" : props.row.node.status === "error" ? " \u2717" : "";
@@ -1672,6 +1687,7 @@ var tui_default = Plugin.define({
   setup(context) {
     barOptions = normalizeBarOptions(context.options);
     visibilityOptions = normalizeVisibilityOptions(context.options);
+    treeTheme = normalizeTreeTheme(context.options?.treeTheme);
     expandRootsByDefault = context.options?.expandRootsByDefault === true;
     const configuredRows = context.options?.tuiMaxRows;
     maxRows = typeof configuredRows === "number" && configuredRows >= 1 ? Math.min(50, Math.floor(configuredRows)) : 8;
@@ -1860,6 +1876,7 @@ var tui_default = Plugin.define({
       sayToastHook = void 0;
       sayLineEnabled = true;
       autoHideTimeoutMs = 6e4;
+      treeTheme = "default";
       unregisterComposer?.();
       unregisterSidebar?.();
       unregisterFooter?.();

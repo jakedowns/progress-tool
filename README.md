@@ -24,7 +24,7 @@ Implements the [Agent Progress Tool proposal](https://gist.github.com/jakedowns/
 for OpenCode 2, and is written as a portable reference implementation any
 harness can copy or adapt.
 
-**Versions:** MCP server `2.12.0` · OpenCode plugin `2.24.0`
+**Versions:** MCP server `2.12.0` · OpenCode plugin `2.25.0`
 
 > **Advanced docs:** [schema, relay internals, state store, architecture, all
 > options, file map →](./README-advanced.md)
@@ -131,12 +131,17 @@ Multi-line titles and details accept real newlines, `\n` / `\r\n`, or `<br>`.
   `[Sidebar]` action / the "Progress: swap layout" command at runtime.
   `guiDetailLines` caps detail text in both the pill menu and sidebar
   (default `1` line with `…`; `0` hides details; `-1` shows full text).
+  `treeTheme: "compact"` renders tree rows (pill popover and sidebar) without
+  progress-bar glyphs or the started line, with a single clamped detail line
+  and a `40% · & N more` meta suffix. The composer pill capsule itself keeps
+  its `barStyle` rendering.
 - **TUI:** compact tree above the composer, roots collapsed, capped at
   `tuiMaxRoots` (default 3) and scrollable inside `tuiMaxRows` (default 8) so
   long lists never push the prompt away. A `--- scroll to see N more ---` hint
   appears on overflow; `/progress` opens a dialog to expand a tree or dismiss
   tasks, and the palette can change the root cap or collapse the tree to a
-  one-line status summary. Set `tuiLayout: "sidebar"` to
+  one-line status summary. With `treeTheme: "compact"`, TUI rows drop the
+  progress bar and show `title 40% · & N more` instead. Set `tuiLayout: "sidebar"` to
   park the tree in the sidebar instead, or run `/progress swap-layout` to flip
   placements at runtime.
 - Running and waiting tasks stay visible; errors stay until dismissed or
@@ -190,6 +195,7 @@ Multi-line titles and details accept real newlines, `\n` / `\r\n`, or `<br>`.
 | `guiLayout` | Desktop/web placement: `"composer"` pill (default) or pinned `"sidebar"` panel |
 | `guiSidebarWidth` | Desktop sidebar initial width in CSS pixels (default 360, clamp 240-800) |
 | `guiDetailLines` | Detail line cap in pill menu and sidebar: `-1` full, `0` hidden, `n` lines (default 1) |
+| `treeTheme` | Tree row theme: `"default"` or `"compact"` (no bars/started line, one detail line; pill capsule unaffected) |
 | `taskListFile` | Mirror tasks to a local Markdown checklist (default off) |
 | `taskListLocation` | `1` = project root (default), `0` = `.progress/`, `2` = `~/.opencode-progress/` |
 | `taskListView` | `"ui"` (hide dismissed + rolled-up status) or `"raw"` |

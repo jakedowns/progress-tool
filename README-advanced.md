@@ -376,7 +376,7 @@ There is no requirement that the data plane be this CLI. A harness can implement
 cd mcp-server && npm test        # 57 tests
 
 # Plugin: view helpers, lifecycle, skills, TUI packaging
-cd plugin && npm test            # 165 tests
+cd plugin && npm test            # 171 tests
 ```
 
 The MCP smoke suite covers one-shot emits, session resolution and isolation, subagent mapping and adoption, pipe mode, wrap mode with a failing exit code, field preservation when attaching a relay, the MCP handshake and relay hint, and 16 concurrent writers against one state file.
@@ -424,6 +424,7 @@ Both the TUI and GUI parts read these options.
 - `guiLayout`: desktop/web placement — `"composer"` (default) keeps the pill above the composer; `"sidebar"` registers a pinned Progress tab in the session's side region. The "Progress: swap layout (composer/sidebar)" command flips it at runtime.
 - `guiSidebarWidth`: desktop sidebar initial width in CSS pixels (default `360`, clamped to `240-800`). A user drag still overrides it.
 - `guiDetailLines`: detail text cap in the pill menu and sidebar rows (default `1` line, rendered with an ellipsis). `0` hides details for titles only; `-1` disables truncation and shows the full text; any positive number clamps to that many lines (max `100`).
+- `treeTheme`: tree-row rendering for the GUI pill popover, GUI sidebar panel, and TUI tree — `"default"` (default) or `"compact"`. `"compact"` removes every progress-bar glyph from those rows (no blocks, emoji bar, or fraction), hides the GUI `started …` line, keeps one detail line regardless of `guiDetailLines` (`guiDetailLines: 0` still hides it), tightens GUI row padding, and shows the percentage plus a `& N more` collapsed-descendant suffix instead. It is view-only: the GUI composer pill capsule and its `barStyle` rendering are unchanged.
 - `refreshMs`: how often the views re-read progress state in milliseconds (default `1000`, minimum `100`). Applies to the TUI poller, desktop GUI refresh loop, and the plugin's server-side state watcher. The standalone GUI server has the same knob via `PROGRESS_GUI_REFRESH_MS`.
 - `taskListFile`: set `true` to mirror the session's tasks to `tasklist-<session>.md` on every progress write. **Default `false`**. The file is plaintext and may contain sensitive detail; see the mirror section below.
 - `taskListLocation`: `1` (default) writes `<project>/tasklist-<session>.md`; `0` writes `<project>/.progress/tasklist-<session>.md`; `2` writes `~/.opencode-progress/tasklist-<session>.md`. There is no raw path option, so `..`/absolute paths are not part of the config.
@@ -567,7 +568,7 @@ There is deliberately no free-form path, so project config cannot point it at
 | Prebuilt desktop/web bundle | `plugin/dist/gui-experimental.cjs` |
 | Precompiled TUI entry | `plugin/dist/tui.js` |
 | TUI build script | `plugin/scripts/build-tui.mjs` |
-| Plugin test suite (165 tests) | `plugin/test/*.test.cjs` |
+| Plugin test suite (171 tests) | `plugin/test/*.test.cjs` |
 | Standalone desktop GUI server | `progress-gui-server.js` |
 | Launch / setup scripts | `launch-gui.sh`, `setup.sh` |
 | GUI build script (stages off the repo mount) | `scripts/build-gui.sh` |
