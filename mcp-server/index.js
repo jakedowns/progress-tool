@@ -63,7 +63,7 @@ function treeHasChildren(parentId) {
   }
 }
 
-const SERVER_VERSION = '2.12.0';
+const SERVER_VERSION = '2.11.0';
 const VALID_STATUSES = ['pending', 'running', 'waiting', 'done', 'error'];
 
 const SERVER_INSTRUCTIONS = [

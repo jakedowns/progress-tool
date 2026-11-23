@@ -8,8 +8,8 @@ release commit, dated **2026-11-23** — 41 commits.
 **`plugin@2.19.0`** (`ceff22d`); `plugin@2.18.9` is its predecessor. Development
 used local reload labels `2.20.0`–`2.25.0`, which were **never published as
 separate releases**. This changelog publishes all of that accumulated work as
-**`plugin@2.20.0`**, the next minor after npm `2.19.0`. The MCP package stays at
-`2.12.0`, which remains untagged and is not claimed as a release here.
+**`plugin@2.20.0`**, the next minor after npm `2.19.0`. The MCP package is
+released separately as **`mcp-server@2.11.0`**; see its section below.
 
 ## 2.19.0 — TUI support (released, `ceff22d`)
 
@@ -176,6 +176,20 @@ Everything below ships in `plugin@2.20.0`. The earlier development labels
   task-list mirror, the 17-test `say-monitor` suite, and the 28-test `say` suite.
   Final state: **174 plugin tests**, **57 MCP tests**.
 
+## mcp-server 2.11.0 — pending, mirror, relay levels (released, `mcp-server@2.11.0`)
+
+Shipped since `mcp-server@2.10.2`:
+
+- **`pending` status.** Queued/not-started entries accepted by the schema and bulk
+  writes, carried through roll-up (`error > running > waiting > pending > done`),
+  relay `--status`/`emit`, and the Markdown mirror.
+- **Optional Markdown task-list mirror.** `tasklist-<session>.md` with a location
+  enum (project root, `.progress/`, or home), UI vs raw views, safe detail modes,
+  ordering, relay-entry filtering (`relayMirrorLevel`), session-key hardening,
+  sentinel/state-path guards, and mirror prefs/status files.
+- **Store and mirror support** for cleared/dismissed entries plus expanded MCP
+  smoke and task-list suites (**57 tests**).
+
 ## Local config note
 
 The local OpenCode config used while validating this range sets `sayModes`,
@@ -188,7 +202,7 @@ included.
 
 - Range: **`plugin@2.18.9`** (`e938598`) → **`plugin@2.20.0`** release commit — **41 commits**.
 - Published release in range: **`plugin@2.19.0`** → `ceff22d`.
-- MCP package version: **`2.12.0`** (untagged; not claimed as a release).
+- MCP package version: **`2.11.0`** (released, `mcp-server@2.11.0`).
 - 2.19.0: `39d289c` screenshots, `d2ac471` TUI one-line summary, `332490b`
   screenshot bump, `d8af77b` authoritative stale nudges, `ceff22d` release.
 - Unreleased: `d032d7f` badges, `73053a7` task-list mirror, `a4aa3c6` local
