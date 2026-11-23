@@ -315,6 +315,36 @@ export function dismissalsFor(
   return next;
 }
 
+export type TreeTheme = "default" | "compact";
+
+/**
+ * Normalize the configured tree theme. Anything but `compact` keeps the
+ * default rendering (bars, started line, multi-line detail).
+ */
+export function normalizeTreeTheme(value: unknown): TreeTheme {
+  return value === "compact" ? "compact" : "default";
+}
+
+/**
+ * One-line meta suffix for a compact tree row: the percentage and/or the
+ * collapsed-descendant count, joined with ` · `.
+ *
+ *   compactTreeSuffix(0.4, 3) === "40% · & 3 more"
+ *   compactTreeSuffix(0.4, 0) === "40%"
+ *   compactTreeSuffix(undefined, 2) === "& 2 more"
+ *   compactTreeSuffix(undefined, 0) === ""
+ */
+export function compactTreeSuffix(
+  progress: number | null | undefined,
+  hiddenChildren = 0
+): string {
+  const parts: string[] = [];
+  const pct = progressLabel(progress);
+  if (pct) parts.push(pct);
+  if (hiddenChildren > 0) parts.push(`& ${hiddenChildren} more`);
+  return parts.join(" · ");
+}
+
 export type BarStyle = "blocks" | "emoji";
 
 export interface BarOptions {

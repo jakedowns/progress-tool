@@ -23,7 +23,7 @@ execFileSync(
   [path.join(ROOT, 'src', 'tree.ts'), '--bundle', '--format=cjs', `--outfile=${path.join(OUT, 'tree.cjs')}`],
   { stdio: 'pipe' }
 );
-const { buildTree } = require(path.join(OUT, 'tree.cjs'));
+const { buildTree, compactTreeSuffix, normalizeTreeTheme } = require(path.join(OUT, 'tree.cjs'));
 
 function rootOf(entries) {
   const map = {};
@@ -112,4 +112,25 @@ test('a node that failed itself keeps its own progress when children all succeed
 
   assert.equal(root.status, 'error');
   assert.equal(root.progress, 0.3, 'own failure progress is preserved');
+});
+
+test('treeTheme normalizes to default unless exactly compact', () => {
+  assert.equal(normalizeTreeTheme('compact'), 'compact');
+  assert.equal(normalizeTreeTheme('default'), 'default');
+  assert.equal(normalizeTreeTheme('COMPACT'), 'default');
+  assert.equal(normalizeTreeTheme('nope'), 'default');
+  assert.equal(normalizeTreeTheme(undefined), 'default');
+  assert.equal(normalizeTreeTheme(true), 'default');
+});
+
+test('compact tree suffix renders pct, hidden count, both, or nothing', () => {
+  assert.equal(compactTreeSuffix(0.4, 0), '40%');
+  assert.equal(compactTreeSuffix(0.4, 3), '40% · & 3 more');
+  assert.equal(compactTreeSuffix(undefined, 2), '& 2 more');
+  assert.equal(compactTreeSuffix(null, 1), '& 1 more');
+  assert.equal(compactTreeSuffix(undefined, 0), '');
+  assert.equal(compactTreeSuffix(null), '');
+  // Whole-number rounding matches the default progress label.
+  assert.equal(compactTreeSuffix(1), '100%');
+  assert.equal(compactTreeSuffix(0), '0%');
 });
