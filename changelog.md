@@ -2,16 +2,16 @@
 
 Changes to the Progress Tool (OpenCode plugin, TUI/GUI views, and MCP
 server/relay) from **`plugin@2.18.9`** (`e938598`) through the current HEAD
-(`face549`), dated **2026-11-23** — 37 commits.
+(`02ba836`), dated **2026-11-23** — 39 commits.
 
 **Release policy for this range.** The last published/tagged plugin release is
 **`plugin@2.19.0`** (`ceff22d`); `plugin@2.18.9` is its predecessor. Package
 versions `2.20.0`–`2.25.0` were **never published**: they were local minor
 bumps used to force plugin reloads and are consolidated in the unreleased
 section below, not presented as releases. `plugin/package.json` and the README
-version lines are reset to `2.19.0`; the next published plugin version will be a
-**patch (target `2.19.1`)**. The MCP package is at `2.12.0`, which is also
-untagged and is not claimed as a release here.
+version lines are now `2.19.1` (unreleased patch); the last published tag stays
+`2.19.0`, and future local changes stay on the patch line. The MCP package is at
+`2.12.0`, which is also untagged and is not claimed as a release here.
 
 ## 2.19.0 — TUI support (released, `ceff22d`)
 
@@ -32,7 +32,7 @@ Shipped in `plugin@2.18.9..plugin@2.19.0`:
   `screenshots/tui2.png`, updated the docs and release workflow examples, and
   bumped the plugin to `2.19.0`.
 
-## Unreleased after 2.19.0 (targets 2.19.1)
+## 2.19.1 (unreleased, current local)
 
 Everything below is unreleased. Local reload labels `2.20.0`–`2.25.0` are
 historical only; none of them was published.
@@ -66,6 +66,11 @@ historical only; none of them was published.
   Expired notes fall back to the next visible note, surfaces disappear when none
   remain, old notes never toast, and the GUI re-renders on a 5s clock only while
   notes exist. View-only: the store and purge rules are unchanged.
+- **Toast scope and durations.** `sayToastScope` defaults to `"own"` (only notes
+  authored by the viewed session toast); `"warnings"` also toasts child
+  `blocked`/`question` notes, and `"all"` toasts every rolled-up note. Child
+  notes still appear in the line/pill/history with attribution. Warning toasts
+  last 12s instead of 5s in both clients.
 - **Long-tool `say` nudge.** Opt-in `sayNudge` (`true` / `"long-tool"`) leaves a
   one-shot, context-only reminder after a tool runs longer than
   `sayNudgeAfterMs` (default 20s) with no accepted note that turn. Guards run in
@@ -171,7 +176,7 @@ historical only; none of them was published.
 - Expanded suites across the range: notes, say/sayModes, clear/delete,
   dismissal, GUI/TUI view normalizers, task-list prefs, roll-up, MCP smoke, the
   task-list mirror, the 17-test `say-monitor` suite, and the 28-test `say` suite.
-  Final state: **171 plugin tests**, **57 MCP tests**.
+  Final state: **174 plugin tests**, **57 MCP tests**.
 
 ## Local config note
 
@@ -183,7 +188,7 @@ included.
 
 ## Commits
 
-- Range: **`plugin@2.18.9`** (`e938598`) → **`face549`** — **37 commits**.
+- Range: **`plugin@2.18.9`** (`e938598`) → **`02ba836`** — **39 commits**.
 - Published release in range: **`plugin@2.19.0`** → `ceff22d`.
 - MCP package version: **`2.12.0`** (untagged; not claimed as a release).
 - 2.19.0: `39d289c` screenshots, `d2ac471` TUI one-line summary, `332490b`
@@ -198,5 +203,6 @@ included.
   `93f3dbc` GUI surfaces, `4efe127` sayModes docs, `11a7c8a` auto-hide,
   `c6b24d4` long-tool nudge, `a4964ef` length fix, `434bf46` tree helpers,
   `ac5d2f3` GUI compact rows, `4b039f0` TUI compact rows, `5fde838` treeTheme
-  docs, `e3620ef` length wording, `07eaea0` changelog, `face549` version reset.
+  docs, `e3620ef` length wording, `07eaea0` changelog, `face549` version reset,
+  `9c85c88` changelog consolidation, `02ba836` toast scope + warning durations.
 - Historical local reload labels `2.20.0`–`2.25.0` were never published.
