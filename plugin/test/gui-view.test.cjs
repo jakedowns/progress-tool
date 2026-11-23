@@ -32,6 +32,8 @@ const {
   normalizeGuiDetailLines,
   normalizeGuiLayout,
   normalizeGuiSidebarWidth,
+  buildNotesPill,
+  noteAuthorLabel,
 } = require(path.join(OUT, 'gui-view.cjs'));
 
 test('layout normalizes and swaps between composer and sidebar', () => {
@@ -63,4 +65,44 @@ test('detail lines default to 1, allow -1/0, floor fractions and cap at 100', ()
 
 test('the progress panel id is stable', () => {
   assert.equal(GUI_PROGRESS_PANEL_ID, 'progress');
+});
+
+const note = (text, at, extra = {}) => ({
+  id: String(at),
+  sessionId: 's',
+  text,
+  kind: 'update',
+  at,
+  ...extra,
+});
+
+test('notes pill hides when empty and shows the latest snippet', () => {
+  assert.equal(buildNotesPill([]), undefined);
+  assert.equal(buildNotesPill(undefined), undefined);
+
+  const pill = buildNotesPill([note('older', 1), note('latest note', 2)]);
+  assert.equal(pill.label, 'latest note');
+  assert.equal(pill.title, '2 notes · latest update');
+  assert.equal(pill.tone, undefined);
+});
+
+test('notes pill truncates and warns on blocked/question notes', () => {
+  const long = buildNotesPill([note('x'.repeat(200), 1)], { maxChars: 40 });
+  assert.match(long.label, /…$/);
+  assert.ok(long.label.length <= 40);
+
+  assert.equal(
+    buildNotesPill([note('need input', 1, { kind: 'question' })]).tone,
+    'warning'
+  );
+  assert.equal(
+    buildNotesPill([note('stuck', 1, { kind: 'blocked', eta: '~5 min' })]).title,
+    '1 note · latest blocked · ETA ~5 min'
+  );
+});
+
+test('noteAuthorLabel distinguishes the root agent from child sessions', () => {
+  assert.equal(noteAuthorLabel({ sessionId: 's' }, 's'), 'Agent');
+  assert.equal(noteAuthorLabel({ sessionId: 'c', agent: 'explore' }, 's'), 'Subagent (explore)');
+  assert.equal(noteAuthorLabel({ sessionId: 'c' }, 's'), 'Subagent');
 });

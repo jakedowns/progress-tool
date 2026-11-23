@@ -14,7 +14,9 @@ import { feedbackIssueUrl } from "./feedback.js";
 import { ProgressRpc } from "./rpc.js";
 import {
   GUI_PROGRESS_PANEL_ID,
+  buildNotesPill,
   nextGuiLayout,
+  noteAuthorLabel,
   normalizeGuiDetailLines,
   normalizeGuiLayout,
   normalizeGuiSidebarWidth,
@@ -41,10 +43,13 @@ import {
   visibleEntries,
   type BarOptions,
 } from "./tree.js";
-import type { ProgressEntry, TreeNode } from "./types.js";
+import type { ProgressEntry, SayNote, TreeNode } from "./types.js";
+
+type GuiNote = SayNote & { rootSessionId?: string };
 
 type GuiState = {
   entries: Record<string, ProgressEntry>;
+  notes: GuiNote[];
   loaded: boolean;
   error?: string;
 };
@@ -316,7 +321,7 @@ function rowFor(node: TreeNode, depth: number, options: BarOptions) {
 
 export default Plugin.define({
   setup(ctx) {
-    const [state, setState] = createSignal<GuiState>({ entries: {}, loaded: false });
+    const [state, setState] = createSignal<GuiState>({ entries: {}, notes: [], loaded: false });
     const [interacting, setInteracting] = createSignal(false);
     let suspendUntil = 0;
     // Dismissal is per root task and scoped to that task itself; the revival
@@ -395,6 +400,7 @@ export default Plugin.define({
         scope?: "session" | "all";
       }): Promise<{
         entries?: Record<string, ProgressEntry>;
+        notes?: GuiNote[];
         revision?: string;
       }>;
       dismiss(input: { key: string; status: string }): Promise<{ ok: boolean }>;
@@ -442,17 +448,23 @@ export default Plugin.define({
     void refreshTaskListStatus();
     const taskListTimer = setInterval(() => void refreshTaskListStatus(), 10_000);
 
+    /** Notes rolled up to this session's root, newest first. */
+    const notesForSession = (sessionID: string) =>
+      state()
+        .notes.filter((note) => (note.rootSessionId ?? note.sessionId) === sessionID)
+        .slice(0, 20);
+
     const refresh = async () => {
       if (inFlight || interacting() || Date.now() < suspendUntil) return;
       inFlight = true;
       try {
         const session = ctx.sessions.current();
         if (!session) {
-          setState((prev) => ({ ...prev, loaded: true }));
+          setState((prev) => ({ ...prev, notes: [], loaded: true }));
           return;
         }
         const result = await withTimeout(
-          rpcFor(session).list({ scope: "all" }),
+          rpcFor(session).list({ scope: "all", sessionID: session.id }),
           4000
         );
         if (!alive) return;
@@ -464,6 +476,7 @@ export default Plugin.define({
         if (revision && revision === lastRevision) return;
         if (revision) lastRevision = revision;
         const entries = (result?.entries ?? {}) as Record<string, ProgressEntry>;
+        const notes = (result?.notes ?? []) as GuiNote[];
         // Drop optimistic dismissals once the persisted state reflects them.
         // Build the next map first so an unchanged poll does not notify every
         // dependent computation a second time.
@@ -478,7 +491,7 @@ export default Plugin.define({
           }
         }
         batch(() => {
-          setState({ entries, loaded: true });
+          setState({ entries, notes, loaded: true });
           if (pendingChanged) setPendingDismissed(nextPending);
         });
       } catch (error) {
@@ -1309,6 +1322,57 @@ export default Plugin.define({
       );
     };
 
+    const NotesMenu = (props: { sessionID: string; close?: () => void }) => {
+      onCleanup(() => setInteracting(false));
+      const notes = createMemo(() => notesForSession(props.sessionID));
+      return (
+        <div
+          onPointerEnter={() => setInteracting(true)}
+          onPointerLeave={() => setInteracting(false)}
+          style={{
+            display: "flex",
+            "flex-direction": "column",
+            gap: "8px",
+            "min-width": "320px",
+            "max-width": "520px",
+          }}
+        >
+          <For each={notes()}>
+            {(note) => (
+              <div style={{ display: "flex", "flex-direction": "column", gap: "2px" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    "justify-content": "space-between",
+                    gap: "12px",
+                    "font-size": "11px",
+                    color: "#94a3b8",
+                  }}
+                >
+                  <span>
+                    {noteAuthorLabel(note, props.sessionID)} · {note.kind}
+                    {note.eta ? ` · ETA ${note.eta}` : ""}
+                  </span>
+                  <span title={new Date(note.at).toLocaleString()}>
+                    {formatRelative(note.at)}
+                  </span>
+                </div>
+                <div
+                  style={{
+                    "font-size": "13px",
+                    "white-space": "pre-wrap",
+                    "overflow-wrap": "anywhere",
+                  }}
+                >
+                  {note.text}
+                </div>
+              </div>
+            )}
+          </For>
+        </div>
+      );
+    };
+
     ctx.add(ComposerPill, () => ({
       id: "progress",
       show: (input) => {
@@ -1415,6 +1479,27 @@ export default Plugin.define({
         />
       ),
     }));
+
+    // Optional second pill for `say` notes. Opt in with { options: { say: true } };
+    // composer mode only — sidebar mode is the task tree's surface.
+    const sayNotesEnabled = ctx.options?.say === true;
+    ctx.add(ComposerPill, {
+      id: "say-notes",
+      order: 1,
+      show: (input) => {
+        if (!sayNotesEnabled) return undefined;
+        if (layoutMode() === "sidebar") return undefined;
+        const view = buildNotesPill(notesForSession(input.session.id));
+        if (!view) return undefined;
+        return {
+          label: view.label,
+          title: view.title,
+          icon: "speech-bubble" as const,
+          ...(view.tone ? { tone: view.tone } : {}),
+        };
+      },
+      menu: (input) => <NotesMenu sessionID={input.session.id} close={input.close} />,
+    });
 
     const toggleTaskListView = async () => {
       try {
