@@ -13,6 +13,10 @@
  * `${cwd}/${sessionID}-tasklist.md`.
  *
  *   PROGRESS_TASKLIST_ORDER=newest-first | oldest-first
+ *   PROGRESS_TASKLIST_RELAY_LEVEL=0 | 1 | 2
+ *     0 (default): omit relay-created command entries
+ *     1: mirror every relay entry (the old behavior)
+ *     2: mirror relay entries only while their current status is error
  */
 
 const fs = require('fs');
@@ -25,6 +29,18 @@ function isTruthy(value) {
   return typeof value === 'string' && TRUTHY.has(value.trim().toLowerCase());
 }
 
+/**
+ * Normalize relayMirrorLevel. Numeric 0/1/2 is the documented form; accept
+ * the obvious aliases so hand-written MCP env stays readable.
+ */
+function normalizeRelayMirrorLevel(value) {
+  const text = String(value ?? '').trim().toLowerCase();
+  if (text === 'log' || text === 'all') return 1;
+  if (text === 'err' || text === 'error' || text === 'errors') return 2;
+  const numeric = Number(text);
+  return numeric === 1 || numeric === 2 ? numeric : 0;
+}
+
 function taskListConfig(env = process.env, cwd = process.cwd()) {
   const configuredPath =
     typeof env.PROGRESS_TASKLIST_PATH === 'string' ? env.PROGRESS_TASKLIST_PATH.trim() : '';
@@ -34,7 +50,14 @@ function taskListConfig(env = process.env, cwd = process.cwd()) {
       ? 'oldest-first'
       : DEFAULT_ORDER;
   const sessionID = String(env.PROGRESS_SESSION_ID || env.OPENCODE_SESSION_ID || '').trim();
-  return { enabled, configuredPath, order, sessionID, cwd };
+  return {
+    enabled,
+    configuredPath,
+    order,
+    sessionID,
+    cwd,
+    relayMirrorLevel: normalizeRelayMirrorLevel(env.PROGRESS_TASKLIST_RELAY_LEVEL),
+  };
 }
 
 function safeName(value) {
@@ -94,12 +117,22 @@ function sortEntries(entries, order) {
 function renderTaskList(state, options = {}) {
   const sessionID = options.sessionID || '';
   const order = options.order === 'oldest-first' ? 'oldest-first' : DEFAULT_ORDER;
+  const relayMirrorLevel = normalizeRelayMirrorLevel(options.relayMirrorLevel);
   const all = Object.values((state && state.entries) || {}).filter(
     (entry) => entry && typeof entry === 'object'
   );
-  const entries = sessionID
+  const scopedEntries = sessionID
     ? all.filter((entry) => !entry.sessionId || entry.sessionId === sessionID)
     : all;
+  // Relay-created command entries are high-volume telemetry. Level 0 hides
+  // them entirely, level 1 keeps the old behavior, and level 2 keeps only
+  // entries whose current status is error. Agent-created tasks always mirror.
+  const entries = scopedEntries.filter((entry) => {
+    if (!entry.relay) return true;
+    if (relayMirrorLevel === 1) return true;
+    if (relayMirrorLevel === 2) return entry.status === 'error';
+    return false;
+  });
 
   const byId = new Map(entries.map((entry) => [entry.id, entry]));
   const children = new Map();
@@ -185,6 +218,7 @@ function syncTaskList(state, options = {}) {
 
 module.exports = {
   taskListConfig,
+  normalizeRelayMirrorLevel,
   resolveTaskListPath,
   renderTaskList,
   syncTaskList,

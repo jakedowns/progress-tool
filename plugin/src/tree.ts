@@ -239,6 +239,7 @@ export function summarizeEntries(entries: Record<string, ProgressEntry>): {
   let dismissed = 0;
   for (const entry of Object.values(entries)) {
     if (!entry || typeof entry !== "object") continue;
+    if (entry.cleared) continue;
     if (entry.status === "running" || entry.status === "waiting") active++;
     if (entry.status === "done") done++;
     if (entry.dismissed) dismissed++;
@@ -439,6 +440,9 @@ export function visibleEntries(
   const visible: Record<string, ProgressEntry> = {};
   for (const [key, entry] of Object.entries(entries)) {
     if (!entry || typeof entry !== "object") continue;
+    // Soft-cleared records stay on disk for auditing and hard-delete, but no
+    // view renders or counts them.
+    if (entry.cleared) continue;
     if (entry.status === "done") {
       if (!showDone) continue;
       if (autoHideDone && now - (entry.updatedAt ?? 0) >= hold) continue;

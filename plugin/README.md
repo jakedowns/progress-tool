@@ -79,8 +79,9 @@ Pass under the plugin entry's `options` in `opencode.json`:
 | `taskListFile` | `false` | mirror the session's tasks to a local Markdown checklist |
 | `taskListPath` | `""` | checklist path; empty = `<sessionID>-tasklist.md` in the MCP working dir |
 | `taskListOrder` | `"newest-first"` | `"newest-first"` (new at top) or `"oldest-first"` (append at bottom) |
+| `relayMirrorLevel` | `0` | `0` omit relay-created entries, `1` mirror all relay entries, `2` relay errors only |
 
-These options are passed to the MCP server when the plugin auto-registers it. If you configure `progress-server` manually, put `PROGRESS_TASKLIST` / `PROGRESS_TASKLIST_PATH` / `PROGRESS_TASKLIST_ORDER` in that server's `environment` instead (see the MCP README).
+These options are passed to the MCP server when the plugin auto-registers it. If you configure `progress-server` manually, put `PROGRESS_TASKLIST` / `PROGRESS_TASKLIST_PATH` / `PROGRESS_TASKLIST_ORDER` / `PROGRESS_TASKLIST_RELAY_LEVEL` in that server's `environment` instead (see the MCP README).
 | `mcpRuntime` | auto | absolute path to the `node`/`bun` used to spawn the MCP server (auto-detected; set this if detection picks wrong) |
 | `strictMode` | `"nudge"` | `"nudge"` / `"force"` / `"off"` tool-call monitor |
 | `staleEscalateAfter` | `3` | entry-based stale reminders before one synthetic escalation (`0` disables) |
@@ -92,6 +93,7 @@ These options are passed to the MCP server when the plugin auto-registers it. If
 | `expandRootsByDefault` | `false` | expand pill tree roots by default |
 | `barStyle` | `"blocks"` | `"blocks"` or `"emoji"` |
 | `refreshMs` | `1000` | view refresh interval |
+| `retainDeletedSessionProgress` | `false` | keep store entries when a session is deleted |
 | `tuiMaxRows` | `8` | max TUI tree rows above the prompt; `/progress` expands or dismisses |
 | `tuiMaxRoots` | `3` | root tasks shown before the full-tree summary; palette has "Progress: set root cap" |
 | `tuiLayout` | `"composer"` | TUI placement: `"composer"` (above the prompt) or `"sidebar"`; `/progress swap-layout` toggles it |

@@ -13,8 +13,11 @@ import { Plugin, Skill } from "@opencode/plugin";
 import { ProgressRpc } from "./rpc.js";
 import {
   adoptChildEntries,
+  hardDeleteAll,
+  hardDeleteSession,
   readProgressState,
   recordChildSession,
+  softClearSession,
   writeDismissal,
 } from "./state.js";
 import { normalizeRefreshMs } from "./tree.js";
@@ -137,18 +140,105 @@ export default Plugin.define({
     let signature = JSON.stringify(readProgressState().entries ?? {});
 
     const registration = await ctx.rpc.register(ProgressRpc, {
-      list: async () => {
+      list: async (input) => {
+        const { sessionID, scope } = (input ?? {}) as {
+          sessionID?: string;
+          scope?: "session" | "all";
+        };
         const state = readProgressState();
-        return { entries: state.entries ?? {}, updatedAt: Date.now() };
+        const allEntries = state.entries ?? {};
+        const entries: Record<string, any> = {};
+        for (const [key, entry] of Object.entries(allEntries)) {
+          if (!entry || typeof entry !== "object") continue;
+          if (
+            scope !== "all" &&
+            sessionID &&
+            entry.sessionId !== sessionID &&
+            !key.startsWith(`${sessionID}:`)
+          ) {
+            continue;
+          }
+          entries[key] = entry;
+        }
+        let maxUpdated = 0;
+        let cleared = 0;
+        for (const entry of Object.values(entries)) {
+          if (!entry || typeof entry !== "object") continue;
+          maxUpdated = Math.max(
+            maxUpdated,
+            entry.updatedAt || 0,
+            entry.dismissed?.at || 0,
+            entry.cleared?.at || 0
+          );
+          if (entry.cleared) cleared++;
+        }
+        return {
+          entries,
+          updatedAt: Date.now(),
+          revision: `${Object.keys(entries).length}:${maxUpdated}:${cleared}`,
+        };
       },
       dismiss: async ({ key, status }) => {
         const ok = writeDismissal(key, status);
         console.log(`[opencode-progress] v${pluginVersion} dismiss rpc key=${key} status=${status} ok=${ok}`);
         return { ok };
       },
+      clear: async ({ sessionID }) => {
+        const result = softClearSession(sessionID);
+        return { ok: true, cleared: result.cleared };
+      },
+      hardClearSession: async ({ sessionID }) => {
+        const result = hardDeleteSession(sessionID);
+        return { ok: true, removed: result.removed, freedBytes: result.freedBytes };
+      },
+      hardClearAll: async () => {
+        const result = hardDeleteAll();
+        return { ok: true, removed: result.removed, freedBytes: result.freedBytes };
+      },
+      stats: async (input) => {
+        const { sessionID } = (input ?? {}) as { sessionID?: string };
+        const state = readProgressState();
+        const scoped: Record<string, any> = {};
+        for (const [key, entry] of Object.entries(state.entries ?? {})) {
+          if (!entry || typeof entry !== "object") continue;
+          if (
+            sessionID &&
+            entry.sessionId !== sessionID &&
+            !key.startsWith(`${sessionID}:`)
+          ) {
+            continue;
+          }
+          scoped[key] = entry;
+        }
+        let active = 0;
+        let done = 0;
+        let error = 0;
+        let dismissed = 0;
+        let cleared = 0;
+        for (const entry of Object.values(scoped)) {
+          if (entry.cleared) {
+            cleared++;
+            continue;
+          }
+          if (entry.status === "running" || entry.status === "waiting") active++;
+          if (entry.status === "done") done++;
+          if (entry.status === "error") error++;
+          if (entry.dismissed) dismissed++;
+        }
+        return {
+          entries: Object.keys(scoped).length,
+          active,
+          done,
+          error,
+          dismissed,
+          cleared,
+          bytes: Buffer.byteLength(JSON.stringify(scoped)),
+        };
+      },
     });
 
     const refreshMs = normalizeRefreshMs(ctx.options);
+    const retainDeletedSessionProgress = ctx.options?.retainDeletedSessionProgress === true;
 
     const timer = setInterval(() => {
       const next = JSON.stringify(readProgressState().entries ?? {});
@@ -410,22 +500,34 @@ export default Plugin.define({
 
     // Subagent attribution, part 1: `session.created` carries parentID the
     // moment a child session exists, so map (and adopt) before the child's
-    // first progress call. Consumed in the background; the stream ends when
-    // the plugin unloads.
+    // first progress call. `session.deleted` recycles the plugin store for
+    // that session unless the user opted into retaining deleted sessions.
+    // Consumed in the background; the stream ends when the plugin unloads.
     if (ctx.event?.subscribe) void (async () => {
       try {
-        for await (const event of ctx.event.subscribe({ types: ['session.created'] })) {
-          if (event.type !== 'session.created') continue;
-          const child = event.data.sessionID;
-          const parent = event.data.parentID;
-          const agent = event.data.agent;
-          if (!child || !parent) continue;
-          if (recordChildSession(child, parent, agent)) {
-            adoptChildEntries(child, parent, agent);
+        for await (const event of ctx.event.subscribe({
+          types: ['session.created', 'session.deleted'],
+        })) {
+          if (event.type === 'session.created') {
+            const child = event.data.sessionID;
+            const parent = event.data.parentID;
+            const agent = event.data.agent;
+            if (!child || !parent) continue;
+            if (recordChildSession(child, parent, agent)) {
+              adoptChildEntries(child, parent, agent);
+            }
+          } else if (event.type === 'session.deleted') {
+            if (retainDeletedSessionProgress) continue;
+            const result = hardDeleteSession(event.data.sessionID);
+            if (result.removed > 0) {
+              console.log(
+                `[opencode-progress] purged ${result.removed} entries for deleted session ${event.data.sessionID}`
+              );
+            }
           }
         }
       } catch (error) {
-        console.error('[opencode-progress] session.created subscription failed', String(error));
+        console.error('[opencode-progress] session event subscription failed', String(error));
       }
     })();
 

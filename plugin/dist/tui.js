@@ -28,6 +28,32 @@ function readProgressState() {
   return { entries: {}, version: 2 };
 }
 var SESSION_LINK_TTL_MS = 30 * 24 * 60 * 60 * 1e3;
+function sessionMapFilePath() {
+  return process.env.PROGRESS_SESSION_MAP_PATH || path.join(path.dirname(stateFilePath()), ".opencode-progress-sessions.json");
+}
+function readSessionMap() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(sessionMapFilePath(), "utf8"));
+    const links = parsed && typeof parsed === "object" && "links" in parsed ? parsed.links : parsed;
+    if (!links || typeof links !== "object") return {};
+    const map = {};
+    for (const [child, value] of Object.entries(links)) {
+      if (typeof value === "string" && value) {
+        map[child] = { parentId: value, at: 0 };
+      } else if (value && typeof value === "object" && typeof value.parentId === "string") {
+        const link = value;
+        map[child] = {
+          parentId: link.parentId,
+          at: Number(link.at) || 0,
+          agent: typeof link.agent === "string" && link.agent ? link.agent : void 0
+        };
+      }
+    }
+    return map;
+  } catch {
+    return {};
+  }
+}
 function writeDismissal(key, status) {
   const file = stateFilePath();
   const lock = `${file}.lock`;
@@ -62,6 +88,165 @@ function writeDismissal(key, status) {
   } catch (error) {
     console.error("[opencode-progress] dismissal write failed", String(error));
     return false;
+  } finally {
+    try {
+      fs.unlinkSync(lock);
+    } catch {
+    }
+  }
+}
+function mutateStateFile(mutator) {
+  const file = stateFilePath();
+  const lock = `${file}.lock`;
+  let locked = false;
+  for (let attempt = 0; attempt < 10 && !locked; attempt++) {
+    try {
+      fs.writeFileSync(lock, String(process.pid), { flag: "wx" });
+      locked = true;
+    } catch {
+      try {
+        if (Date.now() - fs.statSync(lock).mtimeMs > 15e3) fs.unlinkSync(lock);
+      } catch {
+      }
+      try {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+      } catch {
+      }
+    }
+  }
+  if (!locked) return void 0;
+  try {
+    const state2 = readProgressState();
+    const { value, write } = mutator(state2);
+    if (!write) return value;
+    state2.version = state2.version ?? 2;
+    const tmp = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(state2, null, 2));
+    fs.renameSync(tmp, file);
+    return value;
+  } catch (error) {
+    console.error("[opencode-progress] state write failed", String(error));
+    return void 0;
+  } finally {
+    try {
+      fs.unlinkSync(lock);
+    } catch {
+    }
+  }
+}
+function belongsToSession(key, entry, sessionID) {
+  return entry.sessionId === sessionID || key.startsWith(`${sessionID}:`);
+}
+function stateBytes(state2) {
+  return Buffer.byteLength(JSON.stringify(state2));
+}
+function softClearSession(sessionID) {
+  if (!sessionID) return { cleared: 0 };
+  const at = Date.now();
+  let cleared = 0;
+  const result = mutateStateFile((state2) => {
+    for (const [key, entry] of Object.entries(state2.entries)) {
+      if (!entry || typeof entry !== "object") continue;
+      if (!belongsToSession(key, entry, sessionID)) continue;
+      if (entry.cleared) continue;
+      const finished = entry.status === "done" || entry.status === "error";
+      if (!finished && !entry.dismissed) continue;
+      delete entry.dismissed;
+      entry.cleared = { at, status: entry.status };
+      cleared++;
+    }
+    return { value: { cleared }, write: cleared > 0 };
+  });
+  if (result?.cleared) {
+    console.log(`[opencode-progress] soft-cleared ${cleared} entries session=${sessionID}`);
+  }
+  return result ?? { cleared: 0 };
+}
+function hardDeleteSession(sessionID) {
+  if (!sessionID) return { removed: 0, freedBytes: 0 };
+  let removed = 0;
+  const result = mutateStateFile((state2) => {
+    const before = stateBytes(state2);
+    for (const [key, entry] of Object.entries(state2.entries)) {
+      if (!entry || typeof entry !== "object") continue;
+      if (!belongsToSession(key, entry, sessionID)) continue;
+      delete state2.entries[key];
+      removed++;
+    }
+    return {
+      value: { removed, freedBytes: Math.max(0, before - stateBytes(state2)) },
+      write: removed > 0
+    };
+  });
+  if (result) {
+    removeSessionLinks(sessionID);
+    if (result.removed > 0) {
+      console.log(
+        `[opencode-progress] hard-deleted ${removed} entries session=${sessionID} freed=${result.freedBytes}B`
+      );
+    }
+  }
+  return result ?? { removed: 0, freedBytes: 0 };
+}
+function hardDeleteAll() {
+  let removed = 0;
+  const result = mutateStateFile((state2) => {
+    const before = stateBytes(state2);
+    removed = Object.keys(state2.entries).length;
+    state2.entries = {};
+    return {
+      value: { removed, freedBytes: Math.max(0, before - stateBytes(state2)) },
+      write: removed > 0
+    };
+  });
+  if (result) {
+    removeSessionLinks();
+    if (result.removed > 0) {
+      console.log(`[opencode-progress] hard-cleared store: ${removed} entries freed=${result.freedBytes}B`);
+    }
+  }
+  return result ?? { removed: 0, freedBytes: 0 };
+}
+function removeSessionLinks(sessionID) {
+  const file = sessionMapFilePath();
+  const lock = `${file}.lock`;
+  let locked = false;
+  for (let attempt = 0; attempt < 10 && !locked; attempt++) {
+    try {
+      fs.writeFileSync(lock, String(process.pid), { flag: "wx" });
+      locked = true;
+    } catch {
+      try {
+        if (Date.now() - fs.statSync(lock).mtimeMs > 15e3) fs.unlinkSync(lock);
+      } catch {
+      }
+      try {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+      } catch {
+      }
+    }
+  }
+  if (!locked) return 0;
+  try {
+    const map = readSessionMap();
+    let removed = 0;
+    for (const [child, link] of Object.entries(map)) {
+      if (sessionID === void 0 || child === sessionID || link.parentId === sessionID) {
+        delete map[child];
+        removed++;
+      }
+    }
+    if (removed === 0) return 0;
+    const tmp = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify({ links: map }, null, 2));
+    fs.renameSync(tmp, file);
+    console.log(
+      `[opencode-progress] removed ${removed} session link${removed === 1 ? "" : "s"}${sessionID ? ` for ${sessionID}` : ""}`
+    );
+    return removed;
+  } catch (error) {
+    console.error("[opencode-progress] session link cleanup failed", String(error));
+    return 0;
   } finally {
     try {
       fs.unlinkSync(lock);
@@ -249,6 +434,7 @@ function visibleEntries(entries, now, options = {}) {
   const visible = {};
   for (const [key, entry] of Object.entries(entries)) {
     if (!entry || typeof entry !== "object") continue;
+    if (entry.cleared) continue;
     if (entry.status === "done") {
       if (!showDone) continue;
       if (autoHideDone && now - (entry.updatedAt ?? 0) >= hold) continue;
@@ -792,6 +978,111 @@ async function promptRootCap(context) {
     variant: "info"
   });
 }
+function sessionEntriesOf(sessionID) {
+  return Object.entries(state().entries ?? {}).filter(([key, entry]) => entry && typeof entry === "object" && (entry.sessionId === sessionID || key.startsWith(`${sessionID}:`)));
+}
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+}
+async function clearList(context) {
+  const sessionID = currentSessionID(context);
+  if (!sessionID) {
+    context.ui.toast.show({
+      message: "Open a session to manage progress",
+      variant: "warning"
+    });
+    return;
+  }
+  const candidates = sessionEntriesOf(sessionID).filter(([, entry]) => !entry.cleared && (entry.status === "done" || entry.status === "error" || Boolean(entry.dismissed)));
+  if (candidates.length === 0) {
+    context.ui.toast.show({
+      message: "Nothing to clear",
+      variant: "info"
+    });
+    return;
+  }
+  const confirmed = await context.ui.dialog.confirm({
+    title: "Clear progress list?",
+    message: `${candidates.length} finished or dismissed ${candidates.length === 1 ? "entry" : "entries"} will be hidden. Records stay on disk; running tasks keep showing.`,
+    label: {
+      confirm: "Clear list"
+    }
+  });
+  if (!confirmed) return;
+  const result = softClearSession(sessionID);
+  setState(readProgressState());
+  context.ui.toast.show({
+    message: `Cleared ${result.cleared} ${result.cleared === 1 ? "entry" : "entries"} (records kept)`,
+    variant: "success"
+  });
+}
+async function hardClearSessionCommand(context) {
+  const sessionID = currentSessionID(context);
+  if (!sessionID) {
+    context.ui.toast.show({
+      message: "Open a session to manage progress",
+      variant: "warning"
+    });
+    return;
+  }
+  const entries = sessionEntriesOf(sessionID);
+  if (entries.length === 0) {
+    context.ui.toast.show({
+      message: "Nothing to delete",
+      variant: "info"
+    });
+    return;
+  }
+  const bytes = Buffer.byteLength(JSON.stringify(Object.fromEntries(entries)));
+  const confirmed = await context.ui.dialog.confirm({
+    title: "Permanently delete session progress?",
+    message: `${entries.length} ${entries.length === 1 ? "entry" : "entries"} (${formatBytes(bytes)}) will be removed from the progress store. The mirrored tasklist file is kept. This cannot be undone.`,
+    label: {
+      confirm: "Delete permanently"
+    }
+  });
+  if (!confirmed) return;
+  const result = hardDeleteSession(sessionID);
+  setState(readProgressState());
+  context.ui.toast.show({
+    message: `Deleted ${result.removed} ${result.removed === 1 ? "entry" : "entries"} \xB7 ${formatBytes(result.freedBytes)} freed`,
+    variant: "success"
+  });
+}
+async function hardClearStoreCommand(context) {
+  const entries = Object.values(state().entries ?? {});
+  if (entries.length === 0) {
+    context.ui.toast.show({
+      message: "Progress store is already empty",
+      variant: "info"
+    });
+    return;
+  }
+  const bytes = Buffer.byteLength(JSON.stringify(state().entries ?? {}));
+  const typed = await context.ui.dialog.prompt({
+    title: "Hard clear the entire progress store",
+    description: `This deletes all ${entries.length} entries (${formatBytes(bytes)}) from the plugin store. It cannot be undone without a backup and prevents future auditing or progress reporting. Type DELETE to confirm.`,
+    placeholder: "DELETE"
+  });
+  if (typed?.trim() !== "DELETE") {
+    if (typed !== void 0) {
+      context.ui.toast.show({
+        message: "Store not cleared: confirmation did not match",
+        variant: "warning"
+      });
+    }
+    return;
+  }
+  const result = hardDeleteAll();
+  setState(readProgressState());
+  context.ui.toast.show({
+    message: `Store cleared: ${result.removed} ${result.removed === 1 ? "entry" : "entries"} \xB7 ${formatBytes(result.freedBytes)} freed`,
+    variant: "success"
+  });
+}
 async function confirmDismissAll(context, roots) {
   if (roots.length === 0) return;
   const confirmed = await context.ui.dialog.confirm({
@@ -982,6 +1273,29 @@ var tui_default = Plugin.define({
         group: "progress",
         palette: true,
         run: () => toggleCollapsed(context)
+      }, {
+        id: "progress.clear",
+        title: "Progress: clear list (this session)",
+        description: "Hide finished and dismissed entries; records stay on disk",
+        group: "progress",
+        palette: true,
+        enabled: () => Boolean(currentSessionID(context)),
+        run: () => clearList(context)
+      }, {
+        id: "progress.hard-clear-session",
+        title: "Progress: hard clear this session",
+        description: "Permanently delete this session's progress entries",
+        group: "progress",
+        palette: true,
+        enabled: () => Boolean(currentSessionID(context)),
+        run: () => hardClearSessionCommand(context)
+      }, {
+        id: "progress.hard-clear-store",
+        title: "Progress: hard clear entire progress store",
+        description: "Delete all progress entries; requires typing DELETE",
+        group: "progress",
+        palette: true,
+        run: () => hardClearStoreCommand(context)
       }]
     }));
     const unregisterComposer = context.ui.slot({

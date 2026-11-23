@@ -28,6 +28,19 @@ export interface ProgressEntry {
    * restart. Revival semantics live in tree.ts `isDismissed`.
    */
   dismissed?: { status: string; at: number } | null;
+  /**
+   * View-plane tombstone: the user cleared the list while this entry was
+   * finished or dismissed. The record stays on disk (and in reports), but
+   * views hide it and counts ignore it. Any agent upsert removes the marker,
+   * reviving the entry.
+   */
+  cleared?: { at: number; status?: string } | null;
+  /**
+   * Origin marker: this entry was created by the out-of-band relay rather
+   * than by an agent progress call. The optional task-list mirror uses it to
+   * hide successful command runs while keeping agent tasks and relay errors.
+   */
+  relay?: boolean;
   /** View-plane marker: created by a subagent session. */
   subagent?: boolean;
   /** Subagent type when known (`explore`, `general`, …). */

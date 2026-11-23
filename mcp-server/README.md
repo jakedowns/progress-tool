@@ -68,6 +68,7 @@ Reads the local OpenCode database read-only (requires `python3`) and prints the
 | `PROGRESS_TASKLIST` | off | mirror the session's tasks to a local Markdown checklist |
 | `PROGRESS_TASKLIST_PATH` | `<cwd>/<sessionID>-tasklist.md` | checklist path (relative paths resolve from the MCP server's cwd) |
 | `PROGRESS_TASKLIST_ORDER` | `newest-first` | `newest-first` (new tasks at top) or `oldest-first` (append at bottom) |
+| `PROGRESS_TASKLIST_RELAY_LEVEL` | `0` | relay-created entries: `0` omit, `1` all, `2` errors only |
 
 ## Local task-list mirror
 
@@ -93,6 +94,14 @@ ticks that only update percentages or `updatedAt` do not touch the file. Each
 task includes its checkbox, status, creation time, and last status-change time;
 children are nested under their parent. New tasks appear at the top by default,
 or append at the bottom with `PROGRESS_TASKLIST_ORDER=oldest-first`.
+
+Relay-created command entries are omitted by default so successful builds do
+not fill the checklist. Set `PROGRESS_TASKLIST_RELAY_LEVEL=1` to mirror every
+relay entry, or `2` to mirror relay entries only while their current status is
+`error`. Agent-created tasks always mirror. The relay marker is applied only
+when the relay creates an entry, so an agent task later driven by relay stays a
+normal task. Entries written before this marker existed stay unmarked until
+cleared.
 
 ## Links
 

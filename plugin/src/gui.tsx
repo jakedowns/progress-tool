@@ -6,8 +6,9 @@
  * tree, including nested children.
  */
 
-import { ComposerPill, Plugin } from "@opencode/plugin/gui";
-import { For, Index, Show, createEffect, createSignal } from "solid-js";
+import { ComposerPill, Command, Plugin, Style } from "@opencode/plugin/gui";
+import type { MountedSession } from "@opencode/plugin/gui";
+import { For, Index, Show, batch, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import pkg from "../package.json";
 import { feedbackIssueUrl } from "./feedback.js";
 import { ProgressRpc } from "./rpc.js";
@@ -103,6 +104,13 @@ function Multiline(props: { text: string }) {
       )}
     </Index>
   );
+}
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
 }
 
 function MenuRow(props: {
@@ -289,6 +297,8 @@ function rowFor(node: TreeNode, depth: number, options: BarOptions) {
 export default Plugin.define({
   setup(ctx) {
     const [state, setState] = createSignal<GuiState>({ entries: {}, loaded: false });
+    const [interacting, setInteracting] = createSignal(false);
+    let suspendUntil = 0;
     // Dismissal is per root task and scoped to that task itself; the revival
     // semantics (re-report always revives, non-terminal status changes revive,
     // terminal dismissals only revive on failure or re-report) live in
@@ -304,35 +314,92 @@ export default Plugin.define({
     const visibility = normalizeVisibilityOptions(ctx.options);
     const refreshMs = normalizeRefreshMs(ctx.options);
     let alive = true;
+    let inFlight = false;
+    let lastRevision = "";
+    let lastRevisionSession = "";
+
+    /**
+     * The host's `rpc(contract)` is typed as an untyped client in this
+     * environment; give the handful of methods we call their real shapes.
+     */
+    type ProgressClient = {
+      list(input?: {
+        sessionID?: string;
+        scope?: "session" | "all";
+      }): Promise<{
+        entries?: Record<string, ProgressEntry>;
+        revision?: string;
+      }>;
+      dismiss(input: { key: string; status: string }): Promise<{ ok: boolean }>;
+      clear(input: { sessionID: string }): Promise<{ ok: boolean; cleared: number }>;
+      hardClearSession(input: {
+        sessionID: string;
+      }): Promise<{ ok: boolean; removed: number; freedBytes: number }>;
+      hardClearAll(input?: Record<string, never>): Promise<{
+        ok: boolean;
+        removed: number;
+        freedBytes: number;
+      }>;
+      stats(input?: { sessionID?: string }): Promise<{
+        entries: number;
+        active: number;
+        done: number;
+        error: number;
+        dismissed: number;
+        cleared: number;
+        bytes: number;
+      }>;
+    };
+    const rpcFor = (session: MountedSession) =>
+      session.server.client.rpc(ProgressRpc) as unknown as ProgressClient;
+    const globalRpc = () =>
+      ctx.client.rpc(ProgressRpc) as unknown as ProgressClient;
 
     const refresh = async () => {
+      if (inFlight || interacting() || Date.now() < suspendUntil) return;
+      inFlight = true;
       try {
         const session = ctx.sessions.current();
         if (!session) {
           setState((prev) => ({ ...prev, loaded: true }));
           return;
         }
-        const result = await withTimeout(session.server.client.rpc(ProgressRpc).list({}), 4000);
+        const result = await withTimeout(
+          rpcFor(session).list({ scope: "all" }),
+          4000
+        );
         if (!alive) return;
-        setState({
-          entries: (result?.entries ?? {}) as Record<string, ProgressEntry>,
-          loaded: true,
-        });
+        if (session.id !== lastRevisionSession) {
+          lastRevision = "";
+          lastRevisionSession = session.id;
+        }
+        const revision = typeof result?.revision === "string" ? result.revision : "";
+        if (revision && revision === lastRevision) return;
+        if (revision) lastRevision = revision;
+        const entries = (result?.entries ?? {}) as Record<string, ProgressEntry>;
         // Drop optimistic dismissals once the persisted state reflects them.
-        setPendingDismissed((prev) => {
-          const next = { ...prev };
-          for (const [key, value] of Object.entries(prev)) {
-            const d = (result?.entries ?? {})[key]?.dismissed;
-            if (d && typeof d === "object" && (d as { at: number }).at >= value.at - 500) {
-              delete next[key];
-            }
+        // Build the next map first so an unchanged poll does not notify every
+        // dependent computation a second time.
+        const prevPending = pendingDismissed();
+        const nextPending = { ...prevPending };
+        let pendingChanged = false;
+        for (const [key, value] of Object.entries(prevPending)) {
+          const d = entries[key]?.dismissed;
+          if (d && typeof d === "object" && (d as { at: number }).at >= value.at - 500) {
+            delete nextPending[key];
+            pendingChanged = true;
           }
-          return next;
+        }
+        batch(() => {
+          setState({ entries, loaded: true });
+          if (pendingChanged) setPendingDismissed(nextPending);
         });
       } catch (error) {
         if (!alive) return;
         setState((prev) => ({ ...prev, loaded: true, error: String(error) }));
         console.error("[opencode-progress] rpc list failed", String(error));
+      } finally {
+        inFlight = false;
       }
     };
 
@@ -346,12 +413,27 @@ export default Plugin.define({
       });
     }
     void refresh();
-    const timer = setInterval(() => void refresh(), refreshMs);
+    let unsubscribeUpdated: (() => void) | undefined;
+    try {
+      // The server emits this whenever its state signature changes. Polling
+      // stays as a slow fallback for a missed event or a server restart.
+      unsubscribeUpdated = ctx.client
+        .rpc(ProgressRpc)
+        .events.on("updated", () => void refresh());
+    } catch (error) {
+      console.warn("[opencode-progress] updated subscription unavailable", String(error));
+    }
+    const timer = setInterval(
+      () => void refresh(),
+      unsubscribeUpdated ? Math.max(refreshMs, 5000) : refreshMs
+    );
 
     /** Persisted dismissals, read straight from the state doc entries. */
-    const dismissedFromEntries = () => {
+    const dismissedFromEntries = (
+      entries: Record<string, ProgressEntry> = state().entries
+    ) => {
       const map: Record<string, { status: string; at: number }> = {};
-      for (const [key, entry] of Object.entries(state().entries)) {
+      for (const [key, entry] of Object.entries(entries)) {
         const d = entry.dismissed;
         if (d && typeof d === "object" && typeof d.at === "number") {
           map[key] = { status: String(d.status ?? ""), at: d.at };
@@ -361,8 +443,8 @@ export default Plugin.define({
     };
 
     /** Persisted + optimistic: pending wins while newer than persisted. */
-    const dismissedMap = () => {
-      const merged = dismissedFromEntries();
+    const dismissedMap = (entries: Record<string, ProgressEntry> = state().entries) => {
+      const merged = dismissedFromEntries(entries);
       for (const [key, pending] of Object.entries(pendingDismissed())) {
         const persisted = merged[key];
         if (!persisted || pending.at > persisted.at) merged[key] = pending;
@@ -370,43 +452,239 @@ export default Plugin.define({
       return merged;
     };
 
-    type DismissSession = {
-      server: {
-        client: {
-          rpc: (contract: unknown) => {
-            dismiss(input: { key: string; status: string }): Promise<{ ok: boolean }>;
-          };
-        };
-      };
-    };
-
     /** Persist the dismissal via the plugin server, optimistically in-memory. */
     const dismissKey = (
-      session: DismissSession,
+      session: MountedSession,
       key: string,
       status: string
     ) => {
       setPendingDismissed((prev) => ({ ...prev, [key]: { status, at: Date.now() } }));
-      void session.server.client
-        .rpc(ProgressRpc)
+      void rpcFor(session)
         .dismiss({ key, status })
         .catch((error: unknown) =>
           console.error("[opencode-progress] dismiss rpc failed", String(error))
         );
     };
 
-    const ProgressMenu = (props: { session: DismissSession; sessionID: string }) => {
-      const scoped = () => scopeEntries(state().entries, props.sessionID, visibility);
-      const visibleRoots = () => {
-        const roots = buildTree(visibleEntries(scoped(), Date.now(), visibility));
-        return roots.filter((root) => !isDismissed(root, dismissedMap()));
-      };
+    const sessionEntries = (sessionID: string) =>
+      Object.entries(state().entries).filter(
+        ([key, entry]) =>
+          entry &&
+          typeof entry === "object" &&
+          (entry.sessionId === sessionID || key.startsWith(`${sessionID}:`))
+      );
+
+    /** Palette-only: soft-clear finished/dismissed entries for this session. */
+    const clearList = async () => {
+      const session = ctx.sessions.current();
+      if (!session) {
+        ctx.toast.show({ title: "Open a session first", variant: "error" });
+        return;
+      }
+      const candidates = sessionEntries(session.id).filter(
+        ([, entry]) =>
+          !entry.cleared &&
+          (entry.status === "done" ||
+            entry.status === "error" ||
+            Boolean(entry.dismissed))
+      );
+      if (candidates.length === 0) {
+        ctx.toast.show({ title: "Nothing to clear", description: "No finished or dismissed entries.", variant: "default" });
+        return;
+      }
+      const confirmed = await ctx.dialogs.confirm({
+        title: "Clear progress list?",
+        description: `${candidates.length} finished or dismissed ${
+          candidates.length === 1 ? "entry" : "entries"
+        } will be hidden. Records stay on disk; running tasks keep showing.`,
+        confirm: "Clear list",
+        danger: true,
+      });
+      if (!confirmed) return;
+      try {
+        const result = await rpcFor(session).clear({ sessionID: session.id });
+        setInteracting(false);
+        void refresh();
+        ctx.toast.show({
+          title: "Progress list cleared",
+          description: `${result.cleared} ${
+            result.cleared === 1 ? "entry" : "entries"
+          } hidden; records kept.`,
+          variant: "success",
+        });
+      } catch (error) {
+        ctx.toast.show({
+          title: "Clear failed",
+          description: String(error),
+          variant: "error",
+        });
+      }
+    };
+
+    /** Palette-only: permanently delete this session's progress entries. */
+    const hardClearSession = async () => {
+      const session = ctx.sessions.current();
+      if (!session) {
+        ctx.toast.show({ title: "Open a session first", variant: "error" });
+        return;
+      }
+      try {
+        const stats = await rpcFor(session).stats({ sessionID: session.id });
+        if (stats.entries === 0) {
+          ctx.toast.show({ title: "Nothing to delete", variant: "default" });
+          return;
+        }
+        const confirmed = await ctx.dialogs.confirm({
+          title: "Permanently delete session progress?",
+          description: `${stats.entries} ${
+            stats.entries === 1 ? "entry" : "entries"
+          } (${formatBytes(stats.bytes)}) will be removed from the progress store. The mirrored tasklist file is kept. This cannot be undone.`,
+          confirm: "Delete permanently",
+          danger: true,
+        });
+        if (!confirmed) return;
+        const result = await rpcFor(session).hardClearSession({
+          sessionID: session.id,
+        });
+        setInteracting(false);
+        void refresh();
+        ctx.toast.show({
+          title: "Session progress deleted",
+          description: `${result.removed} ${
+            result.removed === 1 ? "entry" : "entries"
+          } removed · ${formatBytes(result.freedBytes)} freed.`,
+          variant: "success",
+        });
+      } catch (error) {
+        ctx.toast.show({
+          title: "Delete failed",
+          description: String(error),
+          variant: "error",
+        });
+      }
+    };
+
+    /** Palette-only: wipe every progress entry. Requires typing DELETE. */
+    const hardClearStore = async () => {
+      try {
+        const stats = await globalRpc().stats({});
+        if (stats.entries === 0) {
+          ctx.toast.show({ title: "Progress store is already empty", variant: "default" });
+          return;
+        }
+        const typed = await ctx.dialogs.prompt({
+          title: "Hard clear the entire progress store",
+          description: `This deletes all ${stats.entries} entries (${formatBytes(
+            stats.bytes
+          )}) from the plugin store. It cannot be undone without a backup and prevents future auditing or progress reporting. Type DELETE to confirm.`,
+          placeholder: "DELETE",
+          submit: "Delete everything",
+        });
+        if (typed?.trim() !== "DELETE") {
+          if (typed !== undefined) {
+            ctx.toast.show({ title: "Store not cleared", description: "Confirmation did not match.", variant: "default" });
+          }
+          return;
+        }
+        const result = await globalRpc().hardClearAll({});
+        setInteracting(false);
+        void refresh();
+        ctx.toast.show({
+          title: "Progress store cleared",
+          description: `${result.removed} ${
+            result.removed === 1 ? "entry" : "entries"
+          } removed · ${formatBytes(result.freedBytes)} freed. Mirrored tasklists kept.`,
+          variant: "success",
+        });
+      } catch (error) {
+        ctx.toast.show({
+          title: "Hard clear failed",
+          description: String(error),
+          variant: "error",
+        });
+      }
+    };
+
+    ctx.add(Command, () => ({
+      id: "progress.clear",
+      title: "Progress: clear list (this session)",
+      description: "Hide finished and dismissed entries; records stay on disk",
+      keywords: "progress clear soft delete dismiss history",
+      section: "session" as const,
+      get enabled() {
+        return Boolean(ctx.sessions.current());
+      },
+      run: () => void clearList(),
+    }));
+
+    ctx.add(Command, () => ({
+      id: "progress.hard-clear-session",
+      title: "Progress: hard clear this session",
+      description: "Permanently delete this session's progress entries",
+      keywords: "progress hard delete purge session store",
+      section: "session" as const,
+      get enabled() {
+        return Boolean(ctx.sessions.current());
+      },
+      run: () => void hardClearSession(),
+    }));
+
+    ctx.add(Command, () => ({
+      id: "progress.hard-clear-store",
+      title: "Progress: hard clear entire progress store",
+      description: "Delete all progress entries; requires typing DELETE",
+      keywords: "progress hard delete purge all store wipe",
+      section: "general" as const,
+      run: () => void hardClearStore(),
+    }));
+
+    ctx.add(
+      Style,
+      `.progress-pill-button { cursor: pointer !important; }
+       .progress-pill-button:hover { background: rgba(127,127,127,0.18) !important; }`
+    );
+
+    const ProgressMenu = (props: { session: MountedSession; sessionID: string }) => {
+      // The popover removes this component without a pointerleave; make sure
+      // closing it never leaves refresh paused forever.
+      onCleanup(() => setInteracting(false));
+      const scoped = createMemo(() =>
+        scopeEntries(state().entries, props.sessionID, visibility)
+      );
+      // Persisted + optimistic dismissals, recomputed once per state change
+      // rather than once per root. The old per-root call scanned every entry
+      // in the store for every root, which dominated the 1 s tick.
+      const dismissed = createMemo(() => {
+        const merged = dismissedFromEntries(scoped());
+        for (const [key, pending] of Object.entries(pendingDismissed())) {
+          const persisted = merged[key];
+          if (!persisted || pending.at > persisted.at) merged[key] = pending;
+        }
+        return merged;
+      });
+      const tree = createMemo(() =>
+        buildTree(visibleEntries(scoped(), Date.now(), visibility))
+      );
+      const visibleRoots = createMemo(() =>
+        tree().filter((root) => !isDismissed(root, dismissed()))
+      );
       const [expandedOverrides, setExpandedOverrides] = createSignal<Record<string, boolean>>({});
       const expandByDefault = ctx.options?.expandRootsByDefault === true;
-      const collapsedMap = () =>
-        collapsedRootMap(visibleRoots(), expandByDefault, expandedOverrides());
-      const rows = () => visibleRows(visibleRoots(), collapsedMap());
-      const doneRoots = () => visibleRoots().filter((root) => root.status === "done");
+      const collapsedMap = createMemo(() =>
+        collapsedRootMap(visibleRoots(), expandByDefault, expandedOverrides())
+      );
+      const rows = createMemo(() => visibleRows(visibleRoots(), collapsedMap()));
+      const doneRoots = createMemo(() =>
+        visibleRoots().filter((root) => root.status === "done")
+      );
+      // Stable keys keep <For> from remounting every row on each poll. The
+      // node lookup is reactive, so row content still updates in place.
+      const rootKeys = createMemo(() => visibleRoots().map((root) => root.key));
+      const rootByKey = createMemo(() => {
+        const map = new Map<string, TreeNode>();
+        for (const root of visibleRoots()) map.set(root.key, root);
+        return map;
+      });
 
       // Slide-away dismissal: mark the root as leaving (still rendered) and
       // slide it out sideways; once it has cleared the right edge, collapse
@@ -418,6 +696,11 @@ export default Plugin.define({
       const [leavingCollapsed, setLeavingCollapsed] = createSignal<Record<string, boolean>>({});
       const dismissAnimated = (root: TreeNode, delayMs = 0) => {
         if (leaving()[root.key] !== undefined) return;
+        // Do not let a poll land mid-animation and rebuild the rows.
+        suspendUntil = Math.max(
+          suspendUntil,
+          Date.now() + delayMs + SLIDE_MS + COLLAPSE_MS + 120
+        );
         setLeaving((prev) => ({ ...prev, [root.key]: delayMs }));
         setTimeout(() => {
           setLeavingCollapsed((prev) => ({ ...prev, [root.key]: true }));
@@ -492,6 +775,8 @@ export default Plugin.define({
 
       return (
         <div
+          onPointerEnter={() => setInteracting(true)}
+          onPointerLeave={() => setInteracting(false)}
           style={{
             display: "flex",
             "flex-direction": "column",
@@ -499,10 +784,6 @@ export default Plugin.define({
             "max-width": "520px",
           }}
         >
-          <style>{`
-            .progress-pill-button { cursor: pointer !important; }
-            .progress-pill-button:hover { background: rgba(127,127,127,0.18) !important; }
-          `}</style>
           <div
             ref={(el) => (listEl = el)}
             onScroll={(event) => {
@@ -528,59 +809,64 @@ export default Plugin.define({
               </div>
             }
           >
-            <For each={visibleRoots()}>
-              {(root) => {
-                const isCollapsed = () => collapsedMap()[root.key] ?? false;
+            <For each={rootKeys()}>
+              {(key) => {
+                const root = () => rootByKey().get(key);
+                const isCollapsed = () => collapsedMap()[key] ?? false;
                 return (
                   // Outer wrapper collapses vertically once the row has slid
                   // fully past the right edge.
                   <div
-                    data-root-key={root.key}
+                    data-root-key={key}
                     style={{
                       display: "grid",
-                      "grid-template-rows": leavingCollapsed()[root.key] ? "0fr" : "1fr",
+                      "grid-template-rows": leavingCollapsed()[key] ? "0fr" : "1fr",
                       transition: "grid-template-rows 0.3s ease-in",
                     }}
                   >
-                    <div style={{ overflow: "hidden", "min-height": "0" }}>
-                      <MenuRow
-                        node={root}
-                        depth={0}
-                        options={options}
-                        hasChildren={root.children.length > 0}
-                        collapsed={isCollapsed()}
-                        onToggle={() =>
-                          setExpandedOverrides((prev) => ({
-                            ...prev,
-                            [root.key]: !(prev[root.key] ?? expandByDefault),
-                          }))
-                        }
-                        onDismiss={() => dismissAnimated(root)}
-                        leaving={leaving()[root.key] !== undefined}
-                        leaveDelayMs={leaving()[root.key] ?? 0}
-                      />
-                      <div
-                        style={{
-                          display: "grid",
-                          "grid-template-rows": isCollapsed() ? "0fr" : "1fr",
-                          transition: "grid-template-rows 0.5s ease-in-out, transform 0.35s ease-in, opacity 0.3s ease-in",
-                          transform:
-                            leaving()[root.key] !== undefined
-                              ? "translateX(120%)"
-                              : "translateX(0)",
-                          opacity: leaving()[root.key] !== undefined ? "0" : "1",
-                          "transition-delay": `${leaving()[root.key] ?? 0}ms`,
-                        }}
-                      >
+                    <Show when={root()}>
+                      {(node) => (
                         <div style={{ overflow: "hidden", "min-height": "0" }}>
-                          <For each={flattenTreeWithDepth(root.children, 1)}>
-                            {({ node, depth }) => (
-                              <MenuRow node={node} depth={depth} options={options} />
-                            )}
-                          </For>
+                          <MenuRow
+                            node={node()}
+                            depth={0}
+                            options={options}
+                            hasChildren={node().children.length > 0}
+                            collapsed={isCollapsed()}
+                            onToggle={() =>
+                              setExpandedOverrides((prev) => ({
+                                ...prev,
+                                [key]: !(prev[key] ?? expandByDefault),
+                              }))
+                            }
+                            onDismiss={() => dismissAnimated(node())}
+                            leaving={leaving()[key] !== undefined}
+                            leaveDelayMs={leaving()[key] ?? 0}
+                          />
+                          <div
+                            style={{
+                              display: "grid",
+                              "grid-template-rows": isCollapsed() ? "0fr" : "1fr",
+                              transition: "grid-template-rows 0.5s ease-in-out, transform 0.35s ease-in, opacity 0.3s ease-in",
+                              transform:
+                                leaving()[key] !== undefined
+                                  ? "translateX(120%)"
+                                  : "translateX(0)",
+                              opacity: leaving()[key] !== undefined ? "0" : "1",
+                              "transition-delay": `${leaving()[key] ?? 0}ms`,
+                            }}
+                          >
+                            <div style={{ overflow: "hidden", "min-height": "0" }}>
+                              <For each={flattenTreeWithDepth(node().children, 1)}>
+                                {({ node: child, depth }) => (
+                                  <MenuRow node={child} depth={depth} options={options} />
+                                )}
+                              </For>
+                            </div>
+                          </div>
                         </div>
-                      </div>
-                    </div>
+                      )}
+                    </Show>
                   </div>
                 );
               }}
@@ -676,7 +962,8 @@ export default Plugin.define({
         }
 
         const roots = buildTree(visibleEntries(scoped, Date.now(), visibility));
-        const visibleRoots = roots.filter((root) => !isDismissed(root, dismissedMap()));
+        const dismissed = dismissedMap(scoped);
+        const visibleRoots = roots.filter((root) => !isDismissed(root, dismissed));
         if (visibleRoots.length === 0) return undefined;
 
         const active = countActive(visibleRoots);
@@ -753,6 +1040,7 @@ export default Plugin.define({
     return () => {
       alive = false;
       clearInterval(timer);
+      unsubscribeUpdated?.();
     };
   },
 });

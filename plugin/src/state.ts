@@ -8,7 +8,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { ProgressState } from "./types.js";
+import type { ProgressEntry, ProgressState } from "./types.js";
 
 export function stateFilePath(): string {
   return (
@@ -288,6 +288,208 @@ export function writeDismissal(key: string, status: string): boolean {
   } catch (error) {
     console.error("[opencode-progress] dismissal write failed", String(error));
     return false;
+  } finally {
+    try {
+      fs.unlinkSync(lock);
+    } catch {
+      // Already released.
+    }
+  }
+}
+
+/**
+ * Locked read-modify-write for the shared progress state.
+ *
+ * Same contract as the MCP state-store: a sibling lock serializes writers and
+ * the document lands with a temp-file + rename, so a relay tick never sees a
+ * half-written store. Returns undefined when the lock cannot be acquired; the
+ * caller reports "nothing changed".
+ */
+function mutateStateFile<T>(
+  mutator: (state: ProgressState) => { value: T; write: boolean }
+): T | undefined {
+  const file = stateFilePath();
+  const lock = `${file}.lock`;
+  let locked = false;
+  for (let attempt = 0; attempt < 10 && !locked; attempt++) {
+    try {
+      fs.writeFileSync(lock, String(process.pid), { flag: "wx" });
+      locked = true;
+    } catch {
+      try {
+        if (Date.now() - fs.statSync(lock).mtimeMs > 15_000) fs.unlinkSync(lock);
+      } catch {
+        // Lock vanished; retry.
+      }
+      try {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+      } catch {
+        // Restricted context; retry immediately.
+      }
+    }
+  }
+  if (!locked) return undefined;
+
+  try {
+    const state = readProgressState();
+    const { value, write } = mutator(state);
+    if (!write) return value;
+    state.version = state.version ?? 2;
+    const tmp = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
+    fs.renameSync(tmp, file);
+    return value;
+  } catch (error) {
+    console.error("[opencode-progress] state write failed", String(error));
+    return undefined;
+  } finally {
+    try {
+      fs.unlinkSync(lock);
+    } catch {
+      // Already released.
+    }
+  }
+}
+
+function belongsToSession(key: string, entry: ProgressEntry, sessionID: string): boolean {
+  return entry.sessionId === sessionID || key.startsWith(`${sessionID}:`);
+}
+
+function stateBytes(state: ProgressState): number {
+  return Buffer.byteLength(JSON.stringify(state));
+}
+
+/**
+ * Soft-clear the current session's finished and dismissed entries.
+ *
+ * Sets `cleared` on done/error entries and on anything the user already
+ * dismissed. Running/waiting entries that are still visible are left alone.
+ * Records stay on disk; views and counts ignore them. Any agent update
+ * revives a cleared entry (handled by the MCP store's applyUpsert).
+ */
+export function softClearSession(sessionID: string): { cleared: number } {
+  if (!sessionID) return { cleared: 0 };
+  const at = Date.now();
+  let cleared = 0;
+  const result = mutateStateFile((state) => {
+    for (const [key, entry] of Object.entries(state.entries)) {
+      if (!entry || typeof entry !== "object") continue;
+      if (!belongsToSession(key, entry, sessionID)) continue;
+      if (entry.cleared) continue;
+      const finished = entry.status === "done" || entry.status === "error";
+      if (!finished && !entry.dismissed) continue;
+      // Clear supersedes dismissal: after an agent update revives the entry,
+      // the old dismissal must not hide it again.
+      delete entry.dismissed;
+      entry.cleared = { at, status: entry.status };
+      cleared++;
+    }
+    return { value: { cleared }, write: cleared > 0 };
+  });
+  if (result?.cleared) {
+    console.log(`[opencode-progress] soft-cleared ${cleared} entries session=${sessionID}`);
+  }
+  return result ?? { cleared: 0 };
+}
+
+/** Permanently delete every entry for one session. The tasklist mirror is untouched. */
+export function hardDeleteSession(sessionID: string): { removed: number; freedBytes: number } {
+  if (!sessionID) return { removed: 0, freedBytes: 0 };
+  let removed = 0;
+  const result = mutateStateFile((state) => {
+    const before = stateBytes(state);
+    for (const [key, entry] of Object.entries(state.entries)) {
+      if (!entry || typeof entry !== "object") continue;
+      if (!belongsToSession(key, entry, sessionID)) continue;
+      delete state.entries[key];
+      removed++;
+    }
+    return {
+      value: { removed, freedBytes: Math.max(0, before - stateBytes(state)) },
+      write: removed > 0,
+    };
+  });
+  if (result) {
+    removeSessionLinks(sessionID);
+    if (result.removed > 0) {
+      console.log(
+        `[opencode-progress] hard-deleted ${removed} entries session=${sessionID} freed=${result.freedBytes}B`
+      );
+    }
+  }
+  return result ?? { removed: 0, freedBytes: 0 };
+}
+
+/** Permanently wipe every progress entry. The tasklist mirrors are untouched. */
+export function hardDeleteAll(): { removed: number; freedBytes: number } {
+  let removed = 0;
+  const result = mutateStateFile((state) => {
+    const before = stateBytes(state);
+    removed = Object.keys(state.entries).length;
+    state.entries = {};
+    return {
+      value: { removed, freedBytes: Math.max(0, before - stateBytes(state)) },
+      write: removed > 0,
+    };
+  });
+  if (result) {
+    removeSessionLinks();
+    if (result.removed > 0) {
+      console.log(`[opencode-progress] hard-cleared store: ${removed} entries freed=${result.freedBytes}B`);
+    }
+  }
+  return result ?? { removed: 0, freedBytes: 0 };
+}
+
+/**
+ * Drop child→parent links for a deleted session, or every link when no id is
+ * given. The map is small, but stale rows are still noise after a purge.
+ */
+export function removeSessionLinks(sessionID?: string): number {
+  const file = sessionMapFilePath();
+  const lock = `${file}.lock`;
+  let locked = false;
+  for (let attempt = 0; attempt < 10 && !locked; attempt++) {
+    try {
+      fs.writeFileSync(lock, String(process.pid), { flag: "wx" });
+      locked = true;
+    } catch {
+      try {
+        if (Date.now() - fs.statSync(lock).mtimeMs > 15_000) fs.unlinkSync(lock);
+      } catch {
+        // Lock vanished; retry.
+      }
+      try {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+      } catch {
+        // Restricted context; retry immediately.
+      }
+    }
+  }
+  if (!locked) return 0;
+
+  try {
+    const map = readSessionMap();
+    let removed = 0;
+    for (const [child, link] of Object.entries(map)) {
+      if (sessionID === undefined || child === sessionID || link.parentId === sessionID) {
+        delete map[child];
+        removed++;
+      }
+    }
+    if (removed === 0) return 0;
+    const tmp = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify({ links: map }, null, 2));
+    fs.renameSync(tmp, file);
+    console.log(
+      `[opencode-progress] removed ${removed} session link${removed === 1 ? "" : "s"}${
+        sessionID ? ` for ${sessionID}` : ""
+      }`
+    );
+    return removed;
+  } catch (error) {
+    console.error("[opencode-progress] session link cleanup failed", String(error));
+    return 0;
   } finally {
     try {
       fs.unlinkSync(lock);

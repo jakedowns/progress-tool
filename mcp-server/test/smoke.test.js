@@ -656,6 +656,36 @@ test('a done parent normalizes stale progress to 100% on a plain MCP-style upser
   assert.equal(readState(file).entries['plain'].progress, 1);
 });
 
+test('a soft-cleared entry revives on the next agent upsert', () => {
+  const { file } = tempState();
+  const { upsertProgress, readState: readStore, atomicWrite } = require(
+    path.join(ROOT, 'state-store')
+  );
+
+  const envKeys = ['PROGRESS_SESSION_ID', 'OPENCODE_SESSION_ID'];
+  const savedEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+  envKeys.forEach((key) => delete process.env[key]);
+  try {
+    upsertProgress({ id: 'cleared-task', status: 'done', title: 'Cleared' }, file);
+    const store = readStore(file);
+    store.entries['cleared-task'].cleared = { at: Date.now(), status: 'done' };
+    atomicWrite(file, store);
+    assert.ok(readState(file).entries['cleared-task'].cleared, 'marker persisted');
+
+    upsertProgress({ id: 'cleared-task', status: 'done', title: 'Updated' }, file);
+    assert.equal(
+      readState(file).entries['cleared-task'].cleared,
+      undefined,
+      'agent update clears the tombstone'
+    );
+  } finally {
+    for (const key of envKeys) {
+      if (savedEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = savedEnv[key];
+    }
+  }
+});
+
 test('closing a parent leaves errored descendants (and their subtree) unresolved', () => {
   const { file } = tempState();
   run(['emit', '--id', 'err-parent', '--status', 'running', '--title', 'Parent'], { state: file });

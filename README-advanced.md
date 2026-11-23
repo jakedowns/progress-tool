@@ -413,6 +413,9 @@ Both the TUI and GUI parts read these options.
 - `barTotal`: denominator for the `(done/total)` label (default 100).
 - `successHoldMs`: how long a `done` task stays visible after its last update (default `8000`). Only applies when `autoHideDone` is enabled.
 - `autoHideDone`: hide completed tasks after `successHoldMs`, regardless of dismissal. **Default `false`** — done entries you never dismissed stay visible indefinitely (retention is opt-in, see `PROGRESS_AUTO_PRUNE_S`), including across plugin reloads.
+- `retainDeletedSessionProgress`: **Default `false`**. When a session is deleted, its plugin-store entries and child/parent links are purged to reclaim space. Set to `true` to keep them for auditing. The mirrored Markdown tasklist (`PROGRESS_TASKLIST`) is never deleted, only the store copy. A later progress write for the same session can regenerate that mirror from the remaining store entries.
+- `relayMirrorLevel`: **Default `0`** when the Markdown tasklist mirror is enabled. `0` omits entries the relay created (successful build spam), `1` mirrors every relay entry (the old behavior), and `2` mirrors relay entries only while their current status is `error`. Agent-created tasks always mirror. The marker is set only when the relay creates an entry; an agent task later driven by relay remains a normal task. Pre-upgrade relay entries have no marker and stay visible until cleared.
+- **Clear/delete palette commands**: *Progress: clear list (this session)* soft-deletes done/error and already-dismissed entries by setting `cleared: { at, status }`; records stay on disk and views/counts ignore them. Any agent update revives a cleared entry. *Progress: hard clear this session* permanently removes that session's entries (simple confirmation). *Progress: hard clear entire progress store* wipes every entry and requires typing `DELETE` (no admin gate). All three are palette-only in both the GUI and TUI: there are no pill buttons, clickable links, default keybinds, or slash commands.
 - `showDone`: set to `false` to drop completed tasks immediately.
 - `scope`: `"session"` (default) shows only the current chat's tasks; `"all"` shows every session sharing the state file.
 - `tuiMaxRows`: rows the TUI progress tree may occupy above the prompt (default `8`, max `50`). Roots are collapsed by default; `/progress` expands a tree or dismisses tasks.
@@ -461,7 +464,7 @@ Both the TUI and GUI parts read these options.
 | Prebuilt desktop/web bundle | `plugin/dist/gui-experimental.cjs` |
 | Precompiled TUI entry | `plugin/dist/tui.js` |
 | TUI build script | `plugin/scripts/build-tui.mjs` |
-| Plugin test suite (78 tests) | `plugin/test/*.test.cjs` |
+| Plugin test suite (94 tests) | `plugin/test/*.test.cjs` |
 | Standalone desktop GUI server | `progress-gui-server.js` |
 | Launch / setup scripts | `launch-gui.sh`, `setup.sh` |
 | GUI build script (stages off the repo mount) | `scripts/build-gui.sh` |
@@ -479,3 +482,7 @@ Legacy V1 entrypoints (`plugin/index.js`, `plugin/gui-experimental.js`) are kept
 2. **TUI** — `scripts/build-tui.mjs` runs Babel's Solid transform (via `@opentui/solid`'s pure transform) and esbuild, leaving `solid-js`, `@opentui/*`, and `@opencode/plugin/tui` external so the host bridges its own runtime. The compiled `dist/tui.js` is required for npm installs: raw TSX under `node_modules` is skipped by OpenCode's Solid transform and falls back to React's JSX runtime.
 
 `dist/gui-experimental.cjs` and `dist/tui.js` are committed, so a fresh checkout already has working bundles.
+
+## Future enhancements / backlog
+
+- **Pill virtualization or pagination (P4).** Deferred until the visible row count exceeds roughly 100, or users still report frame drops after the memoized derivation and stable-row work. Virtualization reduces DOM/paint cost; it does not replace the tree/dismissal memoization.

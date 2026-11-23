@@ -16,7 +16,7 @@ import { Plugin, usePlugin } from "@opencode/plugin/tui";
 
 /** Setup context; the package does not re-export the Context type. */
 type TuiContext = Parameters<Parameters<typeof Plugin.define>[0]["setup"]>[0];
-import { readProgressState, writeDismissal } from "./state.js";
+import { readProgressState, writeDismissal, softClearSession, hardDeleteSession, hardDeleteAll } from "./state.js";
 import {
   buildTree,
   barParts,
@@ -45,7 +45,7 @@ import {
   summarizeRoots,
   type TuiRow,
 } from "./tui-view.js";
-import type { ProgressStatus, ProgressState, TreeNode } from "./types.js";
+import type { ProgressEntry, ProgressStatus, ProgressState, TreeNode } from "./types.js";
 
 const [state, setState] = createSignal<ProgressState>(readProgressState());
 /** Root keys expanded per session; replaced wholesale so Solid sees the change. */
@@ -466,6 +466,116 @@ async function promptRootCap(context: TuiContext): Promise<void> {
   });
 }
 
+function sessionEntriesOf(sessionID: string): Array<[string, ProgressEntry]> {
+  return Object.entries(state().entries ?? {}).filter(
+    ([key, entry]) =>
+      entry &&
+      typeof entry === "object" &&
+      (entry.sessionId === sessionID || key.startsWith(`${sessionID}:`))
+  );
+}
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+}
+
+/** Palette-only: soft-clear finished and dismissed entries for this session. */
+async function clearList(context: TuiContext): Promise<void> {
+  const sessionID = currentSessionID(context);
+  if (!sessionID) {
+    context.ui.toast.show({ message: "Open a session to manage progress", variant: "warning" });
+    return;
+  }
+  const candidates = sessionEntriesOf(sessionID).filter(
+    ([, entry]) =>
+      !entry.cleared &&
+      (entry.status === "done" || entry.status === "error" || Boolean(entry.dismissed))
+  );
+  if (candidates.length === 0) {
+    context.ui.toast.show({ message: "Nothing to clear", variant: "info" });
+    return;
+  }
+  const confirmed = await context.ui.dialog.confirm({
+    title: "Clear progress list?",
+    message: `${candidates.length} finished or dismissed ${
+      candidates.length === 1 ? "entry" : "entries"
+    } will be hidden. Records stay on disk; running tasks keep showing.`,
+    label: { confirm: "Clear list" },
+  });
+  if (!confirmed) return;
+  const result = softClearSession(sessionID);
+  setState(readProgressState());
+  context.ui.toast.show({
+    message: `Cleared ${result.cleared} ${result.cleared === 1 ? "entry" : "entries"} (records kept)`,
+    variant: "success",
+  });
+}
+
+/** Palette-only: permanently delete this session's progress entries. */
+async function hardClearSessionCommand(context: TuiContext): Promise<void> {
+  const sessionID = currentSessionID(context);
+  if (!sessionID) {
+    context.ui.toast.show({ message: "Open a session to manage progress", variant: "warning" });
+    return;
+  }
+  const entries = sessionEntriesOf(sessionID);
+  if (entries.length === 0) {
+    context.ui.toast.show({ message: "Nothing to delete", variant: "info" });
+    return;
+  }
+  const bytes = Buffer.byteLength(JSON.stringify(Object.fromEntries(entries)));
+  const confirmed = await context.ui.dialog.confirm({
+    title: "Permanently delete session progress?",
+    message: `${entries.length} ${
+      entries.length === 1 ? "entry" : "entries"
+    } (${formatBytes(bytes)}) will be removed from the progress store. The mirrored tasklist file is kept. This cannot be undone.`,
+    label: { confirm: "Delete permanently" },
+  });
+  if (!confirmed) return;
+  const result = hardDeleteSession(sessionID);
+  setState(readProgressState());
+  context.ui.toast.show({
+    message: `Deleted ${result.removed} ${
+      result.removed === 1 ? "entry" : "entries"
+    } · ${formatBytes(result.freedBytes)} freed`,
+    variant: "success",
+  });
+}
+
+/** Palette-only: wipe every entry. Requires typing DELETE. */
+async function hardClearStoreCommand(context: TuiContext): Promise<void> {
+  const entries = Object.values(state().entries ?? {});
+  if (entries.length === 0) {
+    context.ui.toast.show({ message: "Progress store is already empty", variant: "info" });
+    return;
+  }
+  const bytes = Buffer.byteLength(JSON.stringify(state().entries ?? {}));
+  const typed = await context.ui.dialog.prompt({
+    title: "Hard clear the entire progress store",
+    description: `This deletes all ${entries.length} entries (${formatBytes(
+      bytes
+    )}) from the plugin store. It cannot be undone without a backup and prevents future auditing or progress reporting. Type DELETE to confirm.`,
+    placeholder: "DELETE",
+  });
+  if (typed?.trim() !== "DELETE") {
+    if (typed !== undefined) {
+      context.ui.toast.show({ message: "Store not cleared: confirmation did not match", variant: "warning" });
+    }
+    return;
+  }
+  const result = hardDeleteAll();
+  setState(readProgressState());
+  context.ui.toast.show({
+    message: `Store cleared: ${result.removed} ${
+      result.removed === 1 ? "entry" : "entries"
+    } · ${formatBytes(result.freedBytes)} freed`,
+    variant: "success",
+  });
+}
+
 async function confirmDismissAll(context: TuiContext, roots: TreeNode[]): Promise<void> {
   if (roots.length === 0) return;
   const confirmed = await context.ui.dialog.confirm({
@@ -644,6 +754,32 @@ export default Plugin.define({
           group: "progress",
           palette: true,
           run: () => toggleCollapsed(context),
+        },
+        {
+          id: "progress.clear",
+          title: "Progress: clear list (this session)",
+          description: "Hide finished and dismissed entries; records stay on disk",
+          group: "progress",
+          palette: true,
+          enabled: () => Boolean(currentSessionID(context)),
+          run: () => clearList(context),
+        },
+        {
+          id: "progress.hard-clear-session",
+          title: "Progress: hard clear this session",
+          description: "Permanently delete this session's progress entries",
+          group: "progress",
+          palette: true,
+          enabled: () => Boolean(currentSessionID(context)),
+          run: () => hardClearSessionCommand(context),
+        },
+        {
+          id: "progress.hard-clear-store",
+          title: "Progress: hard clear entire progress store",
+          description: "Delete all progress entries; requires typing DELETE",
+          group: "progress",
+          palette: true,
+          run: () => hardClearStoreCommand(context),
         },
       ],
     }));

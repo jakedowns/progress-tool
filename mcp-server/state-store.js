@@ -513,6 +513,15 @@ function applyUpsert(state, input, now) {
         : prev.statusUpdatedAt || prev.updatedAt || now,
   };
   delete entry.source;
+  // Origin marker for the optional Markdown mirror. Only entries the relay
+  // itself creates are tagged, so an agent task that a relay later drives
+  // still mirrors like any other progress entry. Historical entries written
+  // before this marker existed stay unmarked.
+  if (!prev && fromRelay) entry.relay = true;
+  // Soft-cleared entries are tombstones: any agent update revives them. The
+  // marker is view-plane metadata, so a late progress write is enough to put
+  // the task back in front of the user.
+  if (entry.cleared) delete entry.cleared;
 
   // An agent update is fresh activity: the user's dismissal of THIS entry no
   // longer applies, and neither does any dismissal on its ancestors — a

@@ -60,6 +60,27 @@ function sampleState() {
         statusUpdatedAt: T2,
         updatedAt: T2,
       },
+      relayOk: {
+        id: 'relay-ok',
+        sessionId: 'ses_test',
+        relay: true,
+        status: 'done',
+        title: 'Build succeeded',
+        createdAt: T3,
+        statusUpdatedAt: T3,
+        updatedAt: T3,
+      },
+      relayError: {
+        id: 'relay-error',
+        sessionId: 'ses_test',
+        relay: true,
+        status: 'error',
+        title: 'Build failed',
+        detail: 'compile error',
+        createdAt: T3,
+        statusUpdatedAt: T3,
+        updatedAt: T3,
+      },
       foreign: {
         id: 'foreign',
         sessionId: 'ses_other',
@@ -79,7 +100,30 @@ test('renderTaskList is newest-first with checkboxes, timestamps, and children',
   assert.match(md, /\n  - \[ \] \*\*Child task\*\* — waiting/);
   assert.ok(md.indexOf('Fresh task') < md.indexOf('Old task'), 'newest root comes first');
   assert.ok(!md.includes('Other session'), 'other sessions are excluded');
+  assert.ok(!md.includes('Build succeeded'), 'relay-created entries are off by default');
+  assert.ok(!md.includes('Build failed'), 'relay-created errors are off by default');
   assert.match(md, /compiling with details/);
+});
+
+test('relayMirrorLevel gates relay-created entries, never agent tasks', () => {
+  const zero = renderTaskList(sampleState(), { sessionID: 'ses_test' });
+  assert.ok(!zero.includes('Build succeeded'));
+  assert.ok(!zero.includes('Build failed'));
+
+  const all = renderTaskList(sampleState(), { sessionID: 'ses_test', relayMirrorLevel: 1 });
+  assert.ok(all.includes('Build succeeded'));
+  assert.ok(all.includes('Build failed'));
+  assert.ok(all.includes('Fresh task'), 'agent tasks still mirror at level 1');
+
+  const errors = renderTaskList(sampleState(), { sessionID: 'ses_test', relayMirrorLevel: 2 });
+  assert.ok(!errors.includes('Build succeeded'), 'successful relay runs are hidden');
+  assert.match(errors, /\*\*Build failed\*\* — error/);
+  assert.ok(errors.includes('Fresh task'), 'agent tasks still mirror at level 2');
+
+  const retried = sampleState();
+  retried.entries.relayError = { ...retried.entries.relayError, status: 'done', title: 'Build retried' };
+  const afterSuccess = renderTaskList(retried, { sessionID: 'ses_test', relayMirrorLevel: 2 });
+  assert.ok(!afterSuccess.includes('Build retried'), 'level 2 follows the current status');
 });
 
 test('renderTaskList can append older-first and omits empty state gracefully', () => {
@@ -101,6 +145,23 @@ test('taskListConfig is opt-in and normalizes order/session', () => {
     'oldest-first'
   );
   assert.equal(taskListConfig({ PROGRESS_SESSION_ID: 'ses_x' }, '/work').sessionID, 'ses_x');
+  assert.equal(taskListConfig({}, '/work').relayMirrorLevel, 0, 'off by default');
+  assert.equal(
+    taskListConfig({ PROGRESS_TASKLIST_RELAY_LEVEL: '2' }, '/work').relayMirrorLevel,
+    2
+  );
+  assert.equal(
+    taskListConfig({ PROGRESS_TASKLIST_RELAY_LEVEL: 'log' }, '/work').relayMirrorLevel,
+    1
+  );
+  assert.equal(
+    taskListConfig({ PROGRESS_TASKLIST_RELAY_LEVEL: 'err' }, '/work').relayMirrorLevel,
+    2
+  );
+  assert.equal(
+    taskListConfig({ PROGRESS_TASKLIST_RELAY_LEVEL: 'nonsense' }, '/work').relayMirrorLevel,
+    0
+  );
 });
 
 test('resolveTaskListPath defaults to <session>-tasklist.md and honors directories', () => {
@@ -149,6 +210,52 @@ test('syncTaskList prefers the writing session over env for the default filename
   assert.equal(result.file, path.join(dir, 'ses_test-tasklist.md'));
   const md = fs.readFileSync(result.file, 'utf8');
   assert.ok(!md.includes('Other session'));
+});
+
+test('only entries created by the relay carry the relay marker', () => {
+  const dir = tempDir();
+  const stateFile = path.join(dir, 'state.json');
+  const keys = [
+    'PROGRESS_SESSION_ID',
+    'OPENCODE_SESSION_ID',
+    'PROGRESS_TASKLIST',
+    'PROGRESS_TASKLIST_PATH',
+  ];
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  for (const key of keys) delete process.env[key];
+
+  try {
+    upsertProgress(
+      { id: 'relay-build', status: 'running', title: 'Build', source: 'relay' },
+      stateFile
+    );
+    let entries = readState(stateFile).entries;
+    assert.equal(entries['relay-build'].relay, true, 'relay creation is marked');
+
+    upsertProgress(
+      { id: 'agent-task', status: 'running', title: 'Agent task' },
+      stateFile
+    );
+    entries = readState(stateFile).entries;
+    assert.equal(entries['agent-task'].relay, undefined, 'agent task is unmarked');
+
+    upsertProgress({ id: 'agent-task', progress: 0.5, source: 'relay' }, stateFile);
+    entries = readState(stateFile).entries;
+    assert.equal(
+      entries['agent-task'].relay,
+      undefined,
+      'relay updates do not reclassify an agent-created task'
+    );
+
+    upsertProgress({ id: 'relay-build', status: 'done', source: 'relay' }, stateFile);
+    entries = readState(stateFile).entries;
+    assert.equal(entries['relay-build'].relay, true, 'marker survives later updates');
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
 });
 
 test('the state-store hook derives the session from the write when env is absent', () => {

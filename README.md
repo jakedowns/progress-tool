@@ -9,7 +9,7 @@
 <img src="https://raw.githubusercontent.com/jakedowns/progress-tool/master/screenshots/1.png" width="300" alt="Progress pill showing a live task tree">
 <img src="https://raw.githubusercontent.com/jakedowns/progress-tool/master/screenshots/subagents.png" width="300" alt="Progress pill showing subagent rows">
 
-A non-blocking twin of `question` so coding agents can signal long-running work
+Enhanced version of todowrite so coding agents can signal long-running work
 without looking dead, plus a **zero-token-burn out-of-band relay** so the agent
 never has to poll `stdout` just to keep the UI alive. Token cost scales with
 milestones, not with task duration.
@@ -141,6 +141,12 @@ Multi-line titles and details accept real newlines, `\n` / `\r\n`, or `<br>`.
   dismissal** on that entry and its ancestors — except a terminal dismissal
   (dismissed while done/error), which later done/error re-reports do not revive;
   a restart or a child failure does.
+- **Clear/delete are palette commands** (not pill buttons): *Progress: clear
+  list* soft-deletes finished/dismissed entries while keeping records on disk,
+  *hard clear this session* removes one session's store copy, and *hard clear
+  entire progress store* requires typing `DELETE`. Deleting a chat purges its
+  store entries unless `retainDeletedSessionProgress` is enabled; the mirrored
+  Markdown tasklist is never removed.
 - **Subagents:** child sessions are mapped to their parent automatically
   (`session.created` → `~/.opencode-progress-sessions.json`), and the parent id
   is stamped into subagent prompts as a fallback. Roots created by a child
@@ -160,6 +166,7 @@ Multi-line titles and details accept real newlines, `\n` / `\r\n`, or `<br>`.
 | `taskListFile` | Mirror tasks to a local Markdown checklist (default off) |
 | `taskListPath` | Checklist path; empty = `<sessionID>-tasklist.md` in the MCP cwd |
 | `taskListOrder` | `"newest-first"` (default) or `"oldest-first"` |
+| `relayMirrorLevel` | `0` off (default), `1` all relay entries, `2` relay errors only |
 | `expandRootsByDefault` | Expand trees by default (default collapsed) |
 | `strictMode` | `"nudge"` / `"force"` / `"off"` silent-work nudges |
 | `staleEscalateAfter` | Entry reminders before one synthetic escalation (default 3; `0` disables) |
@@ -167,6 +174,7 @@ Multi-line titles and details accept real newlines, `\n` / `\r\n`, or `<br>`.
 | `demoSkills` | Register the demo skills (default off) |
 | `barStyle` | `"blocks"` or `"emoji"` |
 | `refreshMs` | View refresh interval (default 1000) |
+| `retainDeletedSessionProgress` | Keep store entries when a session is deleted (default off) |
 
 [Full option list →](./README-advanced.md#plugin-options-full-list)
 
