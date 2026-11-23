@@ -11,7 +11,8 @@ const STATUS_ORDER: Record<string, number> = {
   error: 4,
   running: 3,
   waiting: 2,
-  done: 1,
+  pending: 1,
+  done: 0,
 };
 
 /**
@@ -122,6 +123,7 @@ export function buildTree(entries: Record<string, ProgressEntry>): TreeNode[] {
       if (errorFromChild || entry.status === "error") status = "error";
       else if (statuses.includes("running")) status = "running";
       else if (statuses.includes("waiting")) status = "waiting";
+      else if (statuses.includes("pending")) status = "pending";
       else if (statuses.every((child) => child === "done")) status = "done";
 
       const childProgresses = children
@@ -225,26 +227,30 @@ export function collapsedRootMap(
 }
 
 /**
- * Headline counts for the pill: active (running/waiting), done, and dismissed.
- * Computed over the session-scoped entry set, before view filtering, so the
- * numbers describe the store rather than the current visibility.
+ * Headline counts for the pill: active (running/waiting), pending (queued,
+ * not started), done, and dismissed. Computed over the session-scoped entry
+ * set, before view filtering, so the numbers describe the store rather than
+ * the current visibility.
  */
 export function summarizeEntries(entries: Record<string, ProgressEntry>): {
   active: number;
+  pending: number;
   done: number;
   dismissed: number;
 } {
   let active = 0;
+  let pending = 0;
   let done = 0;
   let dismissed = 0;
   for (const entry of Object.values(entries)) {
     if (!entry || typeof entry !== "object") continue;
     if (entry.cleared) continue;
     if (entry.status === "running" || entry.status === "waiting") active++;
+    if (entry.status === "pending") pending++;
     if (entry.status === "done") done++;
     if (entry.dismissed) dismissed++;
   }
-  return { active, done, dismissed };
+  return { active, pending, done, dismissed };
 }
 
 export function countActive(nodes: readonly TreeNode[]): number {

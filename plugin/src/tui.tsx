@@ -103,6 +103,7 @@ function glyph(status: ProgressStatus): string {
   if (status === "done") return "✓";
   if (status === "error") return "✗";
   if (status === "waiting") return "◐";
+  if (status === "pending") return "○";
   return "●";
 }
 
@@ -141,11 +142,11 @@ function rootsForSession(sessionID: string): TreeNode[] {
   );
 }
 
-const STATUS_SUMMARY_ORDER: ProgressStatus[] = ["error", "running", "waiting", "done"];
+const STATUS_SUMMARY_ORDER: ProgressStatus[] = ["error", "running", "waiting", "pending", "done"];
 
-/** "1 error / 2 running / 2 waiting / 3 done" across every root, including hidden ones. */
+/** "1 error / 2 running / 2 waiting / 2 pending / 3 done" across every root, including hidden ones. */
 function statusSummary(roots: readonly TreeNode[]): string {
-  const counts: Record<ProgressStatus, number> = { error: 0, running: 0, waiting: 0, done: 0 };
+  const counts: Record<ProgressStatus, number> = { pending: 0, error: 0, running: 0, waiting: 0, done: 0 };
   for (const root of roots) {
     if (root.status && root.status in counts) counts[root.status] += 1;
   }

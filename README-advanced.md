@@ -77,7 +77,7 @@ If a command is long-running, attach the relay. If the relay is unavailable, sti
 ```ts
 progress({
   id: "compile-1",           // stable id -> update / clear later
-  status: "running" | "done" | "error" | "waiting",
+  status: "pending" | "running" | "done" | "error" | "waiting",
   title: "Waiting on tsc",
   detail?: "34s elapsed",    // optional detail text
   progress?: 0.65,           // optional 0-1 fraction
@@ -110,7 +110,7 @@ OWNERSHIP & ZERO-POLLING CONTRACT:
 
 TREE ROLLUP (BOOTVINE SEMANTICS):
 - Pass `parentId` to nest sub-tasks under a parent task.
-- Parent status and progress automatically roll up from children (any child "error" -> parent "error"; any child "running"/"waiting" -> parent "running"/"waiting"; parent progress = mean of child progress when the parent has no explicit progress).
+- Parent status and progress automatically roll up from children (any child "error" -> parent "error"; any child "running"/"waiting" -> parent "running"/"waiting"; pending children leave a non-active parent "pending"; parent progress = mean of child progress when the parent has no explicit progress).
 
 SESSION ISOLATION:
 - Concurrent sessions are isolated automatically via OPENCODE_SESSION_ID / PROGRESS_SESSION_ID (or an explicit `sessionId` override).
@@ -125,7 +125,7 @@ LINE BREAKS & LONG TEXT:
     type: "object",
     properties: {
       id: { type: "string", description: "Stable task ID; re-using an ID updates the indicator in place." },
-      status: { type: "string", enum: ["running", "waiting", "done", "error"] },
+      status: { type: "string", enum: ["pending", "running", "waiting", "done", "error"] },
       title: { type: "string", description: "Short human-readable task label. Supports line breaks via real newlines, escaped \\n / \\r\\n, or <br> tags." },
       detail: { type: "string", description: "Optional status detail, latest step, or multi-line context. Supports line breaks via real newlines, escaped \\n / \\r\\n, or <br> tags; viewers wrap and scroll long text." },
       progress: { type: "number", minimum: 0, maximum: 1, description: "Optional completion fraction (0.0 to 1.0)." },
@@ -203,7 +203,7 @@ The map is merge-written under a lock, pruned after 30 days, bounded to 8 hops (
 | `--parent <id>` | Nest under a parent task (or `PROGRESS_PARENT`) |
 | `--detail <text>` | Initial detail line |
 | `--progress <value>` | `0..1`, `45%`, or `6/10` |
-| `--status <status>` | Initial status: `running`, `waiting`, `done`, `error` |
+| `--status <status>` | Initial status: `pending`, `running`, `waiting`, `done`, `error` |
 | `--session <id>` | Session scope (or `PROGRESS_SESSION_ID` / `OPENCODE_SESSION_ID`); omit it to keep the legacy flat keying |
 | `--max-hz <n>` | Max state writes per second (default `4`; `0` = unlimited) |
 | `--quiet`, `--no-tee` | Do not echo command output back to the caller |
@@ -280,7 +280,7 @@ Both the MCP server and the views support nested tasks via `parentId`. A parent'
 └── npm-install [██████████] 10/10 · done ✓
 ```
 
-If any child errors, the parent shows `error`. If any child is still running/waiting, the parent shows `running`/`waiting`. Parent progress is the average of child progress values when the parent has no explicit progress; otherwise the parent's own value wins. The relay can attach to a child with `--parent`, so a long build can stream into `build-1` while the agent only reports milestone transitions.
+If any child errors, the parent shows `error`. If any child is still running/waiting, the parent shows `running`/`waiting`; if the remaining children are queued, the parent shows `pending`. Parent progress is the average of child progress values when the parent has no explicit progress; otherwise the parent's own value wins. The relay can attach to a child with `--parent`, so a long build can stream into `build-1` while the agent only reports milestone transitions.
 
 ---
 

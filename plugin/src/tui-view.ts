@@ -44,7 +44,8 @@ const STATUS_URGENCY: Record<string, number> = {
   error: 4,
   running: 3,
   waiting: 2,
-  done: 1,
+  pending: 1,
+  done: 0,
 };
 
 /** Error-first ordering for the click-to-expand summary line. */
@@ -73,11 +74,11 @@ export function rootDetailLines(root: TreeNode): string[] {
   return lines;
 }
 
-const ROOT_SUMMARY_ORDER = ["waiting", "running", "error", "done", "dismissed"] as const;
+const ROOT_SUMMARY_ORDER = ["waiting", "running", "error", "pending", "done", "dismissed"] as const;
 
 /**
  * One-line status summary for the collapsed TUI view, e.g.
- * `waiting (1) | running (3) | error (2) | done (5) | dismissed (34)`.
+ * `waiting (1) | running (3) | error (2) | pending (2) | done (5) | dismissed (34)`.
  * Dismissed roots are counted separately and excluded from status buckets.
  * Zero buckets are omitted; returns "" when there is nothing to show.
  */
@@ -89,6 +90,7 @@ export function summarizeRoots(
     waiting: 0,
     running: 0,
     error: 0,
+    pending: 0,
     done: 0,
     dismissed: 0,
   };

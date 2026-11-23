@@ -360,13 +360,15 @@ export function idleReminder(
   const maxPerRun = options.maxPerRun ?? 3;
   const now = options.now ?? Date.now();
   // Relay-driven tasks tick several times per second; only entries nobody is
-  // writing to deserve an idle nag. Unknown timestamps count as stale.
+  // writing to deserve an idle nag. Pending entries count as open work: a
+  // queued tree left idle is exactly what the reminder is for. Unknown
+  // timestamps count as stale.
   const staleAfterMs = options.staleAfterMs ?? 5 * 60_000;
 
   const open = entries
     .filter(
       (entry) =>
-        (entry.status === "running" || entry.status === "waiting") &&
+        (entry.status === "running" || entry.status === "waiting" || entry.status === "pending") &&
         !entry.dismissed &&
         (entry.updatedAt == null || now - entry.updatedAt >= staleAfterMs)
     )

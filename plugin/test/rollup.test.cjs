@@ -77,6 +77,32 @@ test('an error grandchild propagates its partial bar through a done child', () =
   assert.equal(root.progress, 0.25);
 });
 
+test('a pending child keeps a non-active parent pending until real work starts', () => {
+  const root = rootOf([
+    { id: 'root', status: 'running', progress: 0.2, title: 'Root', updatedAt: 1000 },
+    { id: 'queued', status: 'pending', progress: null, parentId: 'root', title: 'Queued', updatedAt: 900 },
+    { id: 'finished', status: 'done', progress: 1, parentId: 'root', title: 'Finished', updatedAt: 800 },
+  ]);
+
+  assert.equal(root.status, 'pending', 'pending outranks a stale running parent');
+});
+
+test('running and waiting children outrank pending', () => {
+  const running = rootOf([
+    { id: 'root', status: 'done', title: 'Root', updatedAt: 1000 },
+    { id: 'queued', status: 'pending', parentId: 'root', title: 'Queued', updatedAt: 900 },
+    { id: 'live', status: 'running', parentId: 'root', title: 'Live', updatedAt: 800 },
+  ]);
+  assert.equal(running.status, 'running');
+
+  const waiting = rootOf([
+    { id: 'root', status: 'done', title: 'Root', updatedAt: 1000 },
+    { id: 'queued', status: 'pending', parentId: 'root', title: 'Queued', updatedAt: 900 },
+    { id: 'blocked', status: 'waiting', parentId: 'root', title: 'Blocked', updatedAt: 800 },
+  ]);
+  assert.equal(waiting.status, 'waiting');
+});
+
 test('a node that failed itself keeps its own progress when children all succeeded', () => {
   const root = rootOf([
     // The error belongs to root, not a descendant: no child-mean override.

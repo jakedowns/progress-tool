@@ -275,8 +275,8 @@ function visibleEntries(state, sessionID, mode, relayMirrorLevel) {
 /**
  * Effective status for the visible tree: bottom-up roll-up in UI mode, stored
  * status in raw mode. Mirrors the GUI/TUI roll-up (error > running > waiting >
- * done) so the Markdown does not claim a parent is running when every child
- * is done.
+ * pending > done) so the Markdown does not claim a parent is running when every
+ * child is done.
  */
 function effectiveStatuses(entries, byKey, children, mode) {
   const cache = new Map();
@@ -298,6 +298,7 @@ function effectiveStatuses(entries, byKey, children, mode) {
       if (statuses.includes('error')) status = 'error';
       else if (statuses.includes('running')) status = 'running';
       else if (statuses.includes('waiting')) status = 'waiting';
+      else if (statuses.includes('pending')) status = 'pending';
       else if (statuses.every((child) => child === 'done')) status = 'done';
     }
     visiting.delete(key);

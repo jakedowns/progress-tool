@@ -182,8 +182,9 @@ test('visibleRows, countDescendants, summarizeEntries', () => {
     b: { status: 'waiting' },
     c: { status: 'done' },
     d: { status: 'done', dismissed: { status: 'done', at: 1 } },
+    e: { status: 'pending' },
   });
-  assert.deepEqual(summary, { active: 2, done: 2, dismissed: 1 });
+  assert.deepEqual(summary, { active: 2, pending: 1, done: 2, dismissed: 1 });
 });
 
 

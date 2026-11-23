@@ -5,7 +5,7 @@
  * Node built-ins.
  */
 
-export type ProgressStatus = "running" | "done" | "error" | "waiting";
+export type ProgressStatus = "pending" | "running" | "done" | "error" | "waiting";
 
 export interface ProgressEntry {
   id: string;

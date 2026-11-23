@@ -22,7 +22,7 @@ long-running commands.
 Exposes two tools:
 
 - `progress` — record/update a task; bulk `entries[]` creates a whole tree in
-  one atomic write; `status` is `running | waiting | done | error`.
+  one atomic write; `status` is `pending | running | waiting | done | error`.
 - `list` — read-only: session's trees as text, dismissed entries hidden.
 
 ## Relay long-running commands

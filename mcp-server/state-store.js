@@ -427,7 +427,7 @@ function prune(state, now) {
   //   PROGRESS_AUTO_PRUNE_S=<seconds>   (0 = drop completed entries on next write)
   // PROGRESS_TTL_MS still works as a legacy millisecond override.
   // The orphan sweep for `running` entries is also opt-in via
-  // PROGRESS_STALE_MS (milliseconds). `waiting` is never swept.
+  // PROGRESS_STALE_MS (milliseconds). `waiting` and `pending` are never swept.
   const legacyTtl =
     process.env.PROGRESS_TTL_MS !== undefined ? Number(process.env.PROGRESS_TTL_MS) : undefined;
   const configuredS =
@@ -527,7 +527,7 @@ function applyUpsert(state, input, now) {
   const status = input.status !== undefined ? input.status : prev?.status || 'running';
 
   const wasTerminal = prev?.status === 'done' || prev?.status === 'error';
-  const isRestart = wasTerminal && (status === 'running' || status === 'waiting');
+  const isRestart = wasTerminal && (status === 'running' || status === 'waiting' || status === 'pending');
 
   const entry = {
     ...(prev || {}),
@@ -708,8 +708,8 @@ function upsertManyProgress(inputs, stateFile = DEFAULT_STATE_FILE) {
     if (!input || typeof input !== 'object' || !input.id || typeof input.id !== 'string') {
       throw new Error('each entry[] item requires an id (string)');
     }
-    if (!input.status || !['running', 'waiting', 'done', 'error'].includes(input.status)) {
-      throw new Error(`entries[${input.id}] requires a valid status (running|waiting|done|error)`);
+    if (!input.status || !['pending', 'running', 'waiting', 'done', 'error'].includes(input.status)) {
+      throw new Error(`entries[${input.id}] requires a valid status (pending|running|waiting|done|error)`);
     }
     if (!input.title || typeof input.title !== 'string') {
       throw new Error(`entries[${input.id}] requires a title (string)`);
@@ -740,7 +740,8 @@ const STATUS_SEVERITY = {
   error: 4,
   running: 3,
   waiting: 2,
-  done: 1,
+  pending: 1,
+  done: 0,
 };
 
 function statusOrder(a, b) {
@@ -824,6 +825,8 @@ function rollUp(id, entries, childrenMap, cache = new Map()) {
       result.status = 'running';
     } else if (childStatuses.includes('waiting')) {
       result.status = 'waiting';
+    } else if (childStatuses.includes('pending')) {
+      result.status = 'pending';
     } else if (childStatuses.every((s) => s === 'done')) {
       result.status = 'done';
     }

@@ -121,7 +121,7 @@ test('cleared entries are absent from trees and every headline count', () => {
   assert.equal(Object.keys(visible).length, 1, 'cleared entries are hidden');
   const roots = buildTree(visible);
   assert.equal(roots.length, 1, 'cleared roots are not built');
-  assert.deepEqual(summarizeEntries(scoped), { active: 1, done: 0, dismissed: 0 });
+  assert.deepEqual(summarizeEntries(scoped), { active: 1, pending: 0, done: 0, dismissed: 0 });
 });
 
 test('hard delete removes only the requested session and cleans its links', () => {

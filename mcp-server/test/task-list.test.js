@@ -451,3 +451,38 @@ test('status parser tolerates missing/invalid files', () => {
   fs.writeFileSync(taskListStatusPath(path.join(dir, 'state.json')), 'not json');
   assert.equal(readTaskListStatus(path.join(dir, 'state.json')), null);
 });
+
+test('UI mode: pending children keep a parent pending', () => {
+  const state = {
+    entries: {
+      'ses_p:plan': {
+        id: 'plan',
+        sessionId: 'ses_p',
+        status: 'running',
+        title: 'Plan',
+        createdAt: 1,
+        updatedAt: 2,
+      },
+      'ses_p:queued': {
+        id: 'queued',
+        sessionId: 'ses_p',
+        parentId: 'plan',
+        status: 'pending',
+        title: 'Queued',
+        createdAt: 2,
+        updatedAt: 3,
+      },
+      'ses_p:done': {
+        id: 'done',
+        sessionId: 'ses_p',
+        parentId: 'plan',
+        status: 'done',
+        title: 'Done',
+        createdAt: 2,
+        updatedAt: 3,
+      },
+    },
+  };
+  const md = renderTaskList(state, { sessionID: 'ses_p', mode: 'ui', detail: 'code' });
+  assert.match(md, /\*\*Plan\*\* — pending/);
+});

@@ -367,7 +367,8 @@ var STATUS_ORDER = {
   error: 4,
   running: 3,
   waiting: 2,
-  done: 1
+  pending: 1,
+  done: 0
 };
 function normalizeProgressText(value) {
   if (value == null) return "";
@@ -429,6 +430,7 @@ function buildTree(entries) {
       if (errorFromChild || entry.status === "error") status = "error";
       else if (statuses.includes("running")) status = "running";
       else if (statuses.includes("waiting")) status = "waiting";
+      else if (statuses.includes("pending")) status = "pending";
       else if (statuses.every((child) => child === "done")) status = "done";
       const childProgresses = children.map((child) => child.progress).filter((value) => typeof value === "number" && Number.isFinite(value));
       const childMean = childProgresses.length > 0 ? childProgresses.reduce((a, b) => a + b, 0) / childProgresses.length : null;
@@ -569,7 +571,8 @@ var STATUS_URGENCY = {
   error: 4,
   running: 3,
   waiting: 2,
-  done: 1
+  pending: 1,
+  done: 0
 };
 function sortRootsByUrgency(roots) {
   return roots.map((node, index) => ({ node, index })).sort(
@@ -585,12 +588,13 @@ function rootDetailLines(root) {
   lines.push("", root.detail?.trim() ? root.detail.trim() : "(no detail)");
   return lines;
 }
-var ROOT_SUMMARY_ORDER = ["waiting", "running", "error", "done", "dismissed"];
+var ROOT_SUMMARY_ORDER = ["waiting", "running", "error", "pending", "done", "dismissed"];
 function summarizeRoots(roots, isDismissedRoot) {
   const counts = {
     waiting: 0,
     running: 0,
     error: 0,
+    pending: 0,
     done: 0,
     dismissed: 0
   };
@@ -693,6 +697,7 @@ function glyph(status) {
   if (status === "done") return "\u2713";
   if (status === "error") return "\u2717";
   if (status === "waiting") return "\u25D0";
+  if (status === "pending") return "\u25CB";
   return "\u25CF";
 }
 function expandedFor(sessionID) {
@@ -718,9 +723,10 @@ function rootsForSession(sessionID) {
   const entries = state().entries ?? {};
   return allRootsForSession(sessionID).filter((root) => !isDismissed(root, dismissedMap(entries)));
 }
-var STATUS_SUMMARY_ORDER = ["error", "running", "waiting", "done"];
+var STATUS_SUMMARY_ORDER = ["error", "running", "waiting", "pending", "done"];
 function statusSummary(roots) {
   const counts = {
+    pending: 0,
     error: 0,
     running: 0,
     waiting: 0,

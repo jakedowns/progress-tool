@@ -1250,3 +1250,31 @@ test('list called from a mapped child session shows the parent scope', async () 
   assert.match(text, /\[shared\]/);
   assert.doesNotMatch(text, /No progress entries/);
 });
+
+test('emit accepts pending and roll-up treats it as open work', () => {
+  const { file } = tempState();
+  assert.equal(
+    run(['emit', '--id', 'plan', '--status', 'running', '--title', 'Plan'], { state: file }).status,
+    0
+  );
+  assert.equal(
+    run(
+      ['emit', '--id', 'queued', '--status', 'pending', '--title', 'Queued', '--parent', 'plan'],
+      { state: file }
+    ).status,
+    0
+  );
+  assert.equal(
+    run(
+      ['emit', '--id', 'finished', '--status', 'done', '--title', 'Finished', '--parent', 'plan'],
+      { state: file }
+    ).status,
+    0
+  );
+
+  const state = readState(file);
+  assert.equal(state.entries['queued'].status, 'pending');
+  const { tree } = getTree(state);
+  const root = tree.find((node) => node.id === 'plan');
+  assert.equal(root.status, 'pending', 'a pending child keeps the parent pending');
+});

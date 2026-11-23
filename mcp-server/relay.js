@@ -38,7 +38,7 @@ const DEFAULT_MAX_HZ = (() => {
 })();
 const MAX_DETAIL_LENGTH = 240;
 const MAX_LINE_BUFFER = 64 * 1024;
-const STATUSES = ['running', 'waiting', 'done', 'error'];
+const STATUSES = ['pending', 'running', 'waiting', 'done', 'error'];
 
 // OSC 9;4 "progress report" sequence (ConEmu / Windows Terminal convention),
 // emitted natively by Gradle's rich console, mise, PowerShell 7.4+, and other
@@ -77,7 +77,7 @@ function printUsage(mode, stream) {
         '',
         'Options:',
         '  --id <id>            Stable task id (or PROGRESS_ID)',
-        '  --status <status>    running | waiting | done | error (default: running)',
+        '  --status <status>    pending | running | waiting | done | error (default: running)',
         '  --title <title>      Human-readable task label',
         '  --detail <text>      Detail line (e.g. current step)',
         '  --progress <value>   0..1, 45%, or 6/10',
@@ -572,7 +572,7 @@ function runEmit(opts) {
   const prev = existingEntry(opts);
   const status = opts.status || 'running';
   const wasTerminal = prev?.status === 'done' || prev?.status === 'error';
-  const isRestart = wasTerminal && (status === 'running' || status === 'waiting');
+  const isRestart = wasTerminal && (status === 'running' || status === 'waiting' || status === 'pending');
   const progress =
     opts.progress !== null
       ? opts.progress

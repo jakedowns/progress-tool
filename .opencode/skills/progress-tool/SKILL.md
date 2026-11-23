@@ -44,8 +44,8 @@ exploration, multi-file refactors, documentation.
   can read the pill instead of scrolling the log.
 - **Close:** end with `status: "done"` or `"error"`. **Close what you open** —
   an abandoned `running` entry is a zombie the user has to dismiss by hand.
-- Statuses are exactly `running | waiting | done | error` (use `waiting` for
-  "not started yet / blocked"; there is no `pending`).
+- Statuses are exactly `pending | running | waiting | done | error` (use
+  `pending` for queued/not started, `waiting` for blocked).
 
 ## Structure multi-step plans as a tree
 

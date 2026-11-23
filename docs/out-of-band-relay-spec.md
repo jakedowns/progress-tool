@@ -55,7 +55,7 @@ For a task of duration `T` with `M` meaningful milestones:
 The agent owns:
 
 - Task identity (`id`)
-- Lifecycle status (`running`, `waiting`, `done`, `error`)
+- Lifecycle status (`pending`, `running`, `waiting`, `done`, `error`)
 - Human-readable title
 - Tree topology (`parentId`)
 - Occasional semantic detail
@@ -135,7 +135,7 @@ Implementations MUST support an override:
     "<storage-key>": {
       "id": "string",
       "sessionId": "string (optional; present when scoped)",
-      "status": "running | waiting | done | error",
+      "status": "pending | running | waiting | done | error",
       "title": "string",
       "detail": "string | null",
       "progress": "number 0..1 | null",
@@ -187,7 +187,7 @@ Specifically:
 - `undefined` means "leave unchanged".
 - `null` means "explicitly clear" for nullable fields.
 - `progress: 0` MUST be distinguishable from "no progress supplied".
-- Reusing an `id` that is currently `done` or `error` with a new `running`/`waiting` status SHOULD reset `startedAt`, `detail`, and `progress` unless the caller explicitly supplies them. This prevents a new run from inheriting a stale 100% bar. A lifecycle restart MUST also clear the entry's view-plane `dismissed` metadata (§4.9): a stale user dismissal must not mute a fresh run.
+- Reusing an `id` that is currently `done` or `error` with a new `pending`/`running`/`waiting` status SHOULD reset `startedAt`, `detail`, and `progress` unless the caller explicitly supplies them. This prevents a new run from inheriting a stale 100% bar. A lifecycle restart MUST also clear the entry's view-plane `dismissed` metadata (§4.9): a stale user dismissal must not mute a fresh run.
 
 ### 4.9 View-plane metadata: user dismissal
 
@@ -210,7 +210,7 @@ An entry MAY carry a dismissal record written by view clients:
 - **Terminal dismissal** is the exception: a dismissal taken while the entry
   was already terminal (`done`/`error`) MUST survive later terminal
   re-reports — the user has seen the outcome, and a repeated done/error is
-  not news. A dismissal taken while the entry was `running`/`waiting` MUST
+  not news. A dismissal taken while the entry was `pending`/`running`/`waiting` MUST
   clear on any agent update, including completion, so the task visibly
   resolves. A lifecycle restart clears either kind.
 - **Relay telemetry** writes MUST preserve the field (only a lifecycle
@@ -266,7 +266,7 @@ Harnesses that run subagents in child sessions (OpenCode does) SHOULD attribute 
 ```ts
 progress({
   id: string,                 // required, stable
-  status: "running" | "waiting" | "done" | "error", // required
+  status: "pending" | "running" | "waiting" | "done" | "error", // required
   title: string,              // required
   detail?: string,
   progress?: number,          // 0..1

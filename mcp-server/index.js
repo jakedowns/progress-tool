@@ -63,8 +63,8 @@ function treeHasChildren(parentId) {
   }
 }
 
-const SERVER_VERSION = '2.11.0';
-const VALID_STATUSES = ['running', 'waiting', 'done', 'error'];
+const SERVER_VERSION = '2.12.0';
+const VALID_STATUSES = ['pending', 'running', 'waiting', 'done', 'error'];
 
 const SERVER_INSTRUCTIONS = [
   'The `progress` tool is DUAL PURPOSE: a drop-in replacement for',
@@ -73,7 +73,8 @@ const SERVER_INSTRUCTIONS = [
   'commands that report progress on stdout.',
   'The `progress` tool is fire-and-forget. Call it at task milestones:',
   'once when a phase starts (status "running"), once when a child task is',
-  'created (parentId), and once when a phase finishes ("done" or "error").',
+  'created (status "pending" or "running", parentId), and once when a phase',
+  'finishes ("done" or "error").',
   'During long-horizon NON-SHELL work (research, planning, exploration,',
   'refactors, documentation) there is no relay, so also spend one of your',
   'turns between tool calls — roughly every few calls, or whenever you',
@@ -120,7 +121,7 @@ const TOOL_DESCRIPTION = [
   'TREE ROLLUP (BOOTVINE SEMANTICS):',
   '- Pass `parentId` to nest sub-tasks under a parent task.',
   '- Multi-step plans belong in the TREE, created in ONE bulk call: pass `entries: [{ id: "<plan>", status: "running", title: "<plan>" }, { id: "<plan>-step-1", status: "running", title: "<step 1>", parentId: "<plan>" }, …]` (max 50). One child entry per step so each gets its own status/progress. Do NOT embed numbered step lists in one title/detail — the rollup cannot see individual steps inside text.',
-  '- Parent status and progress automatically roll up from children (any child "error" -> parent "error"; any child "running"/"waiting" -> parent "running"/"waiting"; parent progress = mean of child progress).',
+  '- Parent status and progress automatically roll up from children (any child "error" -> parent "error"; any child "running"/"waiting" -> parent "running"/"waiting"; pending children leave a non-running parent "pending"; parent progress = mean of child progress).',
   '',
   'SESSION ISOLATION:',
   '- Concurrent sessions are isolated automatically via OPENCODE_SESSION_ID / PROGRESS_SESSION_ID (or an explicit `sessionId` override). Subagents should report under the parent session: the plugin records child→parent automatically, and an explicit parent `sessionId` always wins.',
@@ -249,7 +250,7 @@ function handleToolsList(id) {
             status: {
               type: 'string',
               enum: VALID_STATUSES,
-              description: 'Current lifecycle status of the task.',
+              description: 'Lifecycle status: pending (queued, not started), running, waiting (blocked), done, or error.',
             },
             title: {
               type: 'string',

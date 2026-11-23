@@ -67,6 +67,7 @@ function dotColor(status: TreeNode["status"]): string {
   if (status === "error") return "#ef4444";
   if (status === "done") return "#10b981";
   if (status === "waiting") return "#f59e0b";
+  if (status === "pending") return "#94a3b8";
   return "#3b82f6";
 }
 
@@ -1110,6 +1111,7 @@ export default Plugin.define({
         const totals = summarizeEntries(scoped());
         const parts: string[] = [];
         if (totals.active > 0) parts.push(`${totals.active} active`);
+        if (totals.pending > 0) parts.push(`${totals.pending} pending`);
         if (totals.done > 0) parts.push(`${totals.done} done`);
         if (totals.dismissed > 0) parts.push(`${totals.dismissed} dismissed`);
         return parts.length > 0 ? parts.join(" · ") : "Agent progress";
@@ -1370,11 +1372,12 @@ export default Plugin.define({
         return {
           label,
           // Headline counts include descendants (the store, not just roots):
-          // "4 active · 3 done · 2 dismissed".
+          // "4 active · 2 pending · 3 done · 2 dismissed".
           title: (() => {
             const summary = summarizeEntries(scoped);
             const parts: string[] = [];
             if (summary.active > 0) parts.push(`${summary.active} active`);
+            if (summary.pending > 0) parts.push(`${summary.pending} pending`);
             if (summary.done > 0) parts.push(`${summary.done} done`);
             if (summary.dismissed > 0) parts.push(`${summary.dismissed} dismissed`);
             return parts.length > 0 ? parts.join(" · ") : "Agent progress";

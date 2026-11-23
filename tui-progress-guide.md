@@ -16,7 +16,7 @@ Split the work instead:
 
 | Plane | Owner | What it does |
 |-------|-------|--------------|
-| Control | Agent | Calls `progress` once per milestone (`running`, `waiting`, `done`, `error`) |
+| Control | Agent | Calls `progress` once per milestone (`pending`, `running`, `waiting`, `done`, `error`) |
 | Data | `progress-relay` | Streams stdout/stderr into the state file at up to 4 writes/sec, at zero model token cost |
 | View | TUI | Polls the state file and redraws the tree |
 
@@ -29,7 +29,7 @@ The agent **must not** call `progress` on a timer, after every output line, or s
 ```ts
 progress({
   id: "sdl2-compile",           // stable id → update / clear later
-  status: "running" | "done" | "error" | "waiting",
+  status: "pending" | "running" | "done" | "error" | "waiting",
   title: "Compiling SDL2",
   detail?: "linking libSDL2.a", // optional detail text
   progress?: 0.60,              // optional 0–1 fraction
@@ -197,15 +197,15 @@ agent: FYI, I'm not stuck, I'm just waiting on these long-running async things:
 | `[██████░░░░]` | 10-char block bar (`█` = complete, `░` = remaining) |
 | `6/10` | progress fraction as `done/total` |
 | `building SDL2` | `title` from the progress call |
-| `✓` / `!` / `⟳` | status icon (done / error / waiting) |
+| `✓` / `!` / `⟳` / `○` | status icon (done / error / waiting / pending) |
 
-**Roll-up rules:** a parent's status is the most severe child status (`error` > `running` > `waiting` > `done`). If any child errors, the parent shows `error`. Parent progress is the average of child progress values. This lets a text harness show at a glance whether a whole build is stuck or just one sub-task.
+**Roll-up rules:** a parent's status is the most severe child status (`error` > `running` > `waiting` > `pending` > `done`). If any child errors, the parent shows `error`. Parent progress is the average of child progress values. This lets a text harness show at a glance whether a whole build is stuck or just one sub-task.
 
 Example renderer (pseudocode):
 
 ```python
 BAR_WIDTH = 10
-STATUS_ORDER = {"error": 4, "running": 3, "waiting": 2, "done": 1}
+STATUS_ORDER = {"error": 4, "running": 3, "waiting": 2, "pending": 1, "done": 0}
 
 def build_tree(entries):
     by_id = {e["id"]: e for e in entries}

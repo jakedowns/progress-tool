@@ -174,3 +174,10 @@ test('expandByDefault opens roots unless the budget says otherwise', () => {
   const view = buildTuiView([tree], { expandByDefault: true });
   assert.deepEqual(view.rows.map((row) => row.node.id), ['build', 'compile']);
 });
+
+test('pending roots report as their own bucket, ahead of done', () => {
+  assert.equal(
+    summarizeRoots([root('d', 'done'), root('p', 'pending')], () => false),
+    'pending (1) | done (1)'
+  );
+});
