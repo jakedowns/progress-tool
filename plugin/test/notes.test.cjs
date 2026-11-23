@@ -30,6 +30,8 @@ execFileSync(
 
 const {
   SAY_NOTES_PER_SESSION,
+  clearSayNotes,
+  dismissSayNote,
   hardDeleteAll,
   hardDeleteSession,
   readProgressState,
@@ -154,6 +156,46 @@ test('sayNotesForSession caps the rolled-up view', () => {
   const notes = sayNotesForSession(readProgressState(), 's', { limit: 5 });
   assert.equal(notes.length, 5);
   assert.equal(notes[0].text, 'n29');
+});
+
+test('dismissSayNote deletes one note from the shared ring buffer', () => {
+  reset();
+  const first = recordSayNote({ sessionID: 's', text: 'first', at: 1 });
+  const second = recordSayNote({ sessionID: 's', text: 'second', at: 2 });
+
+  assert.equal(dismissSayNote(first.id), true);
+  assert.deepEqual(
+    readProgressState().notes.s.map((note) => note.text),
+    ['second'],
+    'only the targeted note is removed'
+  );
+  assert.equal(dismissSayNote('missing-note'), false);
+  assert.equal(dismissSayNote(''), false);
+  assert.equal(dismissSayNote(first.id), false, 'repeat dismissal is a no-op');
+
+  assert.equal(dismissSayNote(second.id), true);
+  assert.equal(readProgressState().notes.s, undefined, 'empty buckets are removed');
+});
+
+test('clearSayNotes is root-scoped and clears child notes with the tree', () => {
+  reset();
+  writeMap({
+    child: { parentId: 'parent', at: 1, agent: 'explore' },
+    grand: { parentId: 'child', at: 1 },
+  });
+  recordSayNote({ sessionID: 'parent', text: 'root note', at: 100 });
+  recordSayNote({ sessionID: 'child', text: 'child note', at: 200 });
+  recordSayNote({ sessionID: 'grand', text: 'grand note', at: 300 });
+  recordSayNote({ sessionID: 'other', text: 'other tree', at: 400 });
+
+  assert.equal(clearSayNotes('child'), 3, 'viewing a child clears the shared root tree');
+  const notes = readProgressState().notes;
+  assert.equal(notes.parent, undefined);
+  assert.equal(notes.child, undefined);
+  assert.equal(notes.grand, undefined);
+  assert.deepEqual(notes.other.map((note) => note.text), ['other tree']);
+  assert.equal(clearSayNotes('child'), 0, 'already empty');
+  assert.equal(clearSayNotes(''), 0);
 });
 
 test('notes survive soft clear but are purged with the session or the store', () => {

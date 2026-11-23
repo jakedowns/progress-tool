@@ -71,6 +71,43 @@ export const ProgressRpc = Rpc.define({
         additionalProperties: false,
       },
     },
+    dismissNote: {
+      input: {
+        type: "object",
+        properties: {
+          // Stable note id from the `list` notes array (not a session id).
+          noteID: { type: "string" },
+        },
+        required: ["noteID"],
+        additionalProperties: false,
+      },
+      output: {
+        type: "object",
+        properties: { ok: { type: "boolean" } },
+        required: ["ok"],
+        additionalProperties: false,
+      },
+    },
+    clearNotes: {
+      input: {
+        type: "object",
+        properties: {
+          // Viewer session; child and grandchild notes roll up to its root.
+          sessionID: { type: "string" },
+        },
+        required: ["sessionID"],
+        additionalProperties: false,
+      },
+      output: {
+        type: "object",
+        properties: {
+          ok: { type: "boolean" },
+          removed: { type: "number" },
+        },
+        required: ["ok", "removed"],
+        additionalProperties: false,
+      },
+    },
     clear: {
       input: {
         type: "object",

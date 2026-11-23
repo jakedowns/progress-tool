@@ -25,11 +25,14 @@ const {
   createSayController,
   decideSay,
   emptySayState,
+  guiSaySurfaces,
+  normalizeSayModes,
   normalizeSayOptions,
   normalizeSayText,
   sayEnabled,
   sayResultMessage,
   sayToolDescription,
+  tuiSaySurfaces,
 } = require(path.join(OUT, 'say.cjs'));
 
 const enabled = (overrides = {}) =>
@@ -47,6 +50,70 @@ test('say is opt-in and defaults are 180-260, 3 per turn, 15s cooldown', () => {
   assert.equal(options.cooldownMs, 15_000);
   assert.equal(options.chatNotes, true);
   assert.equal(options.finalGuard, true);
+  assert.deepEqual(options.modes, ['tree']);
+});
+
+test('sayModes defaults to tree and accepts scalar, alias, dedupe, and empty', () => {
+  assert.deepEqual(normalizeSayOptions({ say: true }).modes, ['tree']);
+  assert.deepEqual(normalizeSayModes(undefined), ['tree']);
+  assert.deepEqual(normalizeSayModes('pill'), ['pill']);
+  assert.deepEqual(normalizeSayModes(['toast', 'pill', 'toast', 'nope']), [
+    'toast',
+    'pill',
+  ]);
+  assert.deepEqual(normalizeSayModes('nope'), [], 'an explicit unknown value drops to none');
+  assert.deepEqual(normalizeSayModes([]), [], 'an explicit empty array is allowed');
+  assert.deepEqual(normalizeSayOptions({ sayModes: [] }).modes, []);
+  assert.deepEqual(normalizeSayOptions({ sayMode: 'toast' }).modes, ['toast']);
+  assert.deepEqual(
+    normalizeSayOptions({ sayModes: ['tree'], sayMode: 'pill' }).modes,
+    ['tree'],
+    'sayModes wins over the scalar alias'
+  );
+  assert.deepEqual(
+    normalizeSayOptions({ sayModes: null, sayMode: 'pill' }).modes,
+    ['pill'],
+    'a null sayModes falls back to the alias'
+  );
+});
+
+test('TUI surfaces fold pill into the tree line and dedupe with tree', () => {
+  assert.deepEqual(tuiSaySurfaces(['tree']), { line: true, toast: false });
+  assert.deepEqual(tuiSaySurfaces(['pill']), { line: true, toast: false });
+  assert.deepEqual(tuiSaySurfaces(['pill', 'tree']), { line: true, toast: false });
+  assert.deepEqual(tuiSaySurfaces(['pill', 'toast', 'tree']), {
+    line: true,
+    toast: true,
+  });
+  assert.deepEqual(tuiSaySurfaces([]), { line: false, toast: false });
+});
+
+test('GUI surfaces fall back from tree to the pill in composer layout', () => {
+  assert.deepEqual(guiSaySurfaces(['tree'], 'composer'), {
+    pill: true,
+    line: true,
+    toast: false,
+  });
+  assert.deepEqual(guiSaySurfaces(['tree'], 'sidebar'), {
+    pill: false,
+    line: true,
+    toast: false,
+  });
+  assert.deepEqual(guiSaySurfaces(['pill'], 'sidebar'), {
+    pill: true,
+    line: false,
+    toast: false,
+  });
+  assert.deepEqual(guiSaySurfaces(['toast'], 'composer'), {
+    pill: false,
+    line: false,
+    toast: true,
+  });
+  assert.deepEqual(guiSaySurfaces([], 'composer'), {
+    pill: false,
+    line: false,
+    toast: false,
+  });
 });
 
 test('option clamping keeps min <= max and bounds every numeric field', () => {
@@ -57,10 +124,14 @@ test('option clamping keeps min <= max and bounds every numeric field', () => {
     sayBudgetPerTurn: 99,
     sayCooldownMs: -1,
   });
-  assert.equal(options.minChars, 80);
+  assert.equal(options.minChars, 20);
   assert.equal(options.maxChars, 600);
   assert.equal(options.budgetPerTurn, 10);
   assert.equal(options.cooldownMs, 0);
+
+  const narrow = normalizeSayOptions({ say: true, sayMinChars: 20, sayMaxChars: 80 });
+  assert.equal(narrow.minChars, 20, '20 is the widened lower bound');
+  assert.equal(narrow.maxChars, 80);
 
   const inverted = normalizeSayOptions({ say: true, sayMinChars: 400, sayMaxChars: 200 });
   assert.equal(inverted.maxChars, 400);

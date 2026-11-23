@@ -18,6 +18,8 @@
  * Pure helpers live here so they can be unit-tested without an OpenCode server.
  */
 
+export type SayMode = "pill" | "toast" | "tree";
+
 export interface SayOptions {
   enabled: boolean;
   minChars: number;
@@ -26,6 +28,8 @@ export interface SayOptions {
   cooldownMs: number;
   chatNotes: boolean;
   finalGuard: boolean;
+  /** Where note surfaces appear; see `tuiSaySurfaces` / `guiSaySurfaces`. */
+  modes: SayMode[];
 }
 
 export interface SayTurnState {
@@ -106,6 +110,78 @@ const DEFAULT_BUDGET = 3;
 const DEFAULT_COOLDOWN_MS = 15_000;
 const KINDS: readonly SayKind[] = ["intent", "update", "blocked", "question"];
 
+export const SAY_MODES = ["pill", "toast", "tree"] as const;
+export const DEFAULT_SAY_MODES: readonly SayMode[] = ["tree"];
+
+function sayModeValues(value: unknown): string[] {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) {
+    return value.filter((entry): entry is string => typeof entry === "string");
+  }
+  return [];
+}
+
+/**
+ * Normalize the user-facing note-mode list. `sayModes` accepts a string or an
+ * array; `sayMode` is the scalar alias. Unknown values are dropped, duplicates
+ * collapse, and an explicit empty array is honoured (no note surfaces).
+ */
+export function normalizeSayModes(value: unknown): SayMode[] {
+  if (value === undefined || value === null) return [...DEFAULT_SAY_MODES];
+  const modes: SayMode[] = [];
+  for (const raw of sayModeValues(value)) {
+    const mode = raw.trim() as SayMode;
+    if (SAY_MODES.includes(mode) && !modes.includes(mode)) modes.push(mode);
+  }
+  return modes;
+}
+
+export interface TuiSaySurfaces {
+  /** The dim latest-note line above the TUI tree (history stays in `/progress`). */
+  line: boolean;
+  /** A toast for each new note. */
+  toast: boolean;
+}
+
+/**
+ * TUI mapping. There are no pills in the TUI, so `pill` maps to the tree line
+ * and collapses into `tree` when both are enabled.
+ */
+export function tuiSaySurfaces(modes: readonly SayMode[] = DEFAULT_SAY_MODES): TuiSaySurfaces {
+  const enabled = new Set(modes);
+  return {
+    line: enabled.has("tree") || enabled.has("pill"),
+    toast: enabled.has("toast"),
+  };
+}
+
+export interface GuiSaySurfaces {
+  /** The notes composer pill (also the only note surface in composer layout). */
+  pill: boolean;
+  /** A line above the tree in the sidebar panel and in the pill popover. */
+  line: boolean;
+  /** A toast for each new note. */
+  toast: boolean;
+}
+
+/**
+ * GUI mapping. The composer layout has no tree, so `tree` falls back to the
+ * pill; `pill` keeps the notes pill visible in both layouts. A sidebar-only
+ * `tree` therefore renders its line in the panel without adding a pill.
+ */
+export function guiSaySurfaces(
+  modes: readonly SayMode[] = DEFAULT_SAY_MODES,
+  layout: "composer" | "sidebar" = "composer"
+): GuiSaySurfaces {
+  const enabled = new Set(modes);
+  const tree = enabled.has("tree");
+  return {
+    pill: enabled.has("pill") || (tree && layout === "composer"),
+    line: tree,
+    toast: enabled.has("toast"),
+  };
+}
+
 function integerInRange(value: unknown, fallback: number, min: number, max: number): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
   return Math.min(max, Math.max(min, Math.floor(value)));
@@ -114,11 +190,17 @@ function integerInRange(value: unknown, fallback: number, min: number, max: numb
 /** Defaults are opt-in: `say` only exists when `options.say === true`. */
 export function normalizeSayOptions(raw: unknown): SayOptions {
   const options = (raw ?? {}) as Record<string, unknown>;
-  const minChars = integerInRange(options.sayMinChars, DEFAULT_MIN_CHARS, 80, 600);
+  const minChars = integerInRange(options.sayMinChars, DEFAULT_MIN_CHARS, 20, 600);
   const maxChars = Math.max(
     minChars,
-    integerInRange(options.sayMaxChars, DEFAULT_MAX_CHARS, 80, 600)
+    integerInRange(options.sayMaxChars, DEFAULT_MAX_CHARS, 20, 600)
   );
+  // `sayModes` wins over the `sayMode` alias; an explicit empty array is a
+  // valid choice meaning "notes are recorded but no client surface shows them".
+  const modesSource =
+    options.sayModes === undefined || options.sayModes === null
+      ? options.sayMode
+      : options.sayModes;
   return {
     enabled: options.say === true,
     minChars,
@@ -127,6 +209,7 @@ export function normalizeSayOptions(raw: unknown): SayOptions {
     cooldownMs: integerInRange(options.sayCooldownMs, DEFAULT_COOLDOWN_MS, 0, 120_000),
     chatNotes: options.sayChatNotes !== false,
     finalGuard: options.sayFinalGuard !== false,
+    modes: normalizeSayModes(modesSource),
   };
 }
 

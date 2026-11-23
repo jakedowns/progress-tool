@@ -13,6 +13,8 @@ import { Plugin, Skill } from "@opencode/plugin";
 import { ProgressRpc } from "./rpc.js";
 import {
   adoptChildEntries,
+  clearSayNotes,
+  dismissSayNote,
   hardDeleteAll,
   hardDeleteSession,
   readProgressState,
@@ -265,6 +267,18 @@ export default Plugin.define({
         const ok = writeDismissal(key, status);
         console.log(`[opencode-progress] v${pluginVersion} dismiss rpc key=${key} status=${status} ok=${ok}`);
         return { ok };
+      },
+      dismissNote: async ({ noteID }) => {
+        const ok = dismissSayNote(noteID);
+        console.log(`[opencode-progress] v${pluginVersion} dismiss note rpc id=${noteID} ok=${ok}`);
+        return { ok };
+      },
+      clearNotes: async ({ sessionID }) => {
+        const removed = clearSayNotes(sessionID);
+        console.log(
+          `[opencode-progress] v${pluginVersion} clear notes rpc session=${sessionID} removed=${removed}`
+        );
+        return { ok: true, removed };
       },
       clear: async ({ sessionID }) => {
         const result = softClearSession(sessionID);

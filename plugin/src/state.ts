@@ -437,6 +437,63 @@ export function recordSayNote(input: {
   });
 }
 
+/**
+ * Delete one note from the shared ring buffer by its stable id.
+ *
+ * Notes are view-plane data, so a dismissal is a real delete: every client
+ * (TUI, GUI windows, popovers) observes the removal on its next poll/event.
+ * Returns false when the id is unknown or the write cannot be completed.
+ */
+export function dismissSayNote(noteID: string): boolean {
+  const id = String(noteID ?? "");
+  if (!id) return false;
+  const result = mutateStateFile((state) => {
+    let removed = false;
+    for (const [author, list] of Object.entries(state.notes ?? {})) {
+      if (!Array.isArray(list)) continue;
+      const next = list.filter((note) => note?.id !== id);
+      if (next.length === list.length) continue;
+      removed = true;
+      if (next.length === 0) delete state.notes![author];
+      else state.notes![author] = next;
+    }
+    return { value: removed, write: removed };
+  });
+  if (result) console.log(`[opencode-progress] dismissed note ${id}`);
+  return result === true;
+}
+
+/**
+ * Delete every note in the viewer's session tree.
+ *
+ * The viewer may be any member of the tree; child and grandchild notes roll up
+ * to the same root, so "Dismiss all notes" clears exactly what the history
+ * showed. Returns the number of notes removed (0 on failure).
+ */
+export function clearSayNotes(sessionID: string): number {
+  const id = String(sessionID ?? "");
+  if (!id) return 0;
+  const links = readSessionMap();
+  const root = rootSessionFor(id, links);
+  const result = mutateStateFile((state) => {
+    let removed = 0;
+    for (const [author, list] of Object.entries(state.notes ?? {})) {
+      if (!Array.isArray(list)) continue;
+      const keep = list.filter(
+        (note) => rootSessionFor(note?.sessionId ?? author, links) !== root
+      );
+      const count = list.length - keep.length;
+      if (count === 0) continue;
+      removed += count;
+      if (keep.length === 0) delete state.notes![author];
+      else state.notes![author] = keep;
+    }
+    return { value: removed, write: removed > 0 };
+  });
+  if (result) console.log(`[opencode-progress] cleared ${result} note(s) root=${root}`);
+  return result ?? 0;
+}
+
 /** Follow child→parent links to the root session (cycle-safe). */
 export function rootSessionFor(
   sessionID: string,
