@@ -21,3 +21,12 @@ npm-debug.log*
 # Symlinked dependency tree (see README dev notes)
 node_modules
 plugin/node_modules.darwin*
+
+# Local planning docs
+/plan-*.md
+
+# Local tasklists - Old Format
+ses_*-tasklist.md
+
+# Local tasklists - New Format
+tasklist-ses*.md
