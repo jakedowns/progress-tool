@@ -1,17 +1,15 @@
 # Changelog
 
 Changes to the Progress Tool (OpenCode plugin, TUI/GUI views, and MCP
-server/relay) from **`plugin@2.18.9`** (`e938598`) through the current HEAD
-(`02ba836`), dated **2026-11-23** — 39 commits.
+server/relay) from **`plugin@2.18.9`** (`e938598`) through the **`plugin@2.20.0`**
+release commit, dated **2026-11-23** — 41 commits.
 
-**Release policy for this range.** The last published/tagged plugin release is
-**`plugin@2.19.0`** (`ceff22d`); `plugin@2.18.9` is its predecessor. Package
-versions `2.20.0`–`2.25.0` were **never published**: they were local minor
-bumps used to force plugin reloads and are consolidated in the unreleased
-section below, not presented as releases. `plugin/package.json` and the README
-version lines are now `2.19.1` (unreleased patch); the last published tag stays
-`2.19.0`, and future local changes stay on the patch line. The MCP package is at
-`2.12.0`, which is also untagged and is not claimed as a release here.
+**Release policy for this range.** The last published/tagged plugin release was
+**`plugin@2.19.0`** (`ceff22d`); `plugin@2.18.9` is its predecessor. Development
+used local reload labels `2.20.0`–`2.25.0`, which were **never published as
+separate releases**. This changelog publishes all of that accumulated work as
+**`plugin@2.20.0`**, the next minor after npm `2.19.0`. The MCP package stays at
+`2.12.0`, which remains untagged and is not claimed as a release here.
 
 ## 2.19.0 — TUI support (released, `ceff22d`)
 
@@ -32,10 +30,10 @@ Shipped in `plugin@2.18.9..plugin@2.19.0`:
   `screenshots/tui2.png`, updated the docs and release workflow examples, and
   bumped the plugin to `2.19.0`.
 
-## 2.19.1 (unreleased, current local)
+## 2.20.0 — narration, notes, and compact trees (released, `plugin@2.20.0`)
 
-Everything below is unreleased. Local reload labels `2.20.0`–`2.25.0` are
-historical only; none of them was published.
+Everything below ships in `plugin@2.20.0`. The earlier development labels
+`2.20.0`–`2.25.0` were reload bumps, not separate releases.
 
 ### Added
 
@@ -188,7 +186,7 @@ included.
 
 ## Commits
 
-- Range: **`plugin@2.18.9`** (`e938598`) → **`02ba836`** — **39 commits**.
+- Range: **`plugin@2.18.9`** (`e938598`) → **`plugin@2.20.0`** release commit — **41 commits**.
 - Published release in range: **`plugin@2.19.0`** → `ceff22d`.
 - MCP package version: **`2.12.0`** (untagged; not claimed as a release).
 - 2.19.0: `39d289c` screenshots, `d2ac471` TUI one-line summary, `332490b`
