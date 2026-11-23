@@ -31,6 +31,7 @@ import {
   countActive,
   flattenTreeWithDepth,
   visibleRows,
+  compactTreeSuffix,
   countDescendants,
   collapsedRootMap,
   summarizeEntries,
@@ -38,6 +39,7 @@ import {
   normalizeBarOptions,
   normalizeProgressText,
   normalizeRefreshMs,
+  normalizeTreeTheme,
   normalizeVisibilityOptions,
   oneLineText,
   progressLabel,
@@ -45,6 +47,7 @@ import {
   subagentPrefix,
   visibleEntries,
   type BarOptions,
+  type TreeTheme,
 } from "./tree.js";
 import type { ProgressEntry, SayNote, TreeNode } from "./types.js";
 
@@ -142,9 +145,22 @@ function MenuRow(props: {
   onToggle?: () => void;
   /** Detail line cap: -1 full, 0 hidden, n>0 clamp with ellipsis. Default full. */
   detailLines?: number;
+  /** `compact` drops the bar and started line and keeps one detail line. */
+  theme?: TreeTheme;
 }) {
   const pct = () => progressLabel(props.node.progress);
   const parts = () => barParts(props.node.progress, props.options);
+  const compact = () => props.theme === "compact";
+  /** Compact rows ignore `guiDetailLines` above 1 but still honor 0 = hidden. */
+  const effectiveDetailLines = () =>
+    compact() ? (props.detailLines === 0 ? 0 : 1) : props.detailLines;
+  const compactMeta = () =>
+    compactTreeSuffix(
+      props.node.progress,
+      props.collapsed && props.node.children.length > 0
+        ? countDescendants(props.node)
+        : 0
+    );
 
   return (
     <div
@@ -161,8 +177,8 @@ function MenuRow(props: {
         "align-items": "flex-start",
         gap: "8px",
         "padding-left": `${props.depth * 14}px`,
-        "padding-top": "5px",
-        "padding-bottom": "5px",
+        "padding-top": compact() ? "2px" : "5px",
+        "padding-bottom": compact() ? "2px" : "5px",
         cursor: props.hasChildren && !props.leaving ? "pointer" : "default",
         transform: props.leaving ? "translateX(120%)" : "translateX(0)",
         opacity: props.leaving ? "0" : "1",
@@ -215,7 +231,7 @@ function MenuRow(props: {
             text={`${props.depth === 0 ? subagentPrefix(props.node) : ""}${props.node.title}`}
           />
         </div>
-        <Show when={props.node.detail && props.detailLines !== 0}>
+        <Show when={props.node.detail && effectiveDetailLines() !== 0}>
           <div
             style={{
               "margin-top": "2px",
@@ -224,11 +240,11 @@ function MenuRow(props: {
               "white-space": "normal",
               "overflow-wrap": "anywhere",
               "word-break": "break-word",
-              ...(props.detailLines && props.detailLines > 0
+              ...((effectiveDetailLines() ?? 0) > 0
                 ? {
                     display: "-webkit-box",
                     "-webkit-box-orient": "vertical",
-                    "-webkit-line-clamp": String(props.detailLines),
+                    "-webkit-line-clamp": String(effectiveDetailLines()),
                     "text-overflow": "ellipsis",
                     overflow: "hidden",
                   }
@@ -239,39 +255,61 @@ function MenuRow(props: {
             <Multiline text={props.node.detail ?? ""} />
           </div>
         </Show>
-        <div
-          style={{
-            "margin-top": "4px",
-            display: "flex",
-            gap: "8px",
-            "align-items": "center",
-            "font-size": "11px",
-            opacity: "0.58",
-          }}
+        <Show
+          when={compact()}
+          fallback={
+            <>
+              <div
+                style={{
+                  "margin-top": "4px",
+                  display: "flex",
+                  gap: "8px",
+                  "align-items": "center",
+                  "font-size": "11px",
+                  opacity: "0.58",
+                }}
+              >
+                <span style={{ "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace" }}>
+                  {parts().bar}
+                </span>
+                <Show when={pct()}>
+                  <span>{pct()}</span>
+                </Show>
+                <Show when={props.collapsed && props.node.children.length > 0}>
+                  <span>&amp; {countDescendants(props.node)} more...</span>
+                </Show>
+              </div>
+              <Show when={props.node.startedAt}>
+                <div
+                  title={`Last updated ${formatRelative(props.node.updatedAt)} (${formatDateTime(props.node.updatedAt)})`}
+                  style={{
+                    "margin-top": "2px",
+                    "font-size": "11px",
+                    opacity: "0.58",
+                    "white-space": "nowrap",
+                    cursor: "default",
+                  }}
+                >
+                  started {formatDateTime(props.node.startedAt)}
+                </div>
+              </Show>
+            </>
+          }
         >
-          <span style={{ "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace" }}>
-            {parts().bar}
-          </span>
-          <Show when={pct()}>
-            <span>{pct()}</span>
+          <Show when={compactMeta()}>
+            <div
+              style={{
+                "margin-top": "2px",
+                display: "flex",
+                gap: "8px",
+                "align-items": "center",
+                "font-size": "11px",
+                opacity: "0.58",
+              }}
+            >
+              <span>{compactMeta()}</span>
+            </div>
           </Show>
-          <Show when={props.collapsed && props.node.children.length > 0}>
-            <span>&amp; {countDescendants(props.node)} more...</span>
-          </Show>
-        </div>
-        <Show when={props.node.startedAt}>
-          <div
-            title={`Last updated ${formatRelative(props.node.updatedAt)} (${formatDateTime(props.node.updatedAt)})`}
-            style={{
-              "margin-top": "2px",
-              "font-size": "11px",
-              opacity: "0.58",
-              "white-space": "nowrap",
-              cursor: "default",
-            }}
-          >
-            started {formatDateTime(props.node.startedAt)}
-          </div>
         </Show>
       </div>
       <Show when={props.onDismiss}>
@@ -304,16 +342,25 @@ function MenuRow(props: {
   );
 }
 
-function rowFor(node: TreeNode, depth: number, options: BarOptions) {
+function rowFor(
+  node: TreeNode,
+  depth: number,
+  options: BarOptions,
+  theme: TreeTheme = "default"
+) {
   const parts = barParts(node.progress, options);
-  const pct = progressLabel(node.progress);
   const indent = depth > 0 ? "\u00A0\u00A0".repeat(depth) + "└─ " : "";
+  const compactSuffix = compactTreeSuffix(node.progress, 0);
   const suffix =
-    parts.style === "emoji"
-      ? `: ${parts.bar}${parts.fraction}`
-      : pct
-        ? ` · ${pct}`
-        : "";
+    theme === "compact"
+      ? compactSuffix
+        ? ` · ${compactSuffix}`
+        : ""
+      : parts.style === "emoji"
+        ? `: ${parts.bar}${parts.fraction}`
+        : progressLabel(node.progress)
+          ? ` · ${progressLabel(node.progress)}`
+          : "";
   return {
     id: node.key,
     label: `${indent}${oneLineText(node.title)}${suffix}`,
@@ -353,6 +400,7 @@ export default Plugin.define({
       });
     const sidebarWidth = normalizeGuiSidebarWidth(ctx.options?.guiSidebarWidth);
     const detailLines = normalizeGuiDetailLines(ctx.options?.guiDetailLines);
+    const treeTheme = normalizeTreeTheme(ctx.options?.treeTheme);
     const sidebarPanelKey = `${ctx.id}:${GUI_PROGRESS_PANEL_ID}`;
     let alive = true;
     let inFlight = false;
@@ -1038,6 +1086,7 @@ export default Plugin.define({
                             depth={0}
                             options={options}
                             detailLines={detailLines}
+                            theme={treeTheme}
                             hasChildren={node().children.length > 0}
                             collapsed={isCollapsed()}
                             onToggle={() =>
@@ -1071,6 +1120,7 @@ export default Plugin.define({
                                     depth={depth}
                                     options={options}
                                     detailLines={detailLines}
+                                    theme={treeTheme}
                                   />
                                 )}
                               </For>
@@ -1327,6 +1377,7 @@ export default Plugin.define({
                             depth={0}
                             options={options}
                             detailLines={detailLines}
+                            theme={treeTheme}
                             hasChildren={node().children.length > 0}
                             collapsed={isCollapsed()}
                             onToggle={() =>
@@ -1354,6 +1405,7 @@ export default Plugin.define({
                                     depth={depth}
                                     options={options}
                                     detailLines={detailLines}
+                                    theme={treeTheme}
                                   />
                                 )}
                               </For>
@@ -1682,7 +1734,7 @@ export default Plugin.define({
             ...flattenTreeWithDepth(visibleRoots)
               .slice(0, 7)
               .map(({ node, depth }) => {
-                const row = rowFor(node, depth, options);
+                const row = rowFor(node, depth, options, treeTheme);
                 if (depth !== 0) return row;
                 return {
                   ...row,
