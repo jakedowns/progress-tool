@@ -2,7 +2,7 @@
 
 Back to the [main README](./README.md).
 
-**Versions:** MCP server `2.12.0` · OpenCode plugin `2.19.0`
+**Versions:** MCP server `2.12.0` · OpenCode plugin `2.19.1`
 
 This document is the reference half of the project: the portable contract, the
 relay's behaviour, state-store guarantees, architecture, testing, every plugin
@@ -376,7 +376,7 @@ There is no requirement that the data plane be this CLI. A harness can implement
 cd mcp-server && npm test        # 57 tests
 
 # Plugin: view helpers, lifecycle, skills, TUI packaging
-cd plugin && npm test            # 171 tests
+cd plugin && npm test            # 174 tests
 ```
 
 The MCP smoke suite covers one-shot emits, session resolution and isolation, subagent mapping and adoption, pipe mode, wrap mode with a failing exit code, field preservation when attaching a relay, the MCP handshake and relay hint, and 16 concurrent writers against one state file.
@@ -460,6 +460,7 @@ Because it is a tool call, the turn cannot end on a note.
 - `sayFinalGuard`: if the agent posts a note and then stops without a conclusion, resume the turn once (default `true`).
 - `sayModes`: where note surfaces appear. **Default `["tree"]`**. Accepts a string or an array of `"pill"`, `"toast"`, `"tree"`; `sayMode` is a scalar alias. Unknown values are dropped, duplicates collapse, and an explicit `[]` records notes with no surface. This is view config only: the tool, its budget, and `sayChatNotes` stay independent.
 - `sayAutoHideTimeoutMs`: hide notes older than this from every notes surface (default `60000`, clamp `0..86400000`; `0` disables auto-hide and keeps notes until manually dismissed). A note is visible only while `now - note.at < timeout`; hidden notes remain in the shared ring buffer, so this is view-only and never changes the tool, store, or purge rules.
+- `sayToastScope`: which rolled-up notes may raise a toast when `toast` is in `sayModes`: `"own"` (default; notes authored by the viewed session), `"warnings"` (own plus child `blocked`/`question`), or `"all"`. Child notes still roll up in the line, pill, and history regardless. `blocked`/`question` toasts last `12000`ms; other notes `5000`ms, in both clients.
 - `sayNudge`: opt-in long-tool reminder. `"long-tool"` (or `true`) leaves one **context-only** nudge after a tool runs longer than `sayNudgeAfterMs` with no accepted say this turn. **Default `off`.** A nudge cannot reach the model while the tool is still running, so it is deliberately retrospective: it asks for a say before the *next* long step. It never sends a synthetic message, never fires for `say`/progress calls, and is suppressed while a `progress-nudge` entry stands. `sayNudgeCooldownMs` (default `120000`) and `sayNudgeMaxPerTurn` (default `1`, max `3`) bound repeats; per-turn counts reset on the next prompt while the cooldown timestamp persists.
 
 Budget and cooldown skips return a result that points the agent at the `progress`
@@ -476,9 +477,11 @@ GUI composer layout has no tree, so `tree` falls back to the pill there.
 | `toast` | one toast per new note | one toast per new note | one toast per new note |
 
 Toasts dedupe by note id and only fire for notes that appear after the view
-loaded; child-session notes roll up to the viewed session with
-`[Subagent (X)]` attribution, and `blocked`/`question` notes use the warning
-variant. Every surface also applies `sayAutoHideTimeoutMs`: an expired latest
+loaded. `sayToastScope` controls which rolled-up notes may toast (default
+`"own"`); child notes always roll up in the line/pill/history with
+`[Subagent (X)]` attribution. `blocked`/`question` toasts use the warning
+variant in the TUI and the warning icon in the GUI, and stay for 12s instead of
+5s. Every surface also applies `sayAutoHideTimeoutMs`: an expired latest
 note falls back to the next visible note, and the surface disappears when none
 remain. Expired notes are still in the shared state and never toasted.
 
@@ -568,7 +571,7 @@ There is deliberately no free-form path, so project config cannot point it at
 | Prebuilt desktop/web bundle | `plugin/dist/gui-experimental.cjs` |
 | Precompiled TUI entry | `plugin/dist/tui.js` |
 | TUI build script | `plugin/scripts/build-tui.mjs` |
-| Plugin test suite (171 tests) | `plugin/test/*.test.cjs` |
+| Plugin test suite (174 tests) | `plugin/test/*.test.cjs` |
 | Standalone desktop GUI server | `progress-gui-server.js` |
 | Launch / setup scripts | `launch-gui.sh`, `setup.sh` |
 | GUI build script (stages off the repo mount) | `scripts/build-gui.sh` |

@@ -20,6 +20,7 @@
  */
 
 export type SayMode = "pill" | "toast" | "tree";
+export type SayToastScope = "own" | "warnings" | "all";
 
 export interface SayOptions {
   enabled: boolean;
@@ -33,6 +34,8 @@ export interface SayOptions {
   modes: SayMode[];
   /** Notes older than this are hidden by views; 0 keeps them until dismissed. */
   autoHideTimeoutMs: number;
+  /** Which notes may raise a toast. Default `own` (root-authored only). */
+  toastScope: SayToastScope;
 }
 
 export interface SayTurnState {
@@ -237,6 +240,7 @@ export function normalizeSayOptions(raw: unknown): SayOptions {
     chatNotes: options.sayChatNotes !== false,
     finalGuard: options.sayFinalGuard !== false,
     modes: normalizeSayModes(modesSource),
+    toastScope: normalizeSayToastScope(options.sayToastScope),
     autoHideTimeoutMs: integerInRange(
       options.sayAutoHideTimeoutMs,
       DEFAULT_SAY_AUTO_HIDE_TIMEOUT_MS,
@@ -469,4 +473,43 @@ export function createSayController(
       if (state) state.guarded = true;
     },
   };
+}
+
+
+export const SAY_TOAST_DURATION_MS = 5_000;
+export const SAY_WARNING_TOAST_DURATION_MS = 12_000;
+
+/** Normalize the toast scope; anything unrecognized means root-authored only. */
+export function normalizeSayToastScope(value: unknown): SayToastScope {
+  return value === "all" || value === "warnings" ? value : "own";
+}
+
+/**
+ * Filter rolled-up notes down to the ones allowed to toast.
+ * `own`: only notes authored by the viewed session.
+ * `warnings`: own notes plus child `blocked`/`question` notes.
+ * `all`: every rolled-up note.
+ */
+export function sayToastNotes<T extends { sessionId: string; kind: string }>(
+  notes: readonly T[],
+  viewerSessionID: string,
+  scope: SayToastScope
+): T[] {
+  if (scope === "all") return [...notes];
+  if (scope === "warnings") {
+    return notes.filter(
+      (note) =>
+        note.sessionId === viewerSessionID ||
+        note.kind === "blocked" ||
+        note.kind === "question"
+    );
+  }
+  return notes.filter((note) => note.sessionId === viewerSessionID);
+}
+
+/** Warning notes stay visible longer; both clients support `duration`. */
+export function sayToastDurationMs(kind: string): number {
+  return kind === "blocked" || kind === "question"
+    ? SAY_WARNING_TOAST_DURATION_MS
+    : SAY_TOAST_DURATION_MS;
 }

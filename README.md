@@ -24,7 +24,7 @@ Implements the [Agent Progress Tool proposal](https://gist.github.com/jakedowns/
 for OpenCode 2, and is written as a portable reference implementation any
 harness can copy or adapt.
 
-**Versions:** MCP server `2.12.0` · OpenCode plugin `2.19.0`
+**Versions:** MCP server `2.12.0` · OpenCode plugin `2.19.1`
 
 > **Advanced docs:** [schema, relay internals, state store, architecture, all
 > options, file map →](./README-advanced.md)
@@ -212,6 +212,7 @@ Multi-line titles and details accept real newlines, `\n` / `\r\n`, or `<br>`.
 | `say` | Enable the opt-in narration tool and notes lane (default off) |
 | `sayModes` | Note surfaces: string or array of `"pill"`, `"toast"`, `"tree"` (default `["tree"]`; `sayMode` is a scalar alias; `[]` records without showing) |
 | `sayAutoHideTimeoutMs` | Hide notes older than this from every surface (default `60000`, clamp `0..86400000`; `0` keeps until dismissed; view-only) |
+| `sayToastScope` | Toast `"own"` notes (default), own + child `"warnings"`, or `"all"`; child notes still roll up in the tree/pill |
 | `sayNudge` | Opt-in long-tool reminder: `"long-tool"` or `true` (default off; context-only, never synthetic) |
 | `retainDeletedSessionProgress` | Keep store entries when a session is deleted (default off) |
 

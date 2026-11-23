@@ -67,7 +67,13 @@ import {
   summarizeRoots,
   type TuiRow,
 } from "./tui-view.js";
-import { normalizeSayOptions, tuiSaySurfaces, visibleSayNotes } from "./say.js";
+import {
+  normalizeSayOptions,
+  sayToastDurationMs,
+  sayToastNotes,
+  tuiSaySurfaces,
+  visibleSayNotes,
+} from "./say.js";
 import type { ProgressEntry, ProgressStatus, ProgressState, SayNote, TreeNode } from "./types.js";
 
 const [state, setState] = createSignal<ProgressState>(readProgressState());
@@ -915,15 +921,19 @@ export default Plugin.define({
       for (const id of [...seen]) {
         if (!current.has(id)) seen.delete(id);
       }
+      const toastable = new Set(
+        sayToastNotes(notes, sessionID, sayOptions.toastScope).map((note) => note.id)
+      );
       const fresh = notes
-        .filter((note) => !seen.has(note.id))
+        .filter((note) => !seen.has(note.id) && toastable.has(note.id))
         .sort((a, b) => (a.at ?? 0) - (b.at ?? 0));
+      for (const note of notes) seen.add(note.id);
       for (const note of fresh) {
-        seen.add(note.id);
         const toast = buildNoteToast(note, sessionID);
         context.ui.toast.show({
           message: toast.message,
           variant: toast.warning ? "warning" : "info",
+          duration: sayToastDurationMs(note.kind),
         });
       }
     };

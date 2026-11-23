@@ -851,6 +851,7 @@ function normalizeSayOptions(raw) {
     chatNotes: options.sayChatNotes !== false,
     finalGuard: options.sayFinalGuard !== false,
     modes: normalizeSayModes(modesSource),
+    toastScope: normalizeSayToastScope(options.sayToastScope),
     autoHideTimeoutMs: integerInRange(
       options.sayAutoHideTimeoutMs,
       DEFAULT_SAY_AUTO_HIDE_TIMEOUT_MS,
@@ -858,6 +859,23 @@ function normalizeSayOptions(raw) {
       MAX_SAY_AUTO_HIDE_TIMEOUT_MS
     )
   };
+}
+var SAY_TOAST_DURATION_MS = 5e3;
+var SAY_WARNING_TOAST_DURATION_MS = 12e3;
+function normalizeSayToastScope(value) {
+  return value === "all" || value === "warnings" ? value : "own";
+}
+function sayToastNotes(notes, viewerSessionID, scope) {
+  if (scope === "all") return [...notes];
+  if (scope === "warnings") {
+    return notes.filter(
+      (note) => note.sessionId === viewerSessionID || note.kind === "blocked" || note.kind === "question"
+    );
+  }
+  return notes.filter((note) => note.sessionId === viewerSessionID);
+}
+function sayToastDurationMs(kind) {
+  return kind === "blocked" || kind === "question" ? SAY_WARNING_TOAST_DURATION_MS : SAY_TOAST_DURATION_MS;
 }
 
 // src/tui.js
@@ -1711,13 +1729,15 @@ var tui_default = Plugin.define({
       for (const id of [...seen]) {
         if (!current.has(id)) seen.delete(id);
       }
-      const fresh = notes.filter((note) => !seen.has(note.id)).sort((a, b) => (a.at ?? 0) - (b.at ?? 0));
+      const toastable = new Set(sayToastNotes(notes, sessionID, sayOptions.toastScope).map((note) => note.id));
+      const fresh = notes.filter((note) => !seen.has(note.id) && toastable.has(note.id)).sort((a, b) => (a.at ?? 0) - (b.at ?? 0));
+      for (const note of notes) seen.add(note.id);
       for (const note of fresh) {
-        seen.add(note.id);
         const toast = buildNoteToast(note, sessionID);
         context.ui.toast.show({
           message: toast.message,
-          variant: toast.warning ? "warning" : "info"
+          variant: toast.warning ? "warning" : "info",
+          duration: sayToastDurationMs(note.kind)
         });
       }
     };

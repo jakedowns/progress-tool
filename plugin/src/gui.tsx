@@ -23,7 +23,13 @@ import {
   normalizeGuiSidebarWidth,
   type GuiLayout,
 } from "./gui-view.js";
-import { guiSaySurfaces, normalizeSayOptions, visibleSayNotes } from "./say.js";
+import {
+  guiSaySurfaces,
+  normalizeSayOptions,
+  sayToastDurationMs,
+  sayToastNotes,
+  visibleSayNotes,
+} from "./say.js";
 import { buildNotesLine } from "./tui-view.js";
 import {
   buildTree,
@@ -558,11 +564,14 @@ export default Plugin.define({
         // forget notes that are truly gone (prevents a re-toast race).
         if (!current.has(id) && !pendingRemovals[id]) seen.delete(id);
       }
+      const toastable = new Set(
+        sayToastNotes(notes, sessionID, sayOptions.toastScope).map((note) => note.id)
+      );
       const fresh = notes
-        .filter((note) => !seen.has(note.id))
+        .filter((note) => !seen.has(note.id) && toastable.has(note.id))
         .sort((a, b) => (a.at ?? 0) - (b.at ?? 0));
+      for (const note of notes) seen.add(note.id);
       for (const note of fresh) {
-        seen.add(note.id);
         const toast = buildNoteToast(note, sessionID);
         // The desktop toast API has no `warning` variant; use its warning
         // icon with the neutral tone for blocked/question notes.
@@ -571,7 +580,7 @@ export default Plugin.define({
           description: toast.description,
           variant: "default",
           ...(toast.tone === "warning" ? { icon: "warning" as const } : {}),
-          duration: 5000,
+          duration: sayToastDurationMs(note.kind),
         });
       }
     };

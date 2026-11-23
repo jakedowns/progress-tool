@@ -146,6 +146,7 @@ removed with the session or a hard clear.
 | `sayFinalGuard` | `true` | if the agent posts a note and stops without concluding, resume once |
 | `sayModes` | `["tree"]` | surfaces: string/array of `"pill"`, `"toast"`, `"tree"`; `sayMode` alias; `[]` records only |
 | `sayAutoHideTimeoutMs` | `60000` | hide notes older than this from every surface; `0` keeps until dismissed; view-only |
+| `sayToastScope` | `"own"` | toast `own` notes, own + child `warnings`, or `all`; child notes always roll up in the line/pill |
 | `sayNudge` | `off` | opt-in long-tool reminder: `"long-tool"` or `true`; context-only, never synthetic |
 | `sayNudgeAfterMs` | `20000` | minimum tool duration before a reminder |
 | `sayNudgeCooldownMs` | `120000` | minimum gap between say reminders |

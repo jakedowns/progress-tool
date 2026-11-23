@@ -34,6 +34,11 @@ const {
   sayToolDescription,
   tuiSaySurfaces,
   visibleSayNotes,
+  normalizeSayToastScope,
+  sayToastDurationMs,
+  sayToastNotes,
+  SAY_TOAST_DURATION_MS,
+  SAY_WARNING_TOAST_DURATION_MS,
 } = require(path.join(OUT, 'say.cjs'));
 
 const enabled = (overrides = {}) =>
@@ -491,4 +496,35 @@ test('reset starts a new turn budget; markGuarded is sticky', async () => {
     { sessionID: 'ses_say_4', progress: async () => {} }
   );
   assert.match(afterReset.content, /Noted/);
+});
+
+test('toast scope defaults to own notes and normalizes values', () => {
+  assert.equal(normalizeSayOptions({ say: true }).toastScope, 'own');
+  assert.equal(normalizeSayToastScope('warnings'), 'warnings');
+  assert.equal(normalizeSayToastScope('all'), 'all');
+  assert.equal(normalizeSayToastScope('nope'), 'own');
+});
+
+test('sayToastNotes filters child notes by scope', () => {
+  const notes = [
+    { id: 'a', sessionId: 'root', kind: 'intent' },
+    { id: 'b', sessionId: 'child', kind: 'update' },
+    { id: 'c', sessionId: 'child', kind: 'blocked' },
+    { id: 'd', sessionId: 'child', kind: 'question' },
+  ];
+  assert.deepEqual(sayToastNotes(notes, 'root', 'own').map((n) => n.id), ['a']);
+  assert.deepEqual(
+    sayToastNotes(notes, 'root', 'warnings').map((n) => n.id),
+    ['a', 'c', 'd']
+  );
+  assert.deepEqual(sayToastNotes(notes, 'root', 'all').map((n) => n.id), ['a', 'b', 'c', 'd']);
+});
+
+test('warning notes get the longer toast duration', () => {
+  assert.equal(sayToastDurationMs('intent'), SAY_TOAST_DURATION_MS);
+  assert.equal(sayToastDurationMs('update'), SAY_TOAST_DURATION_MS);
+  assert.equal(sayToastDurationMs('blocked'), SAY_WARNING_TOAST_DURATION_MS);
+  assert.equal(sayToastDurationMs('question'), SAY_WARNING_TOAST_DURATION_MS);
+  assert.equal(SAY_TOAST_DURATION_MS, 5000);
+  assert.equal(SAY_WARNING_TOAST_DURATION_MS, 12000);
 });
