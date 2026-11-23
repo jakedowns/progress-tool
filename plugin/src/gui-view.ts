@@ -48,6 +48,44 @@ export interface NotesPillView {
   tone?: "warning";
 }
 
+export interface NoteToastView {
+  title: string;
+  description: string;
+  tone?: "warning";
+}
+
+function oneLine(text: unknown): string {
+  return String(text ?? "").replace(/\s+/g, " ").trim();
+}
+
+/** Warning tone for notes that need the user's attention. */
+export function sayNoteWarns(note: Pick<SayNote, "kind">): boolean {
+  return note.kind === "blocked" || note.kind === "question";
+}
+
+/**
+ * Desktop toast copy for one note. Child notes keep their `[Subagent (X)]`
+ * attribution in the title so the roll-up never looks like the root agent
+ * spoke.
+ */
+export function buildNoteToast(
+  note: SayNote,
+  viewerSessionID?: string
+): NoteToastView {
+  const attribution =
+    viewerSessionID && note.sessionId !== viewerSessionID
+      ? note.agent
+        ? `[Subagent (${note.agent})] `
+        : "[Subagent] "
+      : "";
+  const eta = note.eta ? ` · ETA ${note.eta}` : "";
+  return {
+    title: `${attribution}${note.kind} note`,
+    description: `${oneLine(note.text)}${eta}`,
+    ...(sayNoteWarns(note) ? { tone: "warning" as const } : {}),
+  };
+}
+
 /** Author attribution for a note in a menu list. */
 export function noteAuthorLabel(
   note: Pick<SayNote, "sessionId" | "agent">,

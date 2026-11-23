@@ -14,6 +14,7 @@ import { feedbackIssueUrl } from "./feedback.js";
 import { ProgressRpc } from "./rpc.js";
 import {
   GUI_PROGRESS_PANEL_ID,
+  buildNoteToast,
   buildNotesPill,
   nextGuiLayout,
   noteAuthorLabel,
@@ -22,6 +23,8 @@ import {
   normalizeGuiSidebarWidth,
   type GuiLayout,
 } from "./gui-view.js";
+import { guiSaySurfaces, normalizeSayOptions } from "./say.js";
+import { buildNotesLine } from "./tui-view.js";
 import {
   buildTree,
   barParts,
@@ -404,6 +407,8 @@ export default Plugin.define({
         revision?: string;
       }>;
       dismiss(input: { key: string; status: string }): Promise<{ ok: boolean }>;
+      dismissNote(input: { noteID: string }): Promise<{ ok: boolean }>;
+      clearNotes(input: { sessionID: string }): Promise<{ ok: boolean; removed: number }>;
       clear(input: { sessionID: string }): Promise<{ ok: boolean; cleared: number }>;
       hardClearSession(input: {
         sessionID: string;
@@ -449,12 +454,65 @@ export default Plugin.define({
     const taskListTimer = setInterval(() => void refreshTaskListStatus(), 10_000);
 
     const sayNotesEnabled = ctx.options?.say === true;
+    const sayModes = normalizeSayOptions(ctx.options).modes;
+    const saySurfaces = () => guiSaySurfaces(sayModes, layoutMode());
+    // Optimistic note removals between the click and the next server state.
+    // Note ids are stable, so a removed id stays filtered until it disappears
+    // from the shared ring buffer.
+    const [pendingNoteDismissals, setPendingNoteDismissals] = createSignal<
+      Record<string, number>
+    >({});
+    /** Per-session note ids already seen; the first load primes without toasts. */
+    const seenNotesBySession = new Map<string, Set<string>>();
 
     /** Notes rolled up to this session's root, newest first. */
-    const notesForSession = (sessionID: string) =>
-      state()
-        .notes.filter((note) => (note.rootSessionId ?? note.sessionId) === sessionID)
+    const notesForSession = (sessionID: string, all: GuiNote[] = state().notes) => {
+      const pending = pendingNoteDismissals();
+      return all
+        .filter(
+          (note) =>
+            !pending[note.id] &&
+            (note.rootSessionId ?? note.sessionId) === sessionID
+        )
         .slice(0, 20);
+    };
+
+    /**
+     * Toast notes that appeared after this session was first loaded. The
+     * baseline is per session, so switching chats never replays old history.
+     */
+    const toastFreshNotes = (sessionID: string, all: GuiNote[]) => {
+      if (!saySurfaces().toast) return;
+      const notes = notesForSession(sessionID, all);
+      const current = new Set(notes.map((note) => note.id));
+      const seen = seenNotesBySession.get(sessionID);
+      if (!seen) {
+        seenNotesBySession.set(sessionID, current);
+        return;
+      }
+      const pendingRemovals = pendingNoteDismissals();
+      for (const id of [...seen]) {
+        // Keep ids that are merely awaiting the server's dismiss write; only
+        // forget notes that are truly gone (prevents a re-toast race).
+        if (!current.has(id) && !pendingRemovals[id]) seen.delete(id);
+      }
+      const fresh = notes
+        .filter((note) => !seen.has(note.id))
+        .sort((a, b) => (a.at ?? 0) - (b.at ?? 0));
+      for (const note of fresh) {
+        seen.add(note.id);
+        const toast = buildNoteToast(note, sessionID);
+        // The desktop toast API has no `warning` variant; use its warning
+        // icon with the neutral tone for blocked/question notes.
+        ctx.toast.show({
+          title: toast.title,
+          description: toast.description,
+          variant: "default",
+          ...(toast.tone === "warning" ? { icon: "warning" as const } : {}),
+          duration: 5000,
+        });
+      }
+    };
 
     const refresh = async () => {
       if (inFlight || interacting() || Date.now() < suspendUntil) return;
@@ -492,10 +550,24 @@ export default Plugin.define({
             pendingChanged = true;
           }
         }
+        // Drop optimistic note removals once the shared ring buffer no longer
+        // contains them (the server processed the dismiss/clear).
+        const prevNotePending = pendingNoteDismissals();
+        const nextNotePending = { ...prevNotePending };
+        let notePendingChanged = false;
+        const liveNoteIDs = new Set(notes.map((note) => note.id));
+        for (const id of Object.keys(prevNotePending)) {
+          if (!liveNoteIDs.has(id)) {
+            delete nextNotePending[id];
+            notePendingChanged = true;
+          }
+        }
         batch(() => {
           setState({ entries, notes, loaded: true });
           if (pendingChanged) setPendingDismissed(nextPending);
+          if (notePendingChanged) setPendingNoteDismissals(nextNotePending);
         });
+        toastFreshNotes(session.id, notes);
 
       } catch (error) {
         if (!alive) return;
@@ -1137,6 +1209,10 @@ export default Plugin.define({
           dismissKey(props.session(), root.key, root.status ?? "");
         }
       };
+      const notesLine = createMemo(() => {
+        if (!guiSaySurfaces(sayModes, "sidebar").line) return "";
+        return buildNotesLine(notesForSession(props.sessionID()), props.sessionID());
+      });
 
       return (
         <div
@@ -1182,6 +1258,21 @@ export default Plugin.define({
               → Composer
             </button>
           </div>
+          <Show when={notesLine()}>
+            <div
+              title={notesLine()}
+              style={{
+                "font-size": "11px",
+                opacity: "0.62",
+                "white-space": "nowrap",
+                overflow: "hidden",
+                "text-overflow": "ellipsis",
+                "flex": "0 0 auto",
+              }}
+            >
+              {notesLine()}
+            </div>
+          </Show>
           <Show
             when={visibleRoots().length > 0}
             fallback={
@@ -1325,9 +1416,70 @@ export default Plugin.define({
       );
     };
 
-    const NotesMenu = (props: { sessionID: string; close?: () => void }) => {
+    const NotesMenu = (props: { session: MountedSession; sessionID: string }) => {
       onCleanup(() => setInteracting(false));
       const notes = createMemo(() => notesForSession(props.sessionID));
+      const showLine = () => guiSaySurfaces(sayModes, layoutMode()).line;
+      const line = () =>
+        showLine() ? buildNotesLine(notes(), props.sessionID) : "";
+
+      const markPending = (ids: readonly string[]) =>
+        setPendingNoteDismissals((prev) => {
+          const next = { ...prev };
+          const at = Date.now();
+          for (const id of ids) next[id] = at;
+          return next;
+        });
+      const unmarkPending = (ids: readonly string[]) =>
+        setPendingNoteDismissals((prev) => {
+          const next = { ...prev };
+          for (const id of ids) delete next[id];
+          return next;
+        });
+
+      const dismissNote = (note: GuiNote) => {
+        markPending([note.id]);
+        void rpcFor(props.session)
+          .dismissNote({ noteID: note.id })
+          .then((result) => {
+            if (result.ok) return;
+            unmarkPending([note.id]);
+            ctx.toast.show({
+              title: "Note already dismissed",
+              description: "It was removed by another view.",
+              variant: "default",
+            });
+          })
+          .catch((error: unknown) => {
+            unmarkPending([note.id]);
+            ctx.toast.show({
+              title: "Dismiss note failed",
+              description: String(error),
+              variant: "error",
+            });
+          });
+      };
+
+      const dismissAllNotes = () => {
+        const ids = notes().map((note) => note.id);
+        if (ids.length === 0) return;
+        markPending(ids);
+        void rpcFor(props.session)
+          .clearNotes({ sessionID: props.sessionID })
+          .then((result) => {
+            if (result.removed === 0) unmarkPending(ids);
+            void refresh();
+          })
+          .catch((error: unknown) => {
+            unmarkPending(ids);
+            ctx.toast.show({
+              title: "Dismiss all notes failed",
+              description: String(error),
+              variant: "error",
+            });
+          });
+      };
+
       return (
         <div
           onPointerEnter={() => setInteracting(true)}
@@ -1340,6 +1492,20 @@ export default Plugin.define({
             "max-width": "520px",
           }}
         >
+          <Show when={line()}>
+            <div
+              title={line()}
+              style={{
+                "font-size": "11px",
+                opacity: "0.62",
+                "white-space": "nowrap",
+                overflow: "hidden",
+                "text-overflow": "ellipsis",
+              }}
+            >
+              {line()}
+            </div>
+          </Show>
           <For each={notes()}>
             {(note) => (
               <div style={{ display: "flex", "flex-direction": "column", gap: "2px" }}>
@@ -1347,6 +1513,7 @@ export default Plugin.define({
                   style={{
                     display: "flex",
                     "justify-content": "space-between",
+                    "align-items": "center",
                     gap: "12px",
                     "font-size": "11px",
                     color: "#94a3b8",
@@ -1356,8 +1523,38 @@ export default Plugin.define({
                     {noteAuthorLabel(note, props.sessionID)} · {note.kind}
                     {note.eta ? ` · ETA ${note.eta}` : ""}
                   </span>
-                  <span title={new Date(note.at).toLocaleString()}>
-                    {formatRelative(note.at)}
+                  <span
+                    style={{
+                      display: "flex",
+                      "align-items": "center",
+                      gap: "6px",
+                      "flex": "0 0 auto",
+                    }}
+                  >
+                    <span title={new Date(note.at).toLocaleString()}>
+                      {formatRelative(note.at)}
+                    </span>
+                    <button
+                      type="button"
+                      class="progress-pill-button"
+                      title="Dismiss this note"
+                      aria-label="Dismiss note"
+                      onClick={() => dismissNote(note)}
+                      style={{
+                        border: "1px solid rgba(127,127,127,0.35)",
+                        background: "transparent",
+                        color: "inherit",
+                        opacity: "0.7",
+                        "border-radius": "50%",
+                        width: "20px",
+                        height: "20px",
+                        cursor: "pointer",
+                        "line-height": "1",
+                        padding: "0",
+                      }}
+                    >
+                      ×
+                    </button>
                   </span>
                 </div>
                 <div
@@ -1372,6 +1569,24 @@ export default Plugin.define({
               </div>
             )}
           </For>
+          <Show when={notes().length > 0}>
+            <div
+              style={{
+                display: "flex",
+                "padding-top": "2px",
+                "border-top": "1px solid rgba(127,127,127,0.2)",
+              }}
+            >
+              <button
+                type="button"
+                class="progress-pill-button"
+                onClick={dismissAllNotes}
+                style={footerButtonStyle}
+              >
+                ✕ Dismiss all notes ({notes().length})
+              </button>
+            </div>
+          </Show>
         </div>
       );
     };
@@ -1491,6 +1706,7 @@ export default Plugin.define({
       order: 1,
       show: (input) => {
         if (!sayNotesEnabled) return undefined;
+        if (!saySurfaces().pill) return undefined;
         const view = buildNotesPill(notesForSession(input.session.id));
         if (!view) return undefined;
         return {
@@ -1500,7 +1716,9 @@ export default Plugin.define({
           ...(view.tone ? { tone: view.tone } : {}),
         };
       },
-      menu: (input) => <NotesMenu sessionID={input.session.id} close={input.close} />,
+      menu: (input) => (
+        <NotesMenu session={input.session} sessionID={input.session.id} />
+      ),
     });
 
     const toggleTaskListView = async () => {

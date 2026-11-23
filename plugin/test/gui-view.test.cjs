@@ -32,6 +32,7 @@ const {
   normalizeGuiDetailLines,
   normalizeGuiLayout,
   normalizeGuiSidebarWidth,
+  buildNoteToast,
   buildNotesPill,
   noteAuthorLabel,
 } = require(path.join(OUT, 'gui-view.cjs'));
@@ -105,4 +106,28 @@ test('noteAuthorLabel distinguishes the root agent from child sessions', () => {
   assert.equal(noteAuthorLabel({ sessionId: 's' }, 's'), 'Agent');
   assert.equal(noteAuthorLabel({ sessionId: 'c', agent: 'explore' }, 's'), 'Subagent (explore)');
   assert.equal(noteAuthorLabel({ sessionId: 'c' }, 's'), 'Subagent');
+});
+
+test('note toasts keep child attribution and warn on blocked/question', () => {
+  const root = buildNoteToast(note('next phase', 1, { kind: 'update' }), 's');
+  assert.equal(root.title, 'update note');
+  assert.equal(root.description, 'next phase');
+  assert.equal(root.tone, undefined);
+
+  const child = buildNoteToast(
+    note('stuck', 2, { sessionId: 'c', agent: 'explore', kind: 'blocked', eta: '~5 min' }),
+    's'
+  );
+  assert.equal(child.title, '[Subagent (explore)] blocked note');
+  assert.equal(child.description, 'stuck · ETA ~5 min');
+  assert.equal(child.tone, 'warning');
+
+  assert.equal(
+    buildNoteToast(note('need input', 3, { kind: 'question' }), 's').tone,
+    'warning'
+  );
+  assert.equal(
+    buildNoteToast(note('anonymous child', 4, { sessionId: 'c' }), 's').title,
+    '[Subagent] update note'
+  );
 });
