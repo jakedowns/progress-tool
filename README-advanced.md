@@ -453,7 +453,7 @@ watching a spinner or digging through the thought trace while a long tool runs.
 Because it is a tool call, the turn cannot end on a note.
 
 - `say`: register the tool and inject its rules. **Default `false`**.
-- `sayMinChars` / `sayMaxChars`: soft target and hard cap (default `180` / `260`). Over-max is clamped at a word boundary; under-min is accepted with a warning. Length never skips a note. Both clamp to `20..600`, with `sayMaxChars` raised to `sayMinChars` when inverted.
+- `sayMinChars` / `sayMaxChars`: preferred range (default `180`–`260`). Notes outside it are accepted **in full**; the success result carries a reminder (`aim for <min>–<max> next time`). Length never skips, rejects, or rewrites a note. Both clamp to `20..600`, with `sayMaxChars` raised to `sayMinChars` when inverted.
 - `sayBudgetPerTurn`: accepted notes per user turn (default `3`).
 - `sayCooldownMs`: minimum gap between accepted notes (default `15000`).
 - `sayChatNotes`: set to `false` for the instant progress line only, without the durable synthetic note.

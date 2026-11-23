@@ -139,7 +139,7 @@ removed with the session or a hard clear.
 |---|---|---|
 | `say` | `false` | register the `say` tool and inject its narration rules |
 | `sayMinChars` | `180` | soft target; shorter notes are accepted with a warning |
-| `sayMaxChars` | `260` | hard cap; longer notes are trimmed at a word boundary |
+| `sayMaxChars` | `260` | preferred max; longer notes are accepted in full with a reminder |
 | `sayBudgetPerTurn` | `3` | accepted notes per user turn |
 | `sayCooldownMs` | `15000` | minimum gap between accepted notes |
 | `sayChatNotes` | `true` | `false` = progress line only, no synthetic note |
