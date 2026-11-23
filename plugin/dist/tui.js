@@ -166,6 +166,33 @@ function mutateStateFile(mutator) {
     }
   }
 }
+var SAY_NOTES_PER_SESSION = 20;
+function rootSessionFor(sessionID, links = readSessionMap()) {
+  let current = sessionID;
+  const seen = /* @__PURE__ */ new Set();
+  while (current && !seen.has(current) && seen.size < 32) {
+    seen.add(current);
+    const parent = links[current]?.parentId;
+    if (!parent) break;
+    current = parent;
+  }
+  return current;
+}
+function sayNotesForSession(state2, sessionID, options = {}) {
+  const limit = Math.max(
+    1,
+    Math.min(200, Math.floor(options.limit ?? SAY_NOTES_PER_SESSION))
+  );
+  const all = [];
+  for (const list of Object.values(state2.notes ?? {})) {
+    if (Array.isArray(list)) all.push(...list);
+  }
+  all.sort((a, b) => (b.at ?? 0) - (a.at ?? 0));
+  if (options.scope === "all" || !sessionID) return all.slice(0, limit);
+  const links = options.links ?? readSessionMap();
+  const root = rootSessionFor(sessionID, links);
+  return all.filter((note) => rootSessionFor(note.sessionId, links) === root).slice(0, limit);
+}
 function belongsToSession(key, entry, sessionID) {
   return entry.sessionId === sessionID || key.startsWith(`${sessionID}:`);
 }
@@ -205,9 +232,14 @@ function hardDeleteSession(sessionID) {
       delete state2.entries[key];
       removed++;
     }
+    let notesRemoved = 0;
+    if (state2.notes && state2.notes[sessionID]) {
+      notesRemoved = Array.isArray(state2.notes[sessionID]) ? state2.notes[sessionID].length : 1;
+      delete state2.notes[sessionID];
+    }
     return {
       value: { removed, freedBytes: Math.max(0, before - stateBytes(state2)) },
-      write: removed > 0
+      write: removed > 0 || notesRemoved > 0
     };
   });
   if (result) {
@@ -226,9 +258,14 @@ function hardDeleteAll() {
     const before = stateBytes(state2);
     removed = Object.keys(state2.entries).length;
     state2.entries = {};
+    const notesRemoved = Object.values(state2.notes ?? {}).reduce(
+      (total, list) => total + (Array.isArray(list) ? list.length : 0),
+      0
+    );
+    state2.notes = {};
     return {
       value: { removed, freedBytes: Math.max(0, before - stateBytes(state2)) },
-      write: removed > 0
+      write: removed > 0 || notesRemoved > 0
     };
   });
   if (result) {
@@ -650,6 +687,40 @@ function normalizeTuiLayout(value) {
 function nextTuiLayout(current) {
   return current === "sidebar" ? "composer" : "sidebar";
 }
+var NOTES_LINE_MAX_CHARS = 72;
+function noteAuthorPrefix(note, viewerSessionID) {
+  if (!viewerSessionID || note.sessionId === viewerSessionID) return "";
+  return note.agent ? `[Subagent (${note.agent})] ` : "[Subagent] ";
+}
+function truncateNote(text, maxChars) {
+  const oneLine = oneLineText(text);
+  if (oneLine.length <= maxChars) return oneLine;
+  return `${oneLine.slice(0, Math.max(1, maxChars - 1)).trimEnd()}\u2026`;
+}
+function buildNotesLine(notes, viewerSessionID, options = {}) {
+  const list = (notes ?? []).filter((note) => note && oneLineText(note.text));
+  if (list.length === 0) return "";
+  const latest = list.reduce((newest, note) => (note.at ?? 0) > (newest.at ?? 0) ? note : newest);
+  const maxChars = Math.max(
+    20,
+    Math.min(200, Math.floor(options.maxChars ?? NOTES_LINE_MAX_CHARS))
+  );
+  const count = list.length > 1 ? ` (${list.length} notes)` : "";
+  return `notes: ${noteAuthorPrefix(latest, viewerSessionID)}${truncateNote(
+    latest.text,
+    maxChars
+  )}${count}`;
+}
+function formatNotesDialog(notes, options = {}) {
+  const limit = Math.max(1, Math.min(100, Math.floor(options.limit ?? 20)));
+  const list = [...notes ?? []].filter((note) => note && oneLineText(note.text)).sort((a, b) => (b.at ?? 0) - (a.at ?? 0)).slice(0, limit);
+  return list.map((note) => {
+    const time = Number.isFinite(note.at) ? new Date(note.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+    const eta = note.eta ? ` \xB7 ETA ${note.eta}` : "";
+    const prefix = noteAuthorPrefix(note, options.viewerSessionID);
+    return `${time ? `[${time}] ` : ""}${note.kind}${eta}: ${prefix}${oneLineText(note.text)}`;
+  }).join("\n");
+}
 
 // src/tui.js
 var [state, setState] = createSignal(readProgressState());
@@ -851,6 +922,8 @@ function ProgressTree(props) {
   const stackedHeader = props.variant === "sidebar";
   const roots = () => rootsForSession(props.sessionID);
   const doneRoots = () => roots().filter((root) => root.status === "done");
+  const notes = () => sayNotesForSession(state(), props.sessionID);
+  const notesLine = () => buildNotesLine(notes(), props.sessionID);
   const view = () => buildTuiView(roots(), {
     maxRows,
     maxRoots: rootCapState.value,
@@ -914,7 +987,7 @@ function ProgressTree(props) {
     const entries = state().entries ?? {};
     return summarizeRoots(allRootsForSession(props.sessionID), (root) => isDismissed(root, dismissedMap(entries)));
   };
-  const hasContent = () => collapsed() ? summary().length > 0 : view().rows.length > 0;
+  const hasContent = () => notesLine().length > 0 || (collapsed() ? summary().length > 0 : view().rows.length > 0);
   return _$createComponent(Show, {
     get when() {
       return hasContent();
@@ -927,27 +1000,41 @@ function ProgressTree(props) {
       _$setProp(_el$14, "paddingTop", 1);
       _$insert(_el$14, _$createComponent(Show, {
         get when() {
+          return notesLine();
+        },
+        get children() {
+          var _el$15 = _$createElement("text");
+          _$setProp(_el$15, "selectable", false);
+          _$setProp(_el$15, "wrapMode", "word");
+          _$setProp(_el$15, "onMouseUp", () => openNotesDialog(ctx, props.sessionID));
+          _$insert(_el$15, notesLine);
+          _$effect((_$p) => _$setProp(_el$15, "fg", ctx.theme.text.muted, _$p));
+          return _el$15;
+        }
+      }), null);
+      _$insert(_el$14, _$createComponent(Show, {
+        get when() {
           return collapsed();
         },
         get children() {
-          var _el$15 = _$createElement("text"), _el$16 = _$createElement("span");
-          _$insertNode(_el$15, _el$16);
-          _$setProp(_el$15, "selectable", false);
-          _$setProp(_el$15, "onMouseUp", () => setCollapsed?.((draft) => {
+          var _el$16 = _$createElement("text"), _el$17 = _$createElement("span");
+          _$insertNode(_el$16, _el$17);
+          _$setProp(_el$16, "selectable", false);
+          _$setProp(_el$16, "onMouseUp", () => setCollapsed?.((draft) => {
             draft.value = false;
           }));
-          _$insertNode(_el$16, _$createTextNode(`progress: `));
-          _$insert(_el$15, summary, null);
+          _$insertNode(_el$17, _$createTextNode(`progress: `));
+          _$insert(_el$16, summary, null);
           _$effect((_p$) => {
             var _v$4 = ctx.theme.text.base, _v$5 = ctx.theme.text.muted;
-            _v$4 !== _p$.e && (_p$.e = _$setProp(_el$15, "fg", _v$4, _p$.e));
-            _v$5 !== _p$.t && (_p$.t = _$setProp(_el$16, "fg", _v$5, _p$.t));
+            _v$4 !== _p$.e && (_p$.e = _$setProp(_el$16, "fg", _v$4, _p$.e));
+            _v$5 !== _p$.t && (_p$.t = _$setProp(_el$17, "fg", _v$5, _p$.t));
             return _p$;
           }, {
             e: void 0,
             t: void 0
           });
-          return _el$15;
+          return _el$16;
         }
       }), null);
       _$insert(_el$14, _$createComponent(Show, {
@@ -959,12 +1046,12 @@ function ProgressTree(props) {
             when: stackedHeader,
             get fallback() {
               return (() => {
-                var _el$21 = _$createElement("box");
-                _$setProp(_el$21, "flexDirection", "row");
-                _$setProp(_el$21, "justifyContent", "space-between");
-                _$insert(_el$21, title, null);
-                _$insert(_el$21, actions, null);
-                return _el$21;
+                var _el$22 = _$createElement("box");
+                _$setProp(_el$22, "flexDirection", "row");
+                _$setProp(_el$22, "justifyContent", "space-between");
+                _$insert(_el$22, title, null);
+                _$insert(_el$22, actions, null);
+                return _el$22;
               })();
             },
             get children() {
@@ -986,11 +1073,11 @@ function ProgressTree(props) {
               });
             },
             get children() {
-              var _el$18 = _$createElement("scrollbox");
-              _$setProp(_el$18, "scrollY", true);
-              _$setProp(_el$18, "stickyStart", "top");
-              _$setProp(_el$18, "focusable", false);
-              _$insert(_el$18, _$createComponent(For, {
+              var _el$19 = _$createElement("scrollbox");
+              _$setProp(_el$19, "scrollY", true);
+              _$setProp(_el$19, "stickyStart", "top");
+              _$setProp(_el$19, "focusable", false);
+              _$insert(_el$19, _$createComponent(For, {
                 get each() {
                   return view().rows;
                 },
@@ -1001,31 +1088,31 @@ function ProgressTree(props) {
                   }
                 })
               }));
-              _$effect((_$p) => _$setProp(_el$18, "height", viewportHeight(), _$p));
-              return _el$18;
+              _$effect((_$p) => _$setProp(_el$19, "height", viewportHeight(), _$p));
+              return _el$19;
             }
           }), _$createComponent(Show, {
             get when() {
               return capacity > 0 && overflowLines() > 0;
             },
             get children() {
-              var _el$19 = _$createElement("text");
-              _$setProp(_el$19, "selectable", false);
-              _$insert(_el$19, () => `--- scroll to see ${overflowLines()} more ---`);
-              _$effect((_$p) => _$setProp(_el$19, "fg", ctx.theme.text.muted, _$p));
-              return _el$19;
+              var _el$20 = _$createElement("text");
+              _$setProp(_el$20, "selectable", false);
+              _$insert(_el$20, () => `--- scroll to see ${overflowLines()} more ---`);
+              _$effect((_$p) => _$setProp(_el$20, "fg", ctx.theme.text.muted, _$p));
+              return _el$20;
             }
           }), _$createComponent(Show, {
             get when() {
               return view().hiddenRoots > 0;
             },
             get children() {
-              var _el$20 = _$createElement("text");
-              _$setProp(_el$20, "selectable", false);
-              _$setProp(_el$20, "onMouseUp", () => openProgressDialog(ctx));
-              _$insert(_el$20, () => `view full progress tree (${statusSummary(roots())})`);
-              _$effect((_$p) => _$setProp(_el$20, "fg", ctx.theme.text.base, _$p));
-              return _el$20;
+              var _el$21 = _$createElement("text");
+              _$setProp(_el$21, "selectable", false);
+              _$setProp(_el$21, "onMouseUp", () => openProgressDialog(ctx));
+              _$insert(_el$21, () => `view full progress tree (${statusSummary(roots())})`);
+              _$effect((_$p) => _$setProp(_el$21, "fg", ctx.theme.text.base, _$p));
+              return _el$21;
             }
           })];
         }
@@ -1212,6 +1299,30 @@ async function confirmDismissAll(context, roots) {
   });
   if (confirmed) dismissRoots(context, roots);
 }
+async function openNotesDialog(context, sessionIDOverride) {
+  const sessionID = sessionIDOverride ?? currentSessionID(context);
+  if (!sessionID) {
+    context.ui.toast.show({
+      message: "Open a session to read agent notes",
+      variant: "warning"
+    });
+    return;
+  }
+  const notes = sayNotesForSession(readProgressState(), sessionID);
+  if (notes.length === 0) {
+    context.ui.toast.show({
+      message: "No agent notes yet",
+      variant: "info"
+    });
+    return;
+  }
+  void context.ui.dialog.alert({
+    title: `Agent notes (${notes.length})`,
+    message: formatNotesDialog(notes, {
+      viewerSessionID: sessionID
+    })
+  });
+}
 async function openProgressDialog(context) {
   const sessionID = currentSessionID(context);
   if (!sessionID) {
@@ -1222,7 +1333,8 @@ async function openProgressDialog(context) {
     return;
   }
   const roots = rootsForSession(sessionID);
-  if (roots.length === 0) {
+  const notes = sayNotesForSession(readProgressState(), sessionID);
+  if (roots.length === 0 && notes.length === 0) {
     context.ui.toast.show({
       message: "No progress to show",
       variant: "info"
@@ -1234,7 +1346,12 @@ async function openProgressDialog(context) {
   const choice = await context.ui.dialog.select({
     title: "Progress",
     placeholder: "Filter tasks\u2026",
-    options: [...done.length > 0 ? [{
+    options: [...notes.length > 0 ? [{
+      title: `Notes (${notes.length})`,
+      value: {
+        kind: "notes"
+      }
+    }] : [], ...done.length > 0 ? [{
       title: `Dismiss done (${done.length})`,
       value: {
         kind: "done"
@@ -1264,6 +1381,10 @@ async function openProgressDialog(context) {
     }
   });
   if (!choice) return;
+  if (choice.kind === "notes") {
+    await openNotesDialog(context, sessionID);
+    return;
+  }
   if (choice.kind === "done") {
     dismissRoots(context, done);
     return;
@@ -1306,10 +1427,10 @@ function FooterStatus() {
       return summary();
     },
     get children() {
-      var _el$22 = _$createElement("text");
-      _$insert(_el$22, summary);
-      _$effect((_$p) => _$setProp(_el$22, "fg", ctx.theme.text.muted, _$p));
-      return _el$22;
+      var _el$23 = _$createElement("text");
+      _$insert(_el$23, summary);
+      _$effect((_$p) => _$setProp(_el$23, "fg", ctx.theme.text.muted, _$p));
+      return _el$23;
     }
   });
 }

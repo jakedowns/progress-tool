@@ -7,8 +7,8 @@
  * a "+N more" footer.
  */
 
-import { countDescendants, flattenTreeWithDepth, progressLabel } from "./tree.js";
-import type { TreeNode } from "./types.js";
+import { countDescendants, flattenTreeWithDepth, oneLineText, progressLabel } from "./tree.js";
+import type { SayNote, TreeNode } from "./types.js";
 
 export interface TuiRow {
   node: TreeNode;
@@ -164,4 +164,68 @@ export function normalizeTuiLayout(value: unknown): TuiLayout {
 /** Flip between the two placements. */
 export function nextTuiLayout(current: TuiLayout): TuiLayout {
   return current === "sidebar" ? "composer" : "sidebar";
+}
+
+
+/** "…" cap for the one-line notes summary above the tree. */
+export const NOTES_LINE_MAX_CHARS = 72;
+
+/** Who wrote a note, when the viewer is looking at the root tree. */
+export function noteAuthorPrefix(
+  note: Pick<SayNote, "sessionId" | "agent">,
+  viewerSessionID?: string
+): string {
+  if (!viewerSessionID || note.sessionId === viewerSessionID) return "";
+  return note.agent ? `[Subagent (${note.agent})] ` : "[Subagent] ";
+}
+
+function truncateNote(text: string, maxChars: number): string {
+  const oneLine = oneLineText(text);
+  if (oneLine.length <= maxChars) return oneLine;
+  return `${oneLine.slice(0, Math.max(1, maxChars - 1)).trimEnd()}…`;
+}
+
+/**
+ * The dim line above the TUI tree: newest note, its author when it came from
+ * a child session, and a count when there is more history in `/progress`.
+ */
+export function buildNotesLine(
+  notes: readonly SayNote[] | undefined,
+  viewerSessionID?: string,
+  options: { maxChars?: number } = {}
+): string {
+  const list = (notes ?? []).filter((note) => note && oneLineText(note.text));
+  if (list.length === 0) return "";
+  const latest = list.reduce((newest, note) => ((note.at ?? 0) > (newest.at ?? 0) ? note : newest));
+  const maxChars = Math.max(
+    20,
+    Math.min(200, Math.floor(options.maxChars ?? NOTES_LINE_MAX_CHARS))
+  );
+  const count = list.length > 1 ? ` (${list.length} notes)` : "";
+  return `notes: ${noteAuthorPrefix(latest, viewerSessionID)}${truncateNote(
+    latest.text,
+    maxChars
+  )}${count}`;
+}
+
+/** `/progress` → Notes: newest-first history with time, kind, and author. */
+export function formatNotesDialog(
+  notes: readonly SayNote[] | undefined,
+  options: { viewerSessionID?: string; limit?: number } = {}
+): string {
+  const limit = Math.max(1, Math.min(100, Math.floor(options.limit ?? 20)));
+  const list = [...(notes ?? [])]
+    .filter((note) => note && oneLineText(note.text))
+    .sort((a, b) => (b.at ?? 0) - (a.at ?? 0))
+    .slice(0, limit);
+  return list
+    .map((note) => {
+      const time = Number.isFinite(note.at)
+        ? new Date(note.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        : "";
+      const eta = note.eta ? ` · ETA ${note.eta}` : "";
+      const prefix = noteAuthorPrefix(note, options.viewerSessionID);
+      return `${time ? `[${time}] ` : ""}${note.kind}${eta}: ${prefix}${oneLineText(note.text)}`;
+    })
+    .join("\n");
 }

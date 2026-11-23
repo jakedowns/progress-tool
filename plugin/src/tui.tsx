@@ -16,7 +16,7 @@ import { Plugin, usePlugin } from "@opencode/plugin/tui";
 
 /** Setup context; the package does not re-export the Context type. */
 type TuiContext = Parameters<Parameters<typeof Plugin.define>[0]["setup"]>[0];
-import { readProgressState, writeDismissal, softClearSession, hardDeleteSession, hardDeleteAll } from "./state.js";
+import { readProgressState, sayNotesForSession, writeDismissal, softClearSession, hardDeleteSession, hardDeleteAll } from "./state.js";
 import {
   readTaskListStatus,
   toggleTaskListMode as toggleTaskListModePref,
@@ -41,7 +41,9 @@ import {
   type VisibilityOptions,
 } from "./tree.js";
 import {
+  buildNotesLine,
   buildTuiView,
+  formatNotesDialog,
   nextTuiLayout,
   normalizeMaxRoots,
   normalizeSidebarRows,
@@ -265,6 +267,8 @@ function ProgressTree(props: { sessionID: string; capacity?: number; variant?: "
   const stackedHeader = props.variant === "sidebar";
   const roots = () => rootsForSession(props.sessionID);
   const doneRoots = () => roots().filter((root) => root.status === "done");
+  const notes = () => sayNotesForSession(state(), props.sessionID);
+  const notesLine = () => buildNotesLine(notes(), props.sessionID);
   const view = () =>
     buildTuiView(roots(), {
       maxRows,
@@ -324,11 +328,23 @@ function ProgressTree(props: { sessionID: string; capacity?: number; variant?: "
       isDismissed(root, dismissedMap(entries))
     );
   };
-  const hasContent = () => (collapsed() ? summary().length > 0 : view().rows.length > 0);
+  const hasContent = () =>
+    notesLine().length > 0 ||
+    (collapsed() ? summary().length > 0 : view().rows.length > 0);
 
   return (
     <Show when={hasContent()}>
       <box flexDirection="column" paddingLeft={1} paddingRight={1} paddingTop={1}>
+        <Show when={notesLine()}>
+          <text
+            selectable={false}
+            fg={ctx.theme.text.muted}
+            wrapMode="word"
+            onMouseUp={() => openNotesDialog(ctx, props.sessionID)}
+          >
+            {notesLine()}
+          </text>
+        </Show>
         <Show when={collapsed()}>
           <text
             selectable={false}
@@ -399,6 +415,7 @@ type ProgressChoice =
   | { kind: "done" }
   | { kind: "all" }
   | { kind: "pick-dismiss" }
+  | { kind: "notes" }
   | { kind: "toggle"; key: string }
   | { kind: "dismiss"; key: string };
 
@@ -600,6 +617,23 @@ async function confirmDismissAll(context: TuiContext, roots: TreeNode[]): Promis
   if (confirmed) dismissRoots(context, roots);
 }
 
+async function openNotesDialog(context: TuiContext, sessionIDOverride?: string): Promise<void> {
+  const sessionID = sessionIDOverride ?? currentSessionID(context);
+  if (!sessionID) {
+    context.ui.toast.show({ message: "Open a session to read agent notes", variant: "warning" });
+    return;
+  }
+  const notes = sayNotesForSession(readProgressState(), sessionID);
+  if (notes.length === 0) {
+    context.ui.toast.show({ message: "No agent notes yet", variant: "info" });
+    return;
+  }
+  void context.ui.dialog.alert({
+    title: `Agent notes (${notes.length})`,
+    message: formatNotesDialog(notes, { viewerSessionID: sessionID }),
+  });
+}
+
 async function openProgressDialog(context: TuiContext): Promise<void> {
   const sessionID = currentSessionID(context);
   if (!sessionID) {
@@ -607,7 +641,8 @@ async function openProgressDialog(context: TuiContext): Promise<void> {
     return;
   }
   const roots = rootsForSession(sessionID);
-  if (roots.length === 0) {
+  const notes = sayNotesForSession(readProgressState(), sessionID);
+  if (roots.length === 0 && notes.length === 0) {
     context.ui.toast.show({ message: "No progress to show", variant: "info" });
     return;
   }
@@ -618,6 +653,9 @@ async function openProgressDialog(context: TuiContext): Promise<void> {
     title: "Progress",
     placeholder: "Filter tasks…",
     options: [
+      ...(notes.length > 0
+        ? [{ title: `Notes (${notes.length})`, value: { kind: "notes" as const } }]
+        : []),
       ...(done.length > 0
         ? [{ title: `Dismiss done (${done.length})`, value: { kind: "done" as const } }]
         : []),
@@ -643,6 +681,10 @@ async function openProgressDialog(context: TuiContext): Promise<void> {
   });
 
   if (!choice) return;
+  if (choice.kind === "notes") {
+    await openNotesDialog(context, sessionID);
+    return;
+  }
   if (choice.kind === "done") {
     dismissRoots(context, done);
     return;

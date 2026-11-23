@@ -36,6 +36,8 @@ const {
   rootDetailLines,
   sortRootsByUrgency,
   summarizeRoots,
+  buildNotesLine,
+  formatNotesDialog,
 } = require(path.join(OUT, 'tui-view.cjs'));
 
 const root = (id, status, children = []) => ({ id, key: id, status, title: id, children });
@@ -180,4 +182,39 @@ test('pending roots report as their own bucket, ahead of done', () => {
     summarizeRoots([root('d', 'done'), root('p', 'pending')], () => false),
     'pending (1) | done (1)'
   );
+});
+
+function note(text, at, extra = {}) {
+  return { id: String(at), sessionId: 's', text, kind: 'update', at, ...extra };
+}
+
+test('buildNotesLine shows the latest note, child author, and history count', () => {
+  assert.equal(buildNotesLine([], 's'), '');
+  assert.equal(
+    buildNotesLine([note('older note', 1), note('newest\nnote', 2)], 's'),
+    'notes: newest note (2 notes)'
+  );
+  assert.equal(
+    buildNotesLine([note('child note', 3, { sessionId: 'c', agent: 'explore' })], 's'),
+    'notes: [Subagent (explore)] child note'
+  );
+});
+
+test('buildNotesLine truncates long notes with an ellipsis', () => {
+  const line = buildNotesLine([note('x'.repeat(200), 1)], 's', { maxChars: 20 });
+  assert.match(line, /…$/);
+  assert.ok(line.length <= 'notes: '.length + 20);
+});
+
+test('formatNotesDialog is newest-first with kind, ETA, and author', () => {
+  const text = formatNotesDialog(
+    [
+      note('old note', 1000, { kind: 'intent' }),
+      note('new note', 2000, { kind: 'blocked', eta: '~1 min', sessionId: 'c', agent: 'general' }),
+    ],
+    { viewerSessionID: 's' }
+  );
+  const lines = text.split('\n');
+  assert.match(lines[0], /blocked · ETA ~1 min: \[Subagent \(general\)\] new note/);
+  assert.match(lines[1], /intent: old note/);
 });
