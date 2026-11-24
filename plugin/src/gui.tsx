@@ -52,9 +52,12 @@ import {
   scopeEntries,
   subagentPrefix,
   visibleEntries,
-  TREE_THEME_CHOICES,
-  treeThemeLabel,
+  THEME_PRESET_CHOICES,
+  themePresetChoice,
+  themePresetFrom,
+  themePresetLabel,
   type BarOptions,
+  type ThemePreset,
   type TreeTheme,
 } from "./tree.js";
 import type { ProgressEntry, SayNote, TreeNode } from "./types.js";
@@ -211,6 +214,23 @@ function MenuRow(props: {
           }}
         >
           {props.collapsed ? "▸" : "▾"}
+        </span>
+      </Show>
+      <Show when={props.depth > 0}>
+        <span
+          aria-hidden="true"
+          style={{
+            flex: "0 0 auto",
+            "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+            "font-size": "11px",
+            "line-height": "1",
+            "margin-top": "5px",
+            opacity: "0.55",
+            "user-select": "none",
+            "white-space": "pre",
+          }}
+        >
+          └─
         </span>
       </Show>
       <div
@@ -393,7 +413,6 @@ export default Plugin.define({
     // reloads and is shared by every view. This signal holds only optimistic
     // writes between the click and the next observed state.
     const [pendingDismissed, setPendingDismissed] = createSignal<Record<string, { status: string; at: number }>>({});
-    const options = normalizeBarOptions(ctx.options);
     const visibility = normalizeVisibilityOptions(ctx.options);
     const refreshMs = normalizeRefreshMs(ctx.options);
     // Placement is memory-backed like the TUI's `tuiLayout`; the configured
@@ -408,16 +427,29 @@ export default Plugin.define({
       });
     const sidebarWidth = normalizeGuiSidebarWidth(ctx.options?.guiSidebarWidth);
     const detailLines = normalizeGuiDetailLines(ctx.options?.guiDetailLines);
-    // Runtime tree theme; the configured value seeds it and the palette command
-    // updates it, then persists the choice to the OpenCode config.
-    const [themeStore, updateTheme] = ctx.storage.memory("guiTreeTheme", {
-      initial: { value: normalizeTreeTheme(ctx.options?.treeTheme) },
+    // Runtime theme preset; the configured tree theme + bar style seed it and
+    // the palette command updates it, then persists both to the OpenCode config.
+    const [themeStore, updateTheme] = ctx.storage.memory("guiTheme", {
+      initial: {
+        treeTheme: normalizeTreeTheme(ctx.options?.treeTheme),
+        barStyle: normalizeBarOptions(ctx.options).style ?? "blocks",
+      },
     });
-    const treeTheme = (): TreeTheme => themeStore.value;
-    const setTreeTheme = (theme: TreeTheme) =>
+    const treeTheme = (): TreeTheme => themeStore.treeTheme;
+    const currentPreset = (): ThemePreset =>
+      themePresetFrom(themeStore.treeTheme, themeStore.barStyle);
+    const setThemePreset = (value: ThemePreset) => {
+      const preset = themePresetChoice(value);
       updateTheme((draft) => {
-        draft.value = theme;
+        draft.treeTheme = preset.treeTheme;
+        draft.barStyle = preset.barStyle;
       });
+    };
+    // Bar options follow the runtime preset so a style switch redraws rows
+    // without a plugin reload.
+    const options = createMemo(() =>
+      normalizeBarOptions({ ...ctx.options, barStyle: themeStore.barStyle })
+    );
     const sidebarPanelKey = `${ctx.id}:${GUI_PROGRESS_PANEL_ID}`;
     let alive = true;
     let inFlight = false;
@@ -442,25 +474,31 @@ export default Plugin.define({
       });
     };
 
-    /** Pick a tree theme, apply it now, and save it to the OpenCode config. */
+    /** Pick a theme preset, apply it now, and save it to the OpenCode config. */
     const switchTreeTheme = async () => {
-      const current = treeTheme();
-      const choice = await ctx.dialogs.select<TreeTheme>({
+      const current = currentPreset();
+      const choice = await ctx.dialogs.select<ThemePreset>({
         title: "Progress tree theme",
         current,
-        options: TREE_THEME_CHOICES.map((option) => ({
+        options: THEME_PRESET_CHOICES.map((option) => ({
           title: option.title,
           value: option.value,
           description:
-            option.value === current ? "current" : option.description,
+            option.value === current
+              ? `${option.description} · current`
+              : option.description,
         })),
       });
       if (!choice) return;
-      setTreeTheme(choice);
+      const preset = themePresetChoice(choice);
+      setThemePreset(choice);
       try {
-        const result = await ctx.client.rpc(ProgressRpc).setTreeTheme({ theme: choice });
+        const result = await ctx.client.rpc(ProgressRpc).setTreeTheme({
+          theme: preset.treeTheme,
+          barStyle: preset.barStyle,
+        });
         ctx.toast.show({
-          title: `Progress tree theme: ${treeThemeLabel(result.theme)}`,
+          title: `Progress theme: ${themePresetLabel(choice)}`,
           description: result.ok
             ? `Saved to ${result.file}`
             : `Applied for this run; config not updated: ${result.error ?? "unknown error"}`,
@@ -469,7 +507,7 @@ export default Plugin.define({
         });
       } catch (error) {
         ctx.toast.show({
-          title: `Progress tree theme: ${treeThemeLabel(choice)}`,
+          title: `Progress theme: ${themePresetLabel(choice)}`,
           description: `Applied for this run; config not updated: ${String(error)}`,
           variant: "default",
           duration: 5000,
@@ -1139,7 +1177,7 @@ export default Plugin.define({
                           <MenuRow
                             node={node()}
                             depth={0}
-                            options={options}
+                            options={options()}
                             detailLines={detailLines}
                             theme={treeTheme()}
                             hasChildren={node().children.length > 0}
@@ -1173,7 +1211,7 @@ export default Plugin.define({
                                   <MenuRow
                                     node={child}
                                     depth={depth}
-                                    options={options}
+                                    options={options()}
                                     detailLines={detailLines}
                                     theme={treeTheme()}
                                   />
@@ -1430,7 +1468,7 @@ export default Plugin.define({
                           <MenuRow
                             node={node()}
                             depth={0}
-                            options={options}
+                            options={options()}
                             detailLines={detailLines}
                             theme={treeTheme()}
                             hasChildren={node().children.length > 0}
@@ -1458,7 +1496,7 @@ export default Plugin.define({
                                   <MenuRow
                                     node={child}
                                     depth={depth}
-                                    options={options}
+                                    options={options()}
                                     detailLines={detailLines}
                                     theme={treeTheme()}
                                   />
@@ -1746,7 +1784,7 @@ export default Plugin.define({
         const active = countActive(visibleRoots);
         const top = visibleRoots[0];
         const topPct = progressLabel(top.progress);
-        const parts = barParts(top.progress, options);
+        const parts = barParts(top.progress, options());
         const topTitle = oneLineText(top.title);
 
         // Collapsed pill prefix: the aggregate % shows even with a single
@@ -1789,7 +1827,7 @@ export default Plugin.define({
             ...flattenTreeWithDepth(visibleRoots)
               .slice(0, 7)
               .map(({ node, depth }) => {
-                const row = rowFor(node, depth, options, treeTheme());
+                const row = rowFor(node, depth, options(), treeTheme());
                 if (depth !== 0) return row;
                 return {
                   ...row,

@@ -577,21 +577,6 @@ function dismissedMap(entries) {
 function normalizeTreeTheme(value) {
   return value === "compact" ? "compact" : "default";
 }
-var TREE_THEME_CHOICES = [
-  {
-    value: "default",
-    title: "Default",
-    description: "Progress bars, started line, configurable detail lines"
-  },
-  {
-    value: "compact",
-    title: "Compact",
-    description: "No bars, one detail line, percentage and hidden-child count"
-  }
-];
-function treeThemeLabel(theme) {
-  return theme === "compact" ? "Compact" : "Default";
-}
 function compactTreeSuffix(progress, hiddenChildren = 0) {
   const parts = [];
   const pct = progressLabel(progress);
@@ -599,13 +584,16 @@ function compactTreeSuffix(progress, hiddenChildren = 0) {
   if (hiddenChildren > 0) parts.push(`& ${hiddenChildren} more`);
   return parts.join(" \xB7 ");
 }
+function normalizeBarStyle(value) {
+  return value === "emoji" ? "emoji" : "blocks";
+}
 function clampProgress(progress) {
   return progress == null ? 0 : Math.max(0, Math.min(1, progress));
 }
 function normalizeBarOptions(raw) {
   const options = raw ?? {};
   return {
-    style: options.barStyle === "emoji" ? "emoji" : "blocks",
+    style: normalizeBarStyle(options.barStyle),
     segments: typeof options.barSegments === "number" && options.barSegments > 0 ? options.barSegments : void 0,
     total: typeof options.barTotal === "number" && options.barTotal > 0 ? options.barTotal : void 0
   };
@@ -672,6 +660,43 @@ function barParts(progress, options = {}) {
 }
 function progressLabel(progress) {
   return progress == null ? null : `${Math.round(progress * 100)}%`;
+}
+var ASCII_PREVIEW = barParts(0.6, { style: "blocks", segments: 10 }).bar;
+var EMOJI_PREVIEW = barParts(0.6, { style: "emoji", segments: 6 });
+var COMPACT_PREVIEW = compactTreeSuffix(0.6, 2);
+var THEME_PRESET_CHOICES = [
+  {
+    value: "ascii",
+    title: `ASCII  ${ASCII_PREVIEW} 60%`,
+    description: "Block bars \xB7 default tree rows",
+    treeTheme: "default",
+    barStyle: "blocks"
+  },
+  {
+    value: "emoji",
+    title: `Emoji  ${EMOJI_PREVIEW.bar}${EMOJI_PREVIEW.fraction}`,
+    description: "Emoji bars \xB7 default tree rows",
+    treeTheme: "default",
+    barStyle: "emoji"
+  },
+  {
+    value: "compact",
+    title: `Compact  Task ${COMPACT_PREVIEW}`,
+    description: "No bars \xB7 one detail line",
+    treeTheme: "compact",
+    barStyle: "blocks"
+  }
+];
+function themePresetFrom(theme, style) {
+  if (theme === "compact") return "compact";
+  return style === "emoji" ? "emoji" : "ascii";
+}
+function themePresetChoice(value) {
+  return THEME_PRESET_CHOICES.find((choice) => choice.value === value);
+}
+function themePresetLabel(value) {
+  if (value === "compact") return "Compact rows";
+  return value === "emoji" ? "Emoji bars" : "ASCII bars";
 }
 
 // src/tree-theme.ts
@@ -880,31 +905,26 @@ function insertObjectProperty(text, node, property, value) {
 function replaceSpan(text, start, end, replacement) {
   return text.slice(0, start) + replacement + text.slice(end);
 }
-function writeThemeIntoEntry(text, theme, entry) {
-  const themeLiteral = JSON.stringify(theme);
+function writePropertyIntoEntry(text, key, literal, entry) {
   const options = memberOf(entry, "options");
   if (options?.value.kind === "object") {
-    const current = memberOf(options.value, "treeTheme");
+    const current = memberOf(options.value, key);
     if (current) {
-      return replaceSpan(text, current.value.start, current.value.end, themeLiteral);
+      return replaceSpan(text, current.value.start, current.value.end, literal);
     }
-    return insertObjectProperty(text, options.value, "treeTheme", themeLiteral);
+    return insertObjectProperty(text, options.value, key, literal);
   }
   if (options) {
     return replaceSpan(
       text,
       options.value.start,
       options.value.end,
-      `{ "treeTheme": ${themeLiteral} }`
+      `{ ${JSON.stringify(key)}: ${literal} }`
     );
   }
-  return insertObjectProperty(text, entry, "options", `{ "treeTheme": ${themeLiteral} }`);
+  return insertObjectProperty(text, entry, "options", `{ ${JSON.stringify(key)}: ${literal} }`);
 }
-function updateTreeThemeInConfig(text, theme, options) {
-  if (text.charCodeAt(0) === 65279) {
-    const updated = updateTreeThemeInConfig(text.slice(1), theme, options);
-    return updated === void 0 ? void 0 : `\uFEFF${updated}`;
-  }
+function setThemePropertyInConfig(text, key, value, options) {
   let root;
   try {
     const parsed = parseValue(tokenize(text), 0);
@@ -919,18 +939,39 @@ function updateTreeThemeInConfig(text, theme, options) {
     const ref = pluginRefOf(item);
     if (typeof ref !== "string" || !options.matches(ref)) continue;
     if (item.kind === "object") {
-      return writeThemeIntoEntry(text, theme, item);
+      return writePropertyIntoEntry(text, key, JSON.stringify(value), item);
     }
     if (item.kind === "string") {
       return replaceSpan(
         text,
         item.start,
         item.end,
-        `{ "package": ${JSON.stringify(item.value ?? "")}, "options": { "treeTheme": ${JSON.stringify(theme)} } }`
+        `{ "package": ${JSON.stringify(item.value ?? "")}, "options": { ${JSON.stringify(key)}: ${JSON.stringify(value)} } }`
       );
     }
   }
   return void 0;
+}
+function updateThemeInConfig(text, theme, options) {
+  if (text.charCodeAt(0) === 65279) {
+    const updated2 = updateThemeInConfig(text.slice(1), theme, options);
+    return updated2 === void 0 ? void 0 : `\uFEFF${updated2}`;
+  }
+  const settings = [];
+  if (theme.treeTheme !== void 0) {
+    settings.push(["treeTheme", normalizeTreeTheme(theme.treeTheme)]);
+  }
+  if (theme.barStyle !== void 0) {
+    settings.push(["barStyle", normalizeBarStyle(theme.barStyle)]);
+  }
+  if (settings.length === 0) return text;
+  let updated = text;
+  for (const [key, value] of settings) {
+    const next = setThemePropertyInConfig(updated, key, value, options);
+    if (next === void 0) return void 0;
+    updated = next;
+  }
+  return updated;
 }
 function atomicWrite(file, body) {
   const stat = fs3.statSync(file);
@@ -938,8 +979,17 @@ function atomicWrite(file, body) {
   fs3.writeFileSync(tmp, body, { encoding: "utf8", mode: stat.mode });
   fs3.renameSync(tmp, file);
 }
-function writeTreeThemeToConfig(value, options = {}) {
-  const theme = normalizeTreeTheme(value);
+function writeThemeToConfig(values, options = {}) {
+  const theme = {};
+  if (values.treeTheme !== void 0) {
+    theme.treeTheme = normalizeTreeTheme(values.treeTheme);
+  }
+  if (values.barStyle !== void 0) {
+    theme.barStyle = normalizeBarStyle(values.barStyle);
+  }
+  if (theme.treeTheme === void 0 && theme.barStyle === void 0) {
+    return { ok: false, error: "no theme values supplied" };
+  }
   const env = options.env ?? process.env;
   const candidates = treeThemeConfigCandidates(options.directory, env);
   for (const file of candidates) {
@@ -949,20 +999,20 @@ function writeTreeThemeToConfig(value, options = {}) {
     } catch {
       continue;
     }
-    const updated = updateTreeThemeInConfig(text, theme, {
+    const updated = updateThemeInConfig(text, theme, {
       matches: (ref) => isProgressPluginPackage(ref, path3.dirname(file))
     });
     if (updated === void 0) continue;
     try {
       if (updated !== text) atomicWrite(file, updated);
-      return { ok: true, theme, file };
+      return { ok: true, ...theme, file };
     } catch (error) {
-      return { ok: false, theme, file, error: String(error) };
+      return { ok: false, ...theme, file, error: String(error) };
     }
   }
   return {
     ok: false,
-    theme,
+    ...theme,
     error: "no OpenCode config entry found for this plugin"
   };
 }
@@ -1200,9 +1250,15 @@ var timer;
 var barOptions = {};
 var visibilityOptions = {};
 var themeState = {
-  value: "default"
+  value: "ascii"
 };
 var setTreeThemeState;
+function presetBarOptions() {
+  return {
+    ...barOptions,
+    style: themeState.value === "emoji" ? "emoji" : "blocks"
+  };
+}
 var maxRows = 8;
 var sidebarRows = 0;
 var expandRootsByDefault = false;
@@ -1325,7 +1381,7 @@ function ProgressRow(props) {
       const meta = compactTreeSuffix(props.row.node.progress, props.row.hiddenChildren);
       return `${glyph(props.row.node.status)} ${title()}${meta ? ` ${meta}` : ""}`;
     }
-    const parts = barParts(props.row.node.progress, barOptions);
+    const parts = barParts(props.row.node.progress, presetBarOptions());
     if (parts.style === "emoji") {
       const done = props.row.node.status === "done" ? " \u2713" : props.row.node.status === "error" ? " \u2717" : "";
       return `${title()}: ${parts.bar}${parts.fraction}${done}${suffix()}`;
@@ -1680,21 +1736,25 @@ async function switchTreeTheme(context) {
   const choice = await context.ui.dialog.select({
     title: "Progress tree theme",
     current,
-    options: TREE_THEME_CHOICES.map((option) => ({
+    options: THEME_PRESET_CHOICES.map((option) => ({
       title: option.title,
       value: option.value,
-      description: option.value === current ? "current" : option.description
+      description: option.value === current ? `${option.description} \xB7 current` : option.description
     }))
   });
   if (choice == null) return;
+  const preset = themePresetChoice(choice);
   setTreeThemeState?.((draft) => {
     draft.value = choice;
   });
-  const result = writeTreeThemeToConfig(choice, {
+  const result = writeThemeToConfig({
+    treeTheme: preset.treeTheme,
+    barStyle: preset.barStyle
+  }, {
     directory: context.location?.directory
   });
   context.ui.toast.show({
-    message: result.ok ? `Tree theme: ${treeThemeLabel(result.theme)} \xB7 saved to config` : `Tree theme: ${treeThemeLabel(result.theme)} \xB7 config not updated`,
+    message: result.ok ? `Theme: ${themePresetLabel(choice)} \xB7 saved to config` : `Theme: ${themePresetLabel(choice)} \xB7 config not updated`,
     variant: result.ok ? "success" : "warning"
   });
 }
@@ -2100,9 +2160,9 @@ var tui_default = Plugin.define({
     });
     collapsedState = collapsedStore;
     setCollapsed = updateCollapsed;
-    const [themeStore, updateTheme] = context.storage.memory("tuiTreeTheme", {
+    const [themeStore, updateTheme] = context.storage.memory("tuiThemePreset", {
       initial: {
-        value: normalizeTreeTheme(context.options?.treeTheme)
+        value: themePresetFrom(normalizeTreeTheme(context.options?.treeTheme), normalizeBarOptions(context.options).style ?? "blocks")
       }
     });
     themeState = themeStore;

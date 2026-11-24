@@ -15,7 +15,27 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { normalizeTreeTheme, type TreeTheme } from "./tree.js";
+import {
+  normalizeBarStyle,
+  normalizeTreeTheme,
+  type BarStyle,
+  type TreeTheme,
+} from "./tree.js";
+
+export interface ThemeOptions {
+  treeTheme?: TreeTheme;
+  barStyle?: BarStyle;
+}
+
+export interface ThemeWriteResult {
+  ok: boolean;
+  treeTheme?: TreeTheme;
+  barStyle?: BarStyle;
+  /** Config file that received the change, when one was found. */
+  file?: string;
+  /** Why nothing was written; the theme still applies to this run. */
+  error?: string;
+}
 
 export interface TreeThemeWriteResult {
   ok: boolean;
@@ -316,56 +336,42 @@ function replaceSpan(text: string, start: number, end: number, replacement: stri
   return text.slice(0, start) + replacement + text.slice(end);
 }
 
-function writeThemeIntoEntry(
+function writePropertyIntoEntry(
   text: string,
-  theme: TreeTheme,
+  key: string,
+  literal: string,
   entry: Node
 ): string | undefined {
-  const themeLiteral = JSON.stringify(theme);
   const options = memberOf(entry, "options");
 
   if (options?.value.kind === "object") {
-    const current = memberOf(options.value, "treeTheme");
+    const current = memberOf(options.value, key);
     if (current) {
-      return replaceSpan(text, current.value.start, current.value.end, themeLiteral);
+      return replaceSpan(text, current.value.start, current.value.end, literal);
     }
-    return insertObjectProperty(text, options.value, "treeTheme", themeLiteral);
+    return insertObjectProperty(text, options.value, key, literal);
   }
 
   // A missing or non-object `options` is replaced wholesale so the plugin
-  // entry cannot keep an invalid value beside the new theme.
+  // entry cannot keep an invalid value beside the new settings.
   if (options) {
     return replaceSpan(
       text,
       options.value.start,
       options.value.end,
-      `{ "treeTheme": ${themeLiteral} }`
+      `{ ${JSON.stringify(key)}: ${literal} }`
     );
   }
 
-  return insertObjectProperty(text, entry, "options", `{ "treeTheme": ${themeLiteral} }`);
+  return insertObjectProperty(text, entry, "options", `{ ${JSON.stringify(key)}: ${literal} }`);
 }
 
-export interface TreeThemeEditOptions {
-  /** Called with each plugin reference found in `plugins`. */
-  matches: (ref: string) => boolean;
-}
-
-/**
- * Rewrite a JSON/JSONC config document so the progress plugin entry stores
- * `treeTheme: <theme>`. Returns `undefined` when no matching entry exists (or
- * the document is not a config object), so callers can try the next file.
- */
-export function updateTreeThemeInConfig(
+function setThemePropertyInConfig(
   text: string,
-  theme: TreeTheme,
+  key: string,
+  value: string,
   options: TreeThemeEditOptions
 ): string | undefined {
-  if (text.charCodeAt(0) === 0xfeff) {
-    const updated = updateTreeThemeInConfig(text.slice(1), theme, options);
-    return updated === undefined ? undefined : `\uFEFF${updated}`;
-  }
-
   let root: Node;
   try {
     const parsed = parseValue(tokenize(text), 0);
@@ -383,7 +389,7 @@ export function updateTreeThemeInConfig(
     if (typeof ref !== "string" || !options.matches(ref)) continue;
 
     if (item.kind === "object") {
-      return writeThemeIntoEntry(text, theme, item);
+      return writePropertyIntoEntry(text, key, JSON.stringify(value), item);
     }
     if (item.kind === "string") {
       // Convert the shorthand string entry into the object form so it can hold
@@ -392,12 +398,61 @@ export function updateTreeThemeInConfig(
         text,
         item.start,
         item.end,
-        `{ "package": ${JSON.stringify(item.value ?? "")}, "options": { "treeTheme": ${JSON.stringify(theme)} } }`
+        `{ "package": ${JSON.stringify(item.value ?? "")}, "options": { ${JSON.stringify(key)}: ${JSON.stringify(value)} } }`
       );
     }
   }
 
   return undefined;
+}
+
+export interface TreeThemeEditOptions {
+  /** Called with each plugin reference found in `plugins`. */
+  matches: (ref: string) => boolean;
+}
+
+/**
+ * Rewrite a JSON/JSONC config document so the progress plugin entry stores the
+ * supplied theme settings. Only the keys present in `theme` are changed, so a
+ * caller can update `treeTheme` without disturbing `barStyle` (or vice versa).
+ * Returns `undefined` when no matching entry exists (or the document is not a
+ * config object), so callers can try the next file.
+ */
+export function updateThemeInConfig(
+  text: string,
+  theme: ThemeOptions,
+  options: TreeThemeEditOptions
+): string | undefined {
+  if (text.charCodeAt(0) === 0xfeff) {
+    const updated = updateThemeInConfig(text.slice(1), theme, options);
+    return updated === undefined ? undefined : `\uFEFF${updated}`;
+  }
+
+  const settings: Array<[string, string]> = [];
+  if (theme.treeTheme !== undefined) {
+    settings.push(["treeTheme", normalizeTreeTheme(theme.treeTheme)]);
+  }
+  if (theme.barStyle !== undefined) {
+    settings.push(["barStyle", normalizeBarStyle(theme.barStyle)]);
+  }
+  if (settings.length === 0) return text;
+
+  let updated = text;
+  for (const [key, value] of settings) {
+    const next = setThemePropertyInConfig(updated, key, value, options);
+    if (next === undefined) return undefined;
+    updated = next;
+  }
+  return updated;
+}
+
+/** Backwards-compatible wrapper for callers that only change `treeTheme`. */
+export function updateTreeThemeInConfig(
+  text: string,
+  theme: TreeTheme,
+  options: TreeThemeEditOptions
+): string | undefined {
+  return updateThemeInConfig(text, { treeTheme: theme }, options);
 }
 
 function atomicWrite(file: string, body: string): void {
@@ -408,15 +463,26 @@ function atomicWrite(file: string, body: string): void {
 }
 
 /**
- * Find the config that declares this plugin and store the theme there.
- * Project config wins over the global one; the first matching document is
- * edited. The runtime theme applies even when this returns `ok: false`.
+ * Find the config that declares this plugin and store the supplied theme
+ * settings there. Project config wins over the global one; the first matching
+ * document is edited. The runtime theme applies even when this returns
+ * `ok: false`. Keys absent from `values` are left untouched.
  */
-export function writeTreeThemeToConfig(
-  value: unknown,
+export function writeThemeToConfig(
+  values: ThemeOptions,
   options: TreeThemeWriteOptions = {}
-): TreeThemeWriteResult {
-  const theme = normalizeTreeTheme(value);
+): ThemeWriteResult {
+  const theme: ThemeOptions = {};
+  if (values.treeTheme !== undefined) {
+    theme.treeTheme = normalizeTreeTheme(values.treeTheme);
+  }
+  if (values.barStyle !== undefined) {
+    theme.barStyle = normalizeBarStyle(values.barStyle);
+  }
+  if (theme.treeTheme === undefined && theme.barStyle === undefined) {
+    return { ok: false, error: "no theme values supplied" };
+  }
+
   const env = options.env ?? process.env;
   const candidates = treeThemeConfigCandidates(options.directory, env);
 
@@ -427,21 +493,36 @@ export function writeTreeThemeToConfig(
     } catch {
       continue;
     }
-    const updated = updateTreeThemeInConfig(text, theme, {
+    const updated = updateThemeInConfig(text, theme, {
       matches: (ref) => isProgressPluginPackage(ref, path.dirname(file)),
     });
     if (updated === undefined) continue;
     try {
       if (updated !== text) atomicWrite(file, updated);
-      return { ok: true, theme, file };
+      return { ok: true, ...theme, file };
     } catch (error) {
-      return { ok: false, theme, file, error: String(error) };
+      return { ok: false, ...theme, file, error: String(error) };
     }
   }
 
   return {
     ok: false,
-    theme,
+    ...theme,
     error: "no OpenCode config entry found for this plugin",
+  };
+}
+
+/** Backwards-compatible wrapper for callers that only change `treeTheme`. */
+export function writeTreeThemeToConfig(
+  value: unknown,
+  options: TreeThemeWriteOptions = {}
+): TreeThemeWriteResult {
+  const theme = normalizeTreeTheme(value);
+  const result = writeThemeToConfig({ treeTheme: theme }, options);
+  return {
+    ok: result.ok,
+    theme,
+    file: result.file,
+    error: result.error,
   };
 }

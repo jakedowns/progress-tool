@@ -28,14 +28,21 @@ for (const name of ['tree', 'tree-theme']) {
     { stdio: 'pipe' }
   );
 }
-const { TREE_THEME_CHOICES, nextTreeTheme, treeThemeLabel } = require(
-  path.join(OUT, 'tree.cjs')
-);
+const {
+  THEME_PRESET_CHOICES,
+  TREE_THEME_CHOICES,
+  nextTreeTheme,
+  themePresetFrom,
+  themePresetLabel,
+  treeThemeLabel,
+} = require(path.join(OUT, 'tree.cjs'));
 const {
   globalConfigDir,
   isProgressPluginPackage,
   treeThemeConfigCandidates,
+  updateThemeInConfig,
   updateTreeThemeInConfig,
+  writeThemeToConfig,
   writeTreeThemeToConfig,
 } = require(path.join(OUT, 'tree-theme.cjs'));
 
@@ -61,6 +68,36 @@ test('theme helpers expose both themes and flip between them', () => {
   assert.equal(treeThemeLabel('default'), 'Default');
 });
 
+test('theme presets pair each bar style with the right tree theme and preview', () => {
+  assert.deepEqual(
+    THEME_PRESET_CHOICES.map((choice) => choice.value),
+    ['ascii', 'emoji', 'compact']
+  );
+  assert.deepEqual(
+    THEME_PRESET_CHOICES.map((choice) => [choice.treeTheme, choice.barStyle]),
+    [
+      ['default', 'blocks'],
+      ['default', 'emoji'],
+      ['compact', 'blocks'],
+    ]
+  );
+  const [ascii, emoji, compact] = THEME_PRESET_CHOICES;
+  assert.match(ascii.title, /ASCII/);
+  assert.match(ascii.title, /█|░/);
+  assert.match(emoji.title, /Emoji/);
+  assert.match(emoji.title, /🟩/);
+  assert.match(emoji.title, /⬛/);
+  assert.match(compact.title, /Compact/);
+  assert.match(compact.title, /60% · & 2 more/);
+
+  assert.equal(themePresetFrom('default', 'blocks'), 'ascii');
+  assert.equal(themePresetFrom('default', 'emoji'), 'emoji');
+  assert.equal(themePresetFrom('compact', 'emoji'), 'compact');
+  assert.equal(themePresetLabel('ascii'), 'ASCII bars');
+  assert.equal(themePresetLabel('emoji'), 'Emoji bars');
+  assert.equal(themePresetLabel('compact'), 'Compact rows');
+});
+
 test('an existing treeTheme is replaced without touching comments or other keys', () => {
   const text = `{
   // keep this comment
@@ -79,6 +116,29 @@ test('an existing treeTheme is replaced without touching comments or other keys'
   assert.ok(updated);
   assert.match(updated, /"treeTheme": "compact"/);
   assert.doesNotMatch(updated, /"treeTheme": "default"/);
+  assert.match(updated, /\/\/ keep this comment/);
+  assert.match(updated, /"say": true/);
+});
+
+test('a theme preset writes both treeTheme and barStyle without touching comments', () => {
+  const text = `{
+  // keep this comment
+  "plugins": [
+    {
+      "package": "${PACKAGE}",
+      "options": { "say": true, "treeTheme": "default", "barStyle": "blocks" }
+    }
+  ]
+}
+`;
+  const updated = updateThemeInConfig(
+    text,
+    { treeTheme: 'default', barStyle: 'emoji' },
+    { matches }
+  );
+  assert.ok(updated);
+  assert.match(updated, /"treeTheme": "default"/);
+  assert.match(updated, /"barStyle": "emoji"/);
   assert.match(updated, /\/\/ keep this comment/);
   assert.match(updated, /"say": true/);
 });
@@ -214,6 +274,32 @@ test('writeTreeThemeToConfig edits the project config first', () => {
     'default',
     'global config stays untouched when the project config wins'
   );
+});
+
+test('writeThemeToConfig persists the preset pair', () => {
+  const project = tempDir();
+  const home = tempDir('progress-tree-theme-home-');
+  const projectConfig = path.join(project, 'opencode.json');
+  fs.writeFileSync(
+    projectConfig,
+    JSON.stringify(
+      { plugins: [{ package: PACKAGE, options: { say: true } }] },
+      null,
+      2
+    )
+  );
+
+  const result = writeThemeToConfig(
+    { treeTheme: 'default', barStyle: 'emoji' },
+    { directory: project, env: envFor(home) }
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.treeTheme, 'default');
+  assert.equal(result.barStyle, 'emoji');
+  const options = JSON.parse(fs.readFileSync(projectConfig, 'utf8')).plugins[0].options;
+  assert.equal(options.treeTheme, 'default');
+  assert.equal(options.barStyle, 'emoji');
+  assert.equal(options.say, true);
 });
 
 test('writeTreeThemeToConfig falls back to the global config', () => {

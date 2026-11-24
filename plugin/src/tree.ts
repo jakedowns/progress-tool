@@ -379,6 +379,11 @@ export function compactTreeSuffix(
 
 export type BarStyle = "blocks" | "emoji";
 
+/** Normalize the configured bar style; anything but `emoji` means blocks. */
+export function normalizeBarStyle(value: unknown): BarStyle {
+  return value === "emoji" ? "emoji" : "blocks";
+}
+
 export interface BarOptions {
   /** `blocks` (default) or `emoji` for the meme-style bar. */
   style?: BarStyle;
@@ -419,7 +424,7 @@ function clampProgress(progress: number | null | undefined): number {
 export function normalizeBarOptions(raw: unknown): BarOptions {
   const options = (raw ?? {}) as Record<string, unknown>;
   return {
-    style: options.barStyle === "emoji" ? "emoji" : "blocks",
+    style: normalizeBarStyle(options.barStyle),
     segments:
       typeof options.barSegments === "number" && options.barSegments > 0
         ? options.barSegments
@@ -546,4 +551,65 @@ export function renderBar(progress: number | null | undefined, width = 10): stri
 
 export function progressLabel(progress: number | null | undefined): string | null {
   return progress == null ? null : `${Math.round(progress * 100)}%`;
+}
+
+/**
+ * User-facing theme preset. The plugin has two bar styles (`blocks` and
+ * `emoji`) plus the barless `compact` tree theme, so the palette switcher
+ * exposes them as three comparable presets instead of two orthogonal options.
+ */
+export type ThemePreset = "ascii" | "emoji" | "compact";
+
+export interface ThemePresetChoice {
+  value: ThemePreset;
+  /** Label with an inline render of the style. */
+  title: string;
+  description: string;
+  treeTheme: TreeTheme;
+  barStyle: BarStyle;
+}
+
+const ASCII_PREVIEW = barParts(0.6, { style: "blocks", segments: 10 }).bar;
+const EMOJI_PREVIEW = barParts(0.6, { style: "emoji", segments: 6 });
+const COMPACT_PREVIEW = compactTreeSuffix(0.6, 2);
+
+/** Switcher options, in display order. */
+export const THEME_PRESET_CHOICES: readonly ThemePresetChoice[] = [
+  {
+    value: "ascii",
+    title: `ASCII  ${ASCII_PREVIEW} 60%`,
+    description: "Block bars · default tree rows",
+    treeTheme: "default",
+    barStyle: "blocks",
+  },
+  {
+    value: "emoji",
+    title: `Emoji  ${EMOJI_PREVIEW.bar}${EMOJI_PREVIEW.fraction}`,
+    description: "Emoji bars · default tree rows",
+    treeTheme: "default",
+    barStyle: "emoji",
+  },
+  {
+    value: "compact",
+    title: `Compact  Task ${COMPACT_PREVIEW}`,
+    description: "No bars · one detail line",
+    treeTheme: "compact",
+    barStyle: "blocks",
+  },
+];
+
+/** Preset that matches the configured tree theme and bar style. */
+export function themePresetFrom(theme: TreeTheme, style: BarStyle): ThemePreset {
+  if (theme === "compact") return "compact";
+  return style === "emoji" ? "emoji" : "ascii";
+}
+
+export function themePresetChoice(value: ThemePreset): ThemePresetChoice {
+  return THEME_PRESET_CHOICES.find((choice) => choice.value === value)!;
+}
+
+/** Human label used in toasts and command descriptions. */
+export function themePresetLabel(value: ThemePreset): string {
+  if (value === "compact") return "Compact rows";
+  return value === "emoji" ? "Emoji bars" : "ASCII bars";
 }

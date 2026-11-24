@@ -206,6 +206,17 @@ Shipped since `mcp-server@2.10.2`:
 - **Store and mirror support** for cleared/dismissed entries plus expanded MCP
   smoke and task-list suites (**57 tests**).
 
+## Unreleased — theme previews and GUI tree branches
+
+- **Theme preset switcher.** **Progress: switch tree theme** now presents
+  **ASCII** (`barStyle: "blocks"`), **Emoji** (`barStyle: "emoji"`), and
+  **Compact** (`treeTheme: "compact"`) with inline previews rendered from the
+  real bar helpers. Picking a preset applies it immediately and persists both
+  `treeTheme` and `barStyle` to the OpenCode config that declares the plugin.
+- **GUI tree branches.** Expanded child rows in the composer pill popover and
+  sidebar are prefixed with the TUI's `└─` branch glyph, placed ahead of the
+  status dot.
+
 ## Local config note
 
 The local OpenCode config used while validating this range sets `sayModes`,

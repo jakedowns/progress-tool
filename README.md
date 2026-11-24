@@ -140,8 +140,11 @@ Multi-line titles and details accept real newlines, `\n` / `\r\n`, or `<br>`.
   progress-bar glyphs or the started line, with a single clamped detail line
   and a `40% · & N more` meta suffix. The composer pill capsule itself keeps
   its `barStyle` rendering. Use the **Progress: switch tree theme** palette
-  command to pick `Default` or `Compact`; the choice applies immediately and is
-  saved as `treeTheme` in the OpenCode config that declares the plugin.
+  command to pick **ASCII**, **Emoji**, or **Compact**; each option shows a
+  live preview of its bars. The choice applies immediately and is saved as
+  `treeTheme` plus `barStyle` in the OpenCode config that declares the plugin.
+  Expanded child rows use the same `└─` branch prefix as the TUI, placed before
+  the status dot.
 - **TUI:** compact tree above the composer, roots collapsed, capped at
   `tuiMaxRoots` (default 3) and scrollable inside `tuiMaxRows` (default 8) so
   long lists never push the prompt away. A `--- scroll to see N more ---` hint
@@ -203,7 +206,7 @@ Multi-line titles and details accept real newlines, `\n` / `\r\n`, or `<br>`.
 | `guiLayout` | Desktop/web placement: `"composer"` pill (default) or pinned `"sidebar"` panel |
 | `guiSidebarWidth` | Desktop sidebar initial width in CSS pixels (default 360, clamp 240-800) |
 | `guiDetailLines` | Detail line cap in pill menu and sidebar: `-1` full, `0` hidden, `n` lines (default 1) |
-| `treeTheme` | Tree row theme: `"default"` or `"compact"` (no bars/started line, one detail line; pill capsule unaffected). **Progress: switch tree theme** picks it and writes it back to the config |
+| `treeTheme` | Tree row theme: `"default"` or `"compact"` (no bars/started line, one detail line; pill capsule unaffected). The **Progress: switch tree theme** preset picker writes this and `barStyle` back to the config |
 | `taskListFile` | Mirror tasks to a local Markdown checklist (default off) |
 | `taskListLocation` | `1` = project root (default), `0` = `.progress/`, `2` = `~/.opencode-progress/` |
 | `taskListView` | `"ui"` (hide dismissed + rolled-up status) or `"raw"` |
@@ -215,7 +218,7 @@ Multi-line titles and details accept real newlines, `\n` / `\r\n`, or `<br>`.
 | `staleEscalateAfter` | Entry reminders before one synthetic escalation (default 3; `0` disables) |
 | `idleReminder` | Turn-end nudge when tasks remain (default on) |
 | `demoSkills` | Register the demo skills (default off) |
-| `barStyle` | `"blocks"` or `"emoji"` |
+| `barStyle` | `"blocks"` (ASCII) or `"emoji"`; the **Progress: switch tree theme** presets set this with `treeTheme` |
 | `refreshMs` | View refresh interval (default 1000) |
 | `say` | Enable the opt-in narration tool and notes lane (default off) |
 | `sayModes` | Note surfaces: string or array of `"pill"`, `"toast"`, `"tree"` (default `["tree"]`; `sayMode` is a scalar alias; `[]` records without showing) |

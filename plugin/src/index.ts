@@ -28,7 +28,7 @@ import {
 } from "./state.js";
 import { readTaskListStatus, toggleTaskListMode } from "./tasklist-prefs.js";
 import { normalizeRefreshMs } from "./tree.js";
-import { writeTreeThemeToConfig } from "./tree-theme.js";
+import { writeThemeToConfig } from "./tree-theme.js";
 import {
   PROGRESS_RULES,
   instructionsEnabled,
@@ -359,15 +359,23 @@ export default Plugin.define({
         console.log(`[opencode-progress] v${pluginVersion} task-list mode=${mode}`);
         return { ok: true, mode };
       },
-      setTreeTheme: async ({ theme }) => {
-        const result = writeTreeThemeToConfig(theme, {
-          directory: ctx.location.directory,
-        });
+      setTreeTheme: async ({ theme, barStyle }) => {
+        const result = writeThemeToConfig(
+          { treeTheme: theme, barStyle },
+          { directory: ctx.location.directory }
+        );
+        const summary = `${result.treeTheme ?? theme}/${result.barStyle ?? barStyle ?? "blocks"}`;
         console.log(
-          `[opencode-progress] v${pluginVersion} tree theme=${result.theme} ` +
+          `[opencode-progress] v${pluginVersion} tree theme=${summary} ` +
             (result.ok ? `saved to ${result.file}` : `config not updated: ${result.error}`)
         );
-        return result;
+        return {
+          ok: result.ok,
+          theme: result.treeTheme ?? theme,
+          barStyle: result.barStyle ?? barStyle,
+          file: result.file,
+          error: result.error,
+        };
       },
     });
 

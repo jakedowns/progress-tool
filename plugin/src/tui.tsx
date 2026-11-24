@@ -31,7 +31,7 @@ import {
   toggleTaskListMode as toggleTaskListModePref,
   type TaskListStatus,
 } from "./tasklist-prefs.js";
-import { writeTreeThemeToConfig } from "./tree-theme.js";
+import { writeThemeToConfig } from "./tree-theme.js";
 import {
   buildTree,
   barParts,
@@ -49,10 +49,12 @@ import {
   scopeEntries,
   subagentPrefix,
   visibleEntries,
-  TREE_THEME_CHOICES,
-  treeThemeLabel,
+  THEME_PRESET_CHOICES,
+  themePresetChoice,
+  themePresetFrom,
+  themePresetLabel,
   type BarOptions,
-  type TreeTheme,
+  type ThemePreset,
   type VisibilityOptions,
 } from "./tree.js";
 import {
@@ -93,11 +95,19 @@ let pollers = 0;
 let timer: ReturnType<typeof setInterval> | undefined;
 let barOptions: BarOptions = {};
 let visibilityOptions: VisibilityOptions = {};
-/** Tree row theme; `compact` drops progress-bar glyphs from tree rows. */
-let themeState: { value: TreeTheme } = { value: "default" };
+/** Runtime theme preset; drives both tree rows and the bar style. */
+let themeState: { value: ThemePreset } = { value: "ascii" };
 let setTreeThemeState:
-  | ((mutation: (draft: { value: TreeTheme }) => void) => void)
+  | ((mutation: (draft: { value: ThemePreset }) => void) => void)
   | undefined;
+
+/** Bar options for the active preset; `barOptions` keeps the configured size. */
+function presetBarOptions(): BarOptions {
+  return {
+    ...barOptions,
+    style: themeState.value === "emoji" ? "emoji" : "blocks",
+  };
+}
 let maxRows = 8;
 let sidebarRows = 0;
 let expandRootsByDefault = false;
@@ -253,7 +263,7 @@ function ProgressRow(props: { row: TuiRow; sessionID: string }) {
       const meta = compactTreeSuffix(props.row.node.progress, props.row.hiddenChildren);
       return `${glyph(props.row.node.status)} ${title()}${meta ? ` ${meta}` : ""}`;
     }
-    const parts = barParts(props.row.node.progress, barOptions);
+    const parts = barParts(props.row.node.progress, presetBarOptions());
     if (parts.style === "emoji") {
       const done =
         props.row.node.status === "done"
@@ -541,29 +551,34 @@ function swapLayout(context: TuiContext): void {
   });
 }
 
-/** Pick a tree theme, apply it now, and save it to the OpenCode config. */
+/** Pick a theme preset, apply it now, and save it to the OpenCode config. */
 async function switchTreeTheme(context: TuiContext): Promise<void> {
   const current = themeState.value;
-  const choice = await context.ui.dialog.select<TreeTheme>({
+  const choice = await context.ui.dialog.select<ThemePreset>({
     title: "Progress tree theme",
     current,
-    options: TREE_THEME_CHOICES.map((option) => ({
+    options: THEME_PRESET_CHOICES.map((option) => ({
       title: option.title,
       value: option.value,
-      description: option.value === current ? "current" : option.description,
+      description:
+        option.value === current
+          ? `${option.description} · current`
+          : option.description,
     })),
   });
   if (choice == null) return;
+  const preset = themePresetChoice(choice);
   setTreeThemeState?.((draft) => {
     draft.value = choice;
   });
-  const result = writeTreeThemeToConfig(choice, {
-    directory: context.location?.directory,
-  });
+  const result = writeThemeToConfig(
+    { treeTheme: preset.treeTheme, barStyle: preset.barStyle },
+    { directory: context.location?.directory }
+  );
   context.ui.toast.show({
     message: result.ok
-      ? `Tree theme: ${treeThemeLabel(result.theme)} · saved to config`
-      : `Tree theme: ${treeThemeLabel(result.theme)} · config not updated`,
+      ? `Theme: ${themePresetLabel(choice)} · saved to config`
+      : `Theme: ${themePresetLabel(choice)} · config not updated`,
     variant: result.ok ? "success" : "warning",
   });
 }
@@ -988,8 +1003,13 @@ export default Plugin.define({
     collapsedState = collapsedStore;
     setCollapsed = updateCollapsed;
 
-    const [themeStore, updateTheme] = context.storage.memory("tuiTreeTheme", {
-      initial: { value: normalizeTreeTheme(context.options?.treeTheme) },
+    const [themeStore, updateTheme] = context.storage.memory("tuiThemePreset", {
+      initial: {
+        value: themePresetFrom(
+          normalizeTreeTheme(context.options?.treeTheme),
+          normalizeBarOptions(context.options).style ?? "blocks"
+        ),
+      },
     });
     themeState = themeStore;
     setTreeThemeState = updateTheme;

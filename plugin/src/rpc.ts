@@ -230,6 +230,7 @@ export const ProgressRpc = Rpc.define({
         type: "object",
         properties: {
           theme: { type: "string", enum: ["default", "compact"] },
+          barStyle: { type: "string", enum: ["blocks", "emoji"] },
         },
         required: ["theme"],
         additionalProperties: false,
@@ -239,6 +240,7 @@ export const ProgressRpc = Rpc.define({
         properties: {
           ok: { type: "boolean" },
           theme: { type: "string", enum: ["default", "compact"] },
+          barStyle: { type: "string", enum: ["blocks", "emoji"] },
           file: { type: "string" },
           error: { type: "string" },
         },
