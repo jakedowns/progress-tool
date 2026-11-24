@@ -155,6 +155,8 @@ export default Plugin.define({
     const sayOptions = normalizeSayOptions(ctx.options);
     const sayNudgeOptions = normalizeSayNudgeOptions(ctx.options);
     const sayNudgeStates = new Map<string, SayNudgeState>();
+    /** Non-say/progress tool calls this turn, reset by an accepted note/prompt. */
+    const sayCallsSinceNote = new Map<string, number>();
     const toolStartedAt = new Map<string, number>();
     let sayController: SayController | undefined;
     let sayToolName = "say";
@@ -178,6 +180,9 @@ export default Plugin.define({
                 agent: link?.agent ?? null,
                 at: note.at,
               });
+              // A real note is compliance: reset the forgot-to-narrate counter
+              // and clear any standing nudge.
+              sayCallsSinceNote.set(note.sessionID, 0);
               void ctx.session.instructions.entry
                 .remove({ sessionID: note.sessionID, key: 'say-nudge' })
                 .catch(() => {});
@@ -729,6 +734,7 @@ export default Plugin.define({
             lastNudgeAt: previous?.lastNudgeAt ?? 0,
             nudgesThisTurn: 0,
           });
+          sayCallsSinceNote.set(sessionID, 0);
           void ctx.session.instructions.entry
             .remove({ sessionID, key: 'say-nudge' })
             .catch(() => {});
@@ -776,23 +782,26 @@ export default Plugin.define({
       }
     }
 
-    // Opt-in say nudge: after a tool runs long with no narration this turn,
-    // leave a one-shot context hint for the NEXT step. A nudge cannot reach
-    // the model while the tool is still running, so this is deliberately
-    // retrospective and never a synthetic message.
+    // Opt-in say nudges: after a long tool OR a run of silent tool calls with
+    // no narration this turn, leave a one-shot context hint for the NEXT step.
+    // A nudge cannot reach the model while the tool is still running, so this
+    // is deliberately retrospective and never a synthetic message. Gated on
+    // `say: true`: a disabled say must never be nudged about.
     let sayNudgeBeforeHook: Awaited<ReturnType<typeof ctx.tool.hook>> | undefined;
     let sayNudgeAfterHook: Awaited<ReturnType<typeof ctx.tool.hook>> | undefined;
-    if (sayOptions.enabled && sayNudgeOptions.mode !== 'off') {
+    if (sayOptions.enabled && sayController && sayNudgeOptions.mode !== 'off') {
       sayNudgeBeforeHook = await ctx.tool.hook('execute.before', (event) => {
         toolStartedAt.set(String(event.id), Date.now());
       });
       sayNudgeAfterHook = await ctx.tool.hook('execute.after', (event) => {
         try {
+          if (event.tool === sayToolName || /(^|_)progress$/.test(event.tool)) return;
+          const callsSinceSay = (sayCallsSinceNote.get(event.sessionID) ?? 0) + 1;
+          sayCallsSinceNote.set(event.sessionID, callsSinceSay);
           const started = toolStartedAt.get(String(event.id));
           toolStartedAt.delete(String(event.id));
-          if (started === undefined) return;
-          if (event.tool === sayToolName || /(^|_)progress$/.test(event.tool)) return;
           const now = Date.now();
+          const durationMs = started === undefined ? 0 : now - started;
           const controller = sayController?.get(event.sessionID);
           const state = sayNudgeStates.get(event.sessionID) ?? emptySayNudgeState();
           const decision = decideSayNudge(
@@ -800,7 +809,8 @@ export default Plugin.define({
             {
               sessionID: event.sessionID,
               tool: event.tool,
-              durationMs: now - started,
+              durationMs,
+              callsSinceSay,
               saidThisTurn: controller?.accepted === true,
               sayCount: controller?.count ?? 0,
               sayBudget: sayOptions.budgetPerTurn,
@@ -819,7 +829,8 @@ export default Plugin.define({
               event: 'say-nudge',
               sessionID: event.sessionID,
               tool: event.tool,
-              durationMs: now - started,
+              durationMs,
+              callsSinceSay,
               reason: decision.reason,
             });
           }
@@ -832,12 +843,14 @@ export default Plugin.define({
           event: 'config',
           sayNudge: sayNudgeOptions.mode,
           sayNudgeAfterMs: sayNudgeOptions.afterMs,
+          sayNudgeMinCalls: sayNudgeOptions.minCalls,
           sayNudgeCooldownMs: sayNudgeOptions.cooldownMs,
           sayNudgeMaxPerTurn: sayNudgeOptions.maxPerTurn,
         });
       }
       console.log(
-        `[opencode-progress] v${pluginVersion} say nudge: ${sayNudgeOptions.mode} after ${sayNudgeOptions.afterMs}ms`
+        `[opencode-progress] v${pluginVersion} say nudge: ${sayNudgeOptions.mode} ` +
+          `(after ${sayNudgeOptions.afterMs}ms or ${sayNudgeOptions.minCalls} calls)`
       );
     }
 

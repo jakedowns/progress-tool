@@ -178,8 +178,9 @@ Multi-line titles and details accept real newlines, `\n` / `\r\n`, or `<br>`.
   at once. Dismissals delete the note from the shared ring buffer, so every
   client updates. Notes also auto-hide from every surface after
   `sayAutoHideTimeoutMs` (default 60s; `0` keeps them until dismissed). An
-  opt-in `sayNudge` reminds a silent agent after a long tool, without
-  deleting them. **Recommended note length: 20–80 characters** for terse
+  opt-in `sayNudge` reminds a silent agent after a long tool
+  (`"long-tool"`) or after a run of tool calls with no note (`"silent-run"`);
+  it only exists when `say: true`. **Recommended note length: 20–80 characters** for terse
   intent/status pings; set `sayMinChars: 20` and `sayMaxChars: 80`. The
   shipped defaults stay `180`/`260` for longer intent-plus-ETA notes. Notes
   survive clear-list, roll child sessions up to the parent, and are purged with
@@ -221,7 +222,8 @@ Multi-line titles and details accept real newlines, `\n` / `\r\n`, or `<br>`.
 | `sayModes` | Note surfaces: string or array of `"pill"`, `"toast"`, `"tree"` (default `["tree"]`; `sayMode` is a scalar alias; `[]` records without showing) |
 | `sayAutoHideTimeoutMs` | Hide notes older than this from every surface (default `60000`, clamp `0..86400000`; `0` keeps until dismissed; view-only) |
 | `sayToastScope` | Toast `"own"` notes (default), own + child `"warnings"`, or `"all"`; child notes still roll up in the tree/pill |
-| `sayNudge` | Opt-in long-tool reminder: `"long-tool"` or `true` (default off; context-only, never synthetic) |
+| `sayNudge` | Opt-in reminder, only with `say: true`: `"long-tool"`/`true`, `"silent-run"` (forgot-to-narrate call count), or `"both"` (default off; context-only, never synthetic) |
+| `sayNudgeMinCalls` | Tool calls with no note before a `"silent-run"` reminder (default `3`, clamp `1..50`) |
 | `retainDeletedSessionProgress` | Keep store entries when a session is deleted (default off) |
 
 The optional task-list mirror is always written as `tasklist-<session>.md`. Add `tasklist-*.md` (and `.progress/` if you use location `0`) to your `.gitignore` — it contains plaintext task titles and details. When enabled, the palette command **Progress: task-list mirror view** switches between the UI view and the raw store view.

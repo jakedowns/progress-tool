@@ -176,6 +176,23 @@ Everything below ships in `plugin@2.20.0`. The earlier development labels
   task-list mirror, the 17-test `say-monitor` suite, and the 28-test `say` suite.
   Final state: **174 plugin tests**, **57 MCP tests**.
 
+## Unreleased — `say` forgot-to-narrate nudge
+
+- **Silent-run `say` nudge.** `sayNudge` now accepts `"silent-run"`: after
+  `sayNudgeMinCalls` non-`say`/progress tool calls in a row with no accepted
+  note this turn, leave one context-only reminder for the next step. This is
+  the `say` analogue of the progress monitor's silent-run nudge, aimed at
+  agents that forget to narrate across many quick calls. `"both"` fires on
+  either the call count or the existing long-tool duration.
+- **`sayNudgeMinCalls`.** Default `3`, clamped to `1..50`. Configurable only in
+  `"silent-run"` / `"both"` modes; `"long-tool"` ignores it.
+- **Gating and reset.** Every say nudge still requires `say: true` and an
+  explicit non-`off` `sayNudge`; a disabled `say` is never nudged about. An
+  accepted note resets the call counter and removes the standing `say-nudge`
+  entry, and a new user prompt resets the counter while preserving the cooldown
+  timestamp. Existing guards (budget, cooldown, per-turn cap, standing
+  `progress-nudge`) are unchanged.
+
 ## 2.21.0 — tree theme picker (released, `plugin@2.21.0`)
 
 Follow-up to `plugin@2.20.0`, dated **2026-11-24**. Final state: **187 plugin
