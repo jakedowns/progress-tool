@@ -2,7 +2,7 @@
 
 Back to the [main README](./README.md).
 
-**Versions:** MCP server `2.11.0` · OpenCode plugin `2.21.1`
+**Versions:** MCP server `2.11.0` · OpenCode plugin `2.21.2`
 
 This document is the reference half of the project: the portable contract, the
 relay's behaviour, state-store guarantees, architecture, testing, every plugin
@@ -417,6 +417,7 @@ Both the TUI and GUI parts read these options.
 - `autoHideDone`: hide completed tasks after `successHoldMs`, regardless of dismissal. **Default `false`** — done entries you never dismissed stay visible indefinitely (retention is opt-in, see `PROGRESS_AUTO_PRUNE_S`), including across plugin reloads.
 - `retainDeletedSessionProgress`: **Default `false`**. When a session is deleted, its plugin-store entries and child/parent links are purged to reclaim space. Set to `true` to keep them for auditing. The mirrored Markdown tasklist (`PROGRESS_TASKLIST`) is never deleted, only the store copy. A later progress write for the same session can regenerate that mirror from the remaining store entries.
 - `relayMirrorLevel`: **Default `0`** when the Markdown tasklist mirror is enabled. `0` omits entries the relay created (successful build spam), `1` mirrors every relay entry (the old behavior), and `2` mirrors relay entries only while their current status is `error`. Agent-created tasks always mirror. The marker is set only when the relay creates an entry; an agent task later driven by relay remains a normal task. Pre-upgrade relay entries have no marker and stay visible until cleared.
+- **Nested dismissal:** every row, not just a root, has a dismiss control. Dismissing a descendant hides that node and its subtree and rebuilds the parent’s status/progress from the remaining children; revival semantics are unchanged (a re-report or a child failure can bring a dismissed node back).
 - **Clear/delete palette commands**: *Progress: clear list (this session)* soft-deletes done/error and already-dismissed entries by setting `cleared: { at, status }`; records stay on disk and views/counts ignore them. Any agent update revives a cleared entry. *Progress: hard clear this session* permanently removes that session's entries (simple confirmation). *Progress: hard clear entire progress store* wipes every entry and requires typing `DELETE` (no admin gate). All three are palette-only in both the GUI and TUI: there are no pill buttons, clickable links, default keybinds, or slash commands.
 - `showDone`: set to `false` to drop completed tasks immediately.
 - `scope`: `"session"` (default) shows only the current chat's tasks; `"all"` shows every session sharing the state file.

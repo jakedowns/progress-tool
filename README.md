@@ -29,7 +29,7 @@ Implements the [Agent Progress Tool proposal](https://gist.github.com/jakedowns/
 for OpenCode 2, and is written as a portable reference implementation any
 harness can copy or adapt.
 
-**Versions:** MCP server `2.11.0` · OpenCode plugin `2.21.1`
+**Versions:** MCP server `2.11.0` · OpenCode plugin `2.21.2`
 
 > **Advanced docs:** [schema, relay internals, state store, architecture, all
 > options, file map →](./README-advanced.md)
@@ -157,7 +157,7 @@ Multi-line titles and details accept real newlines, `\n` / `\r\n`, or `<br>`.
   placements at runtime.
 - Running and waiting tasks stay visible; errors stay until dismissed or
   updated; completed tasks stay unless dismissed (or `autoHideDone` is on).
-- Dismissal is view-plane, not a status change: a dismissed tree stays hidden
+- Dismissal works at any depth: every nested row has its own `✕`; dismissing a child hides its subtree and re-rolls the parent from the remaining children. A dismissed tree stays hidden
   through relay telemetry and sibling activity. An **agent update clears the
   dismissal** on that entry and its ancestors — except a terminal dismissal
   (dismissed while done/error), which later done/error re-reports do not revive;

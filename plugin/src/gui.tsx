@@ -33,6 +33,7 @@ import {
 import { buildNotesLine } from "./tui-view.js";
 import {
   buildTree,
+  buildVisibleTree,
   barParts,
   countActive,
   flattenTreeWithDepth,
@@ -1022,11 +1023,9 @@ export default Plugin.define({
         return merged;
       });
       const tree = createMemo(() =>
-        buildTree(visibleEntries(scoped(), Date.now(), visibility))
+        buildVisibleTree(scoped(), Date.now(), visibility, dismissed())
       );
-      const visibleRoots = createMemo(() =>
-        tree().filter((root) => !isDismissed(root, dismissed()))
-      );
+      const visibleRoots = createMemo(() => tree());
       const [expandedOverrides, setExpandedOverrides] = createSignal<Record<string, boolean>>({});
       const expandByDefault = ctx.options?.expandRootsByDefault === true;
       const collapsedMap = createMemo(() =>
@@ -1214,6 +1213,9 @@ export default Plugin.define({
                                     options={options()}
                                     detailLines={detailLines}
                                     theme={treeTheme()}
+                                    onDismiss={() =>
+                                      dismissKey(props.session, child.key, child.status ?? "")
+                                    }
                                   />
                                 )}
                               </For>
@@ -1331,11 +1333,9 @@ export default Plugin.define({
         return merged;
       });
       const tree = createMemo(() =>
-        buildTree(visibleEntries(scoped(), Date.now(), visibility))
+        buildVisibleTree(scoped(), Date.now(), visibility, dismissed())
       );
-      const visibleRoots = createMemo(() =>
-        tree().filter((root) => !isDismissed(root, dismissed()))
-      );
+      const visibleRoots = createMemo(() => tree());
       const [expandedOverrides, setExpandedOverrides] = createSignal<
         Record<string, boolean>
       >({});
@@ -1499,6 +1499,9 @@ export default Plugin.define({
                                     options={options()}
                                     detailLines={detailLines}
                                     theme={treeTheme()}
+                                    onDismiss={() =>
+                                      dismissKey(props.session(), child.key, child.status ?? "")
+                                    }
                                   />
                                 )}
                               </For>
@@ -1776,9 +1779,12 @@ export default Plugin.define({
           return { label: "progress: loading", title: "Progress plugin" };
         }
 
-        const roots = buildTree(visibleEntries(scoped, Date.now(), visibility));
-        const dismissed = dismissedMap(scoped);
-        const visibleRoots = roots.filter((root) => !isDismissed(root, dismissed));
+        const visibleRoots = buildVisibleTree(
+          scoped,
+          Date.now(),
+          visibility,
+          dismissedMap(scoped)
+        );
         if (visibleRoots.length === 0) return undefined;
 
         const active = countActive(visibleRoots);
@@ -1828,7 +1834,6 @@ export default Plugin.define({
               .slice(0, 7)
               .map(({ node, depth }) => {
                 const row = rowFor(node, depth, options(), treeTheme());
-                if (depth !== 0) return row;
                 return {
                   ...row,
                   icon: "circle-x" as const,

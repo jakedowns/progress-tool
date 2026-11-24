@@ -648,6 +648,30 @@ function visibleEntries(entries, now, options = {}) {
   }
   return visible;
 }
+function buildVisibleTree(entries, now, options = {}, dismissals) {
+  const visible = visibleEntries(entries, now, options);
+  const roots = buildTree(visible);
+  const map = dismissals ?? dismissedMap(visible);
+  const drop = /* @__PURE__ */ new Set();
+  const collect = (node) => {
+    drop.add(node.key);
+    for (const child of node.children) collect(child);
+  };
+  const visit = (node) => {
+    if (isDismissed(node, map)) {
+      collect(node);
+      return;
+    }
+    for (const child of node.children) visit(child);
+  };
+  for (const root of roots) visit(root);
+  if (drop.size === 0) return roots;
+  const remaining = {};
+  for (const [key, entry] of Object.entries(visible)) {
+    if (!drop.has(key)) remaining[key] = entry;
+  }
+  return buildTree(remaining);
+}
 function barParts(progress, options = {}) {
   const style = options.style === "emoji" ? "emoji" : "blocks";
   const segments = options.segments ?? (style === "emoji" ? 6 : 10);
@@ -1326,11 +1350,10 @@ function toggleExpanded(sessionID, key) {
 }
 function allRootsForSession(sessionID) {
   const entries = state().entries ?? {};
-  return buildTree(visibleEntries(scopeEntries(entries, sessionID, visibilityOptions), Date.now(), visibilityOptions));
+  return buildVisibleTree(scopeEntries(entries, sessionID, visibilityOptions), Date.now(), visibilityOptions);
 }
 function rootsForSession(sessionID) {
-  const entries = state().entries ?? {};
-  return allRootsForSession(sessionID).filter((root) => !isDismissed(root, dismissedMap(entries)));
+  return allRootsForSession(sessionID);
 }
 var STATUS_SUMMARY_ORDER = ["error", "running", "waiting", "pending", "done"];
 function statusSummary(roots) {
@@ -1390,10 +1413,11 @@ function ProgressRow(props) {
     return `${glyph(props.row.node.status)} [${parts.bar}] ${title()}${pct ? ` ${pct}` : ""}${suffix()}`;
   };
   return (() => {
-    var _el$ = _$createElement("box"), _el$2 = _$createElement("box"), _el$4 = _$createElement("text"), _el$5 = _$createElement("span");
+    var _el$ = _$createElement("box"), _el$2 = _$createElement("box"), _el$4 = _$createElement("text"), _el$5 = _$createElement("span"), _el$6 = _$createElement("text");
     _$insertNode(_el$, _el$2);
     _$setProp(_el$, "flexDirection", "column");
     _$insertNode(_el$2, _el$4);
+    _$insertNode(_el$2, _el$6);
     _$setProp(_el$2, "flexDirection", "row");
     _$setProp(_el$2, "alignItems", "flex-start");
     _$insert(_el$2, _$createComponent(Show, {
@@ -1417,19 +1441,9 @@ function ProgressRow(props) {
     _$setProp(_el$4, "onMouseUp", onDetail);
     _$insert(_el$5, indent);
     _$insert(_el$4, label, null);
-    _$insert(_el$2, _$createComponent(Show, {
-      get when() {
-        return isRoot();
-      },
-      get children() {
-        var _el$6 = _$createElement("text");
-        _$insertNode(_el$6, _$createTextNode(`  \u2715`));
-        _$setProp(_el$6, "selectable", false);
-        _$setProp(_el$6, "onMouseUp", onDismiss);
-        _$effect((_$p) => _$setProp(_el$6, "fg", ctx.theme.text.muted, _$p));
-        return _el$6;
-      }
-    }), null);
+    _$insertNode(_el$6, _$createTextNode(`  \u2715`));
+    _$setProp(_el$6, "selectable", false);
+    _$setProp(_el$6, "onMouseUp", onDismiss);
     _$insert(_el$, _$createComponent(Show, {
       get when() {
         return props.row.node.detail;
@@ -1445,15 +1459,17 @@ function ProgressRow(props) {
       }
     }), null);
     _$effect((_p$) => {
-      var _v$ = props.row.depth === 0 ? 0 : 2, _v$2 = ctx.theme.text.base, _v$3 = ctx.theme.text.muted;
+      var _v$ = props.row.depth === 0 ? 0 : 2, _v$2 = ctx.theme.text.base, _v$3 = ctx.theme.text.muted, _v$4 = ctx.theme.text.muted;
       _v$ !== _p$.e && (_p$.e = _$setProp(_el$, "paddingLeft", _v$, _p$.e));
       _v$2 !== _p$.t && (_p$.t = _$setProp(_el$4, "fg", _v$2, _p$.t));
       _v$3 !== _p$.a && (_p$.a = _$setProp(_el$5, "fg", _v$3, _p$.a));
+      _v$4 !== _p$.o && (_p$.o = _$setProp(_el$6, "fg", _v$4, _p$.o));
       return _p$;
     }, {
       e: void 0,
       t: void 0,
-      a: void 0
+      a: void 0,
+      o: void 0
     });
     return _el$;
   })();
@@ -1580,9 +1596,9 @@ function ProgressTree(props) {
           _$setProp(_el$17, "selectable", false);
           _$setProp(_el$17, "onMouseUp", onDismissNote);
           _$effect((_p$) => {
-            var _v$4 = ctx.theme.text.muted, _v$5 = ctx.theme.text.muted;
-            _v$4 !== _p$.e && (_p$.e = _$setProp(_el$16, "fg", _v$4, _p$.e));
-            _v$5 !== _p$.t && (_p$.t = _$setProp(_el$17, "fg", _v$5, _p$.t));
+            var _v$5 = ctx.theme.text.muted, _v$6 = ctx.theme.text.muted;
+            _v$5 !== _p$.e && (_p$.e = _$setProp(_el$16, "fg", _v$5, _p$.e));
+            _v$6 !== _p$.t && (_p$.t = _$setProp(_el$17, "fg", _v$6, _p$.t));
             return _p$;
           }, {
             e: void 0,
@@ -1605,9 +1621,9 @@ function ProgressTree(props) {
           _$insertNode(_el$20, _$createTextNode(`progress: `));
           _$insert(_el$19, summary, null);
           _$effect((_p$) => {
-            var _v$6 = ctx.theme.text.base, _v$7 = ctx.theme.text.muted;
-            _v$6 !== _p$.e && (_p$.e = _$setProp(_el$19, "fg", _v$6, _p$.e));
-            _v$7 !== _p$.t && (_p$.t = _$setProp(_el$20, "fg", _v$7, _p$.t));
+            var _v$7 = ctx.theme.text.base, _v$8 = ctx.theme.text.muted;
+            _v$7 !== _p$.e && (_p$.e = _$setProp(_el$19, "fg", _v$7, _p$.e));
+            _v$8 !== _p$.t && (_p$.t = _$setProp(_el$20, "fg", _v$8, _p$.t));
             return _p$;
           }, {
             e: void 0,

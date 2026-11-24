@@ -34,6 +34,7 @@ import {
 import { writeThemeToConfig } from "./tree-theme.js";
 import {
   buildTree,
+  buildVisibleTree,
   barParts,
   compactTreeSuffix,
   countActive,
@@ -180,21 +181,16 @@ function toggleExpanded(sessionID: string, key: string): void {
 /** All roots for a session, including dismissed ones, from the latest polled state. */
 function allRootsForSession(sessionID: string): TreeNode[] {
   const entries = state().entries ?? {};
-  return buildTree(
-    visibleEntries(
-      scopeEntries(entries, sessionID, visibilityOptions),
-      Date.now(),
-      visibilityOptions
-    )
+  return buildVisibleTree(
+    scopeEntries(entries, sessionID, visibilityOptions),
+    Date.now(),
+    visibilityOptions
   );
 }
 
 /** Undismissed roots for a session, built from the latest polled state. */
 function rootsForSession(sessionID: string): TreeNode[] {
-  const entries = state().entries ?? {};
-  return allRootsForSession(sessionID).filter(
-    (root) => !isDismissed(root, dismissedMap(entries))
-  );
+  return allRootsForSession(sessionID);
 }
 
 const STATUS_SUMMARY_ORDER: ProgressStatus[] = ["error", "running", "waiting", "pending", "done"];
@@ -298,11 +294,9 @@ function ProgressRow(props: { row: TuiRow; sessionID: string }) {
           <span fg={ctx.theme.text.muted}>{indent()}</span>
           {label()}
         </text>
-        <Show when={isRoot()}>
-          <text selectable={false} fg={ctx.theme.text.muted} onMouseUp={onDismiss}>
-            {"  ✕"}
-          </text>
-        </Show>
+        <text selectable={false} fg={ctx.theme.text.muted} onMouseUp={onDismiss}>
+          {"  ✕"}
+        </text>
       </box>
       <Show when={props.row.node.detail}>
         <text

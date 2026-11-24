@@ -26,6 +26,7 @@ execFileSync(
 );
 const {
   buildTree,
+  buildVisibleTree,
   isDismissed,
   dismissalsFor,
   visibleEntries,
@@ -233,4 +234,36 @@ test('writeDismissal persists {status, at} atomically and cleans up its lock', (
   // Unknown key: no-op, still clean.
   assert.equal(writeDismissal('missing-key', 'running'), false);
   assert.equal(fs.existsSync(`${file}.lock`), false);
+});
+
+test('buildVisibleTree prunes a dismissed descendant, its subtree, and re-rolls the parent', () => {
+  const entries = {
+    root: { id: 'root', status: 'running', title: 'Root', progress: null, updatedAt: 1000 },
+    child: { id: 'child', parentId: 'root', status: 'done', title: 'Child', progress: 1, updatedAt: 1000 },
+    grand: { id: 'grand', parentId: 'child', status: 'done', title: 'Grand', progress: 1, updatedAt: 1000 },
+    sibling: { id: 'sibling', parentId: 'root', status: 'running', title: 'Sibling', progress: 0.8, updatedAt: 1000 },
+  };
+  const roots = buildVisibleTree(entries, 2000, {}, {
+    child: { status: 'done', at: 1500 },
+  });
+  assert.equal(roots.length, 1, 'the root remains');
+  assert.deepEqual(roots[0].children.map((c) => c.id), ['sibling']);
+  assert.equal(roots[0].progress, 0.8, 'parent progress re-rolls from remaining children');
+  assert.equal(roots[0].status, 'running');
+});
+
+test('buildVisibleTree still hides a dismissed root and can read persisted dismissals', () => {
+  const entries = {
+    root: { id: 'root', status: 'running', title: 'Root', updatedAt: 1000 },
+    child: {
+      id: 'child',
+      parentId: 'root',
+      status: 'done',
+      title: 'Child',
+      updatedAt: 1000,
+      dismissed: { status: 'done', at: 1500 },
+    },
+  };
+  assert.equal(buildVisibleTree(entries, 2000)[0].children.length, 0);
+  assert.equal(buildVisibleTree(entries, 2000, {}, { root: { status: 'done', at: 1500 } }).length, 0);
 });

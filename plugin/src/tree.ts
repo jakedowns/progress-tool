@@ -526,6 +526,45 @@ export function visibleEntries(
 }
 
 /**
+ * Build the visible tree, pruning dismissed nodes at any depth.
+ *
+ * Root dismissals keep their revival semantics. A dismissed descendant also
+ * takes its subtree out of view, and the second build recomputes parent
+ * status/progress from the remaining children. Pass `dismissals` to include
+ * optimistic, not-yet-persisted dismissals.
+ */
+export function buildVisibleTree(
+  entries: Record<string, ProgressEntry>,
+  now: number,
+  options: VisibilityOptions = {},
+  dismissals?: Record<string, Dismissal>
+): TreeNode[] {
+  const visible = visibleEntries(entries, now, options);
+  const roots = buildTree(visible);
+  const map = dismissals ?? dismissedMap(visible);
+  const drop = new Set<string>();
+  const collect = (node: TreeNode) => {
+    drop.add(node.key);
+    for (const child of node.children) collect(child);
+  };
+  const visit = (node: TreeNode) => {
+    if (isDismissed(node, map)) {
+      collect(node);
+      return;
+    }
+    for (const child of node.children) visit(child);
+  };
+  for (const root of roots) visit(root);
+  if (drop.size === 0) return roots;
+
+  const remaining: Record<string, ProgressEntry> = {};
+  for (const [key, entry] of Object.entries(visible)) {
+    if (!drop.has(key)) remaining[key] = entry;
+  }
+  return buildTree(remaining);
+}
+
+/**
  * Build a progress bar in either the ASCII block style or the emoji style:
  *
  *   blocks: [██████░░░░] 60%
