@@ -1962,30 +1962,27 @@ export default Plugin.define({
     // Launcher for the desktop sidebar's New tab page and + menu, alongside
     // Review / Browser / Terminal / Open file. `opened` follows this tab's own
     // state so the launcher stays listed while some other side tab is open.
-    ctx.add(MenuItem, {
-      menu: "session.panel",
-      id: "progress",
-      title: "Progress",
-      icon: "checklist",
-      order: 20,
-      description: "Task tree and notes",
-      get opened() {
-        const session = ctx.sessions.current();
-        if (!session) return false;
-        return ctx.layout.state(sidebarPanelKey, session) !== "closed";
-      },
-      run: () => {
-        const session = ctx.sessions.current();
-        if (!session) return;
-        if (layoutMode() !== "sidebar") {
-          swapLayout();
-          return;
-        }
-        ctx.layout.open(sidebarPanelKey, session, {
-          tab: "select",
-          background: true,
-        });
-      },
+    ctx.add(MenuItem, () => {
+      return {
+        menu: "session.panel" as const,
+        id: "progress",
+        title: "Progress",
+        icon: "checklist" as const,
+        order: 20,
+        description: "Task tree and notes",
+        run: () => {
+          const current = ctx.sessions.current();
+          if (!current) return;
+          if (layoutMode() !== "sidebar") {
+            swapLayout();
+            return;
+          }
+          ctx.layout.open(sidebarPanelKey, current, {
+            tab: "select",
+            background: true,
+          });
+        },
+      };
     });
 
     return () => {
