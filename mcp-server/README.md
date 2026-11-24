@@ -19,10 +19,13 @@ long-running commands.
 }
 ```
 
-Exposes two tools:
+Exposes three tools:
 
 - `progress` — record/update a task; bulk `entries[]` creates a whole tree in
   one atomic write; `status` is `pending | running | waiting | done | error`.
+- `progress_touch` — refresh one entry (or `ids[]`) without changing status,
+  title, progress, or parent. Bumps `updatedAt` and optionally replaces
+  `detail`; use it during long single-step work instead of faking progress.
 - `list` — read-only: session's trees as text, dismissed entries hidden.
 
 ## Relay long-running commands
@@ -31,6 +34,7 @@ Exposes two tools:
 progress-relay --id build-1 -- npm run build   # wrap: exit code → done/error
 npm test | progress-relay --id test-1          # pipe: done on EOF
 progress-emit --id build-1 --status running --title "Build"
+progress-touch --id build-1 --detail "still compiling"
 ```
 
 The relay parses `NN%` / `N/M` and native `OSC 9;4` progress sequences,

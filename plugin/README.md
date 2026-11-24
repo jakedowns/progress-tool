@@ -89,7 +89,7 @@ Pass under the plugin entry's `options` in `opencode.json`:
 | `taskListOrder` | `"newest-first"` | `"newest-first"` (new at top) or `"oldest-first"` (append at bottom) |
 | `relayMirrorLevel` | `0` | `0` omit relay-created entries, `1` mirror all relay entries, `2` relay errors only |
 | `mcpRuntime` | auto | absolute path to the `node`/`bun` used to spawn the MCP server (auto-detected; set this if detection picks wrong) |
-| `strictMode` | `"nudge"` | `"nudge"` / `"force"` / `"off"` tool-call monitor |
+| `strictMode` | `"nudge"` | `"nudge"` / `"force"` / `"off"` model-step monitor |
 | `staleEscalateAfter` | `3` | entry-based stale reminders before one synthetic escalation (`0` disables) |
 | `wallClockMs` | `120000` | wall-clock nudge threshold (`0` disables) |
 | `idleReminder` | `true` | turn-end nudge when open tasks remain |

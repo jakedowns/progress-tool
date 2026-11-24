@@ -41,6 +41,15 @@ import {
   type SayController,
 } from "./say.js";
 import {
+  formatReminder,
+  isHealthyWaiting,
+  pickTarget,
+  reminderHash,
+  shouldReplaceReminder,
+  type ReminderSeverity,
+  type ReminderState,
+} from "./reminders.js";
+import {
   decideSayNudge,
   emptySayNudgeState,
   normalizeSayNudgeOptions,
@@ -158,6 +167,55 @@ export default Plugin.define({
     /** Non-say/progress tool calls this turn, reset by an accepted note/prompt. */
     const sayCallsSinceNote = new Map<string, number>();
     const toolStartedAt = new Map<string, number>();
+    /** Model steps since the last progress write. */
+    const stepsSinceProgress = new Map<string, number>();
+    /** Active execute.before/after calls per session (parallel-safe). */
+    const activeToolCounts = new Map<string, number>();
+    /** Prompt-time baseline so resumed sessions do not print huge ages. */
+    const promptAt = new Map<string, number>();
+    /** One standing reminder entry per session. */
+    const standingReminders = new Map<string, ReminderState>();
+    const REMINDER_KEY = 'progress-reminder';
+
+    const putReminder = (
+      sessionID: string,
+      severity: ReminderSeverity,
+      source: string,
+      body: string
+    ): boolean => {
+      // Message helpers that already carry a tier prefix must not be wrapped
+      // twice; helpers that return only a body get the prefix here.
+      const text = /^\[(info|warn|block)\]\s/.test(body)
+        ? body.trim()
+        : formatReminder(severity, body);
+      const next: ReminderState = {
+        severity,
+        source,
+        text,
+        hash: reminderHash(text),
+        at: Date.now(),
+      };
+      if (!shouldReplaceReminder(standingReminders.get(sessionID), next)) {
+        if (verbose) logNudge({ event: 'reminder', sessionID, severity, source, text, deduped: true });
+        return false;
+      }
+      standingReminders.set(sessionID, next);
+      void ctx.session.instructions.entry
+        .put({ sessionID, key: REMINDER_KEY, value: text })
+        .catch(() => {});
+      if (verbose) logNudge({ event: 'reminder', sessionID, severity, source, text, deduped: false });
+      return true;
+    };
+
+    const clearReminder = (sessionID: string, source?: string): void => {
+      const current = standingReminders.get(sessionID);
+      if (!current) return;
+      if (source && current.source !== source) return;
+      standingReminders.delete(sessionID);
+      void ctx.session.instructions.entry
+        .remove({ sessionID, key: REMINDER_KEY })
+        .catch(() => {});
+    };
     let sayController: SayController | undefined;
     let sayToolName = "say";
     let sayRegistration: Awaited<ReturnType<typeof ctx.tool.transform>> | undefined;
@@ -181,11 +239,9 @@ export default Plugin.define({
                 at: note.at,
               });
               // A real note is compliance: reset the forgot-to-narrate counter
-              // and clear any standing nudge.
+              // and clear a say-sourced standing reminder.
               sayCallsSinceNote.set(note.sessionID, 0);
-              void ctx.session.instructions.entry
-                .remove({ sessionID: note.sessionID, key: 'say-nudge' })
-                .catch(() => {});
+              clearReminder(note.sessionID, 'say');
             },
             synthetic: (input) => ctx.session.synthetic(input),
             log: (message, error) =>
@@ -416,6 +472,13 @@ export default Plugin.define({
     if (instructionsEnabled(ctx.options) || strictMode !== 'off') {
       const injectRules = instructionsEnabled(ctx.options);
       rulesRegistration = await ctx.session.hook("context", async (event) => {
+        const stepSessionID = (event as { sessionID?: string }).sessionID;
+        if (stepSessionID) {
+          stepsSinceProgress.set(
+            stepSessionID,
+            (stepsSinceProgress.get(stepSessionID) ?? 0) + 1
+          );
+        }
         let available = hasProgressTool(
           (event as unknown as { tools?: Record<string, unknown> }).tools
         );
@@ -510,9 +573,8 @@ export default Plugin.define({
       }
     };
     const lastSeenProgress = new Map<string, number>();
-    const progressNudgeStanding = new Set<string>();
-    const NUDGE_KEY = 'progress-nudge';
     let promptReminderHook: Awaited<ReturnType<typeof ctx.session.hook>> | undefined;
+    let promptResetHook: Awaited<ReturnType<typeof ctx.session.hook>> | undefined;
 
     let toolHook: Awaited<ReturnType<typeof ctx.tool.hook>> | undefined;
     if (strictMode !== 'off') {
@@ -521,21 +583,35 @@ export default Plugin.define({
           // Guidance is only meaningful when the progress tool exists; the
           // context hook flips this on once the MCP server has connected.
           if (!progressTool.available) return;
-          const isProgressCall = /(^|_)progress$/.test(event.tool);
+          const isProgressCall = /(^|_)progress(_touch)?$/.test(event.tool);
+          const now = Date.now();
           const entries = Object.values(readProgressState().entries ?? {}).filter(
             (entry) => entry && entry.sessionId === event.sessionID
           );
+          // Healthy waiting still counts as open work (so the silent-run path
+          // does not fire), but it must not reset the staleness clock: only
+          // real progress or a stale/detail-less entry should.
           const hasActive = entries.some(
-            (entry) => entry.status === 'running' || entry.status === 'waiting'
+            (entry) =>
+              (entry.status === 'running' || entry.status === 'waiting') &&
+              !entry.dismissed
           );
           const lastProgressAt = entries.reduce(
-            (max, entry) => Math.max(max, entry.updatedAt ?? 0),
+            (max, entry) =>
+              entry.dismissed || isHealthyWaiting(entry, now, staleAfterMs)
+                ? max
+                : Math.max(max, entry.updatedAt ?? 0),
             0
           );
 
           const previousSeen = lastSeenProgress.get(event.sessionID) ?? 0;
           const progressAdvanced = lastProgressAt > previousSeen;
           if (lastProgressAt > previousSeen) lastSeenProgress.set(event.sessionID, lastProgressAt);
+          if (isProgressCall || progressAdvanced) {
+            stepsSinceProgress.set(event.sessionID, 0);
+            clearReminder(event.sessionID);
+          }
+          const target = pickTarget(entries, now);
           observeTransitions(event.sessionID, entries);
 
           const monitor = monitors.get(event.sessionID) ?? {
@@ -559,7 +635,8 @@ export default Plugin.define({
               hasActive,
               lastProgressAt: lastProgressAt || undefined,
               progressAdvanced,
-              now: Date.now(),
+              now,
+              stepsSinceProgress: stepsSinceProgress.get(event.sessionID) ?? 0,
             },
             { strictMode, staleAfterMs, cooldownMs: staleCooldownMs, threshold: strictThreshold, staleEscalateAfter }
           );
@@ -615,32 +692,22 @@ export default Plugin.define({
           const text =
             step.action === 'stale-escalate' ||
             (step.action === 'stale-nudge' && step.escalated)
-              ? staleProgressEscalation(step.callsSinceProgress, step.staleNudges)
+              ? staleProgressEscalation(step.callsSinceProgress, step.staleNudges, target)
               : step.action === 'stale-nudge'
-                ? staleProgressNudge(step.callsSinceProgress)
-                : silentRunNudge(step.count);
+                ? staleProgressNudge(step.callsSinceProgress, target)
+                : silentRunNudge(step.count, target, step.action === 'force' ? 'block' : 'warn');
 
-          if (
-            step.action === 'nudge' ||
-            step.action === 'force' ||
-            step.action === 'stale-nudge' ||
-            step.action === 'stale-escalate'
-          ) {
-            progressNudgeStanding.add(event.sessionID);
-            void ctx.session.instructions.entry
-              .put({ sessionID: event.sessionID, key: NUDGE_KEY, value: text })
-              .catch(() => {});
+          if (step.action === 'nudge' || step.action === 'stale-nudge') {
+            putReminder(event.sessionID, 'warn', 'strict', text);
           }
           if (step.action === 'force' || step.action === 'stale-escalate') {
+            clearReminder(event.sessionID, 'strict');
             void ctx.session
               .synthetic({ sessionID: event.sessionID, text })
               .catch(() => {});
           }
           if (step.action === 'clear') {
-            progressNudgeStanding.delete(event.sessionID);
-            void ctx.session.instructions.entry
-              .remove({ sessionID: event.sessionID, key: NUDGE_KEY })
-              .catch(() => {});
+            clearReminder(event.sessionID, 'strict');
           }
         } catch (error) {
           console.error('[opencode-progress] strict-mode monitor failed', String(error));
@@ -743,9 +810,7 @@ export default Plugin.define({
             nudgesThisTurn: 0,
           });
           sayCallsSinceNote.set(sessionID, 0);
-          void ctx.session.instructions.entry
-            .remove({ sessionID, key: 'say-nudge' })
-            .catch(() => {});
+          clearReminder(sessionID, 'say');
         }
       });
 
@@ -803,7 +868,7 @@ export default Plugin.define({
       });
       sayNudgeAfterHook = await ctx.tool.hook('execute.after', (event) => {
         try {
-          if (event.tool === sayToolName || /(^|_)progress$/.test(event.tool)) return;
+          if (event.tool === sayToolName || /(^|_)progress(_touch)?$/.test(event.tool)) return;
           const callsSinceSay = (sayCallsSinceNote.get(event.sessionID) ?? 0) + 1;
           sayCallsSinceNote.set(event.sessionID, callsSinceSay);
           const started = toolStartedAt.get(String(event.id));
@@ -822,16 +887,14 @@ export default Plugin.define({
               saidThisTurn: controller?.accepted === true,
               sayCount: controller?.count ?? 0,
               sayBudget: sayOptions.budgetPerTurn,
-              progressNudgeActive: progressNudgeStanding.has(event.sessionID),
+              progressNudgeActive: Boolean(standingReminders.get(event.sessionID)),
               now,
             },
             sayNudgeOptions
           );
           if (!decision.nudge || !decision.message) return;
           sayNudgeStates.set(event.sessionID, recordSayNudge(state, now));
-          void ctx.session.instructions.entry
-            .put({ sessionID: event.sessionID, key: 'say-nudge', value: decision.message })
-            .catch(() => {});
+          putReminder(event.sessionID, 'warn', 'say', decision.message);
           if (verbose) {
             logNudge({
               event: 'say-nudge',
@@ -882,12 +945,41 @@ export default Plugin.define({
     const wallClockMs = normalizeWallClockMs(ctx.options);
     const wallTrackers = new Map<string, WallClockState>();
     const lastToolCallAt = new Map<string, number>();
-    const WALL_KEY = 'progress-wall-clock';
+
+    promptResetHook = await ctx.session.hook("prompt", (event) => {
+      const sessionID = (event as { sessionID?: string }).sessionID;
+      if (!sessionID) return;
+      const now = Date.now();
+      monitors.delete(sessionID);
+      wallTrackers.delete(sessionID);
+      idleTrackers.delete(sessionID);
+      lastSeenProgress.delete(sessionID);
+      stepsSinceProgress.set(sessionID, 0);
+      promptAt.set(sessionID, now);
+      lastToolCallAt.set(sessionID, now);
+      activeToolCounts.delete(sessionID);
+      sayCallsSinceNote.set(sessionID, 0);
+      standingReminders.delete(sessionID);
+      void ctx.session.instructions.entry
+        .remove({ sessionID, key: REMINDER_KEY })
+        .catch(() => {});
+    });
 
     // Track per-session tool activity so the wall-clock nudge can tell a
     // working-but-silent agent apart from a session stalled in a provider
     // queue (or abandoned). Always registered, even with strict mode off.
+    const activeToolHook = await ctx.tool.hook('execute.before', (event) => {
+      activeToolCounts.set(
+        event.sessionID,
+        (activeToolCounts.get(event.sessionID) ?? 0) + 1
+      );
+    });
+
     const activityHook = await ctx.tool.hook('execute.after', (event) => {
+      activeToolCounts.set(
+        event.sessionID,
+        Math.max(0, (activeToolCounts.get(event.sessionID) ?? 0) - 1)
+      );
       lastToolCallAt.set(event.sessionID, Date.now());
       // Delegation telemetry: record subagent launches (Dax's general vs
       // explore question, locally and continuously).
@@ -919,9 +1011,7 @@ export default Plugin.define({
           const now = Date.now();
           if (now - (relayHintCooldown.get(event.sessionID) ?? 0) < 90_000) return;
           relayHintCooldown.set(event.sessionID, now);
-          void ctx.session.instructions.entry
-            .put({ sessionID: event.sessionID, key: 'progress-relay-hint', value: relayHintMessage(match) })
-            .catch(() => {});
+          putReminder(event.sessionID, 'info', 'relay', relayHintMessage(match));
           if (verbose) {
             logNudge({ event: 'relay-hint', sessionID: event.sessionID, command: match.slice(0, 120) });
           }
@@ -944,12 +1034,16 @@ export default Plugin.define({
             const sessionEntries = entries.filter((entry) => entry?.sessionId === sessionID);
             observeTransitions(sessionID, sessionEntries);
             const hasActive = sessionEntries.some(
-              (entry) => entry.status === 'running' || entry.status === 'waiting'
+              (entry) =>
+                (entry.status === 'running' || entry.status === 'waiting') &&
+                !entry.dismissed &&
+                !isHealthyWaiting(entry, now, staleAfterMs)
             );
-            const lastProgressAt = sessionEntries.reduce(
-              (max, entry) => Math.max(max, entry.updatedAt ?? 0),
-              0
+            const lastProgressAt = Math.max(
+              sessionEntries.reduce((max, entry) => Math.max(max, entry.updatedAt ?? 0), 0),
+              promptAt.get(sessionID) ?? 0
             );
+            if ((activeToolCounts.get(sessionID) ?? 0) > 0) continue;
             // Progress changed since the last tick ⇒ reset the reminder streak.
             const previousSeen = lastSeenProgress.get(sessionID) ?? 0;
             if (lastProgressAt > previousSeen) lastSeenProgress.set(sessionID, lastProgressAt);
@@ -962,6 +1056,7 @@ export default Plugin.define({
                 lastProgressAt,
                 lastToolCallAt: lastToolCallAt.get(sessionID),
                 now,
+                target: pickTarget(sessionEntries, now),
               },
               { thresholdMs: wallClockMs }
             );
@@ -972,16 +1067,11 @@ export default Plugin.define({
               if (verbose) {
                 logNudge({ event: 'wall-clock', sessionID, ageMinutes: Math.round((now - lastProgressAt) / 60000), activeEntries: sessionEntries.filter((e) => e.status === 'running' || e.status === 'waiting').length });
               }
-              void ctx.session.instructions.entry
-                .put({ sessionID, key: WALL_KEY, value: decision.message })
-                .catch(() => {});
+              putReminder(sessionID, 'warn', 'wall', decision.message);
             } else if (!hasActive || now - lastProgressAt < wallClockMs) {
-              // Clear the standing entry when work is fresh OR when the tree
-              // has no pending entries left; otherwise a finished session
-              // would keep an obsolete "wall clock" instruction in context.
-              void ctx.session.instructions.entry
-                .remove({ sessionID, key: WALL_KEY })
-                .catch(() => {});
+              // Clear only the wall-sourced reminder; never wipe a stricter
+              // standing reminder from another source.
+              clearReminder(sessionID, 'wall');
             }
           }
         } catch (error) {
@@ -1001,6 +1091,8 @@ export default Plugin.define({
       void idleHook?.dispose();
       void promptReminderHook?.dispose();
       void activityHook?.dispose();
+      void activeToolHook?.dispose();
+      void promptResetHook?.dispose();
       void relayHintHook?.dispose();
       void sayNudgeBeforeHook?.dispose();
       void sayNudgeAfterHook?.dispose();

@@ -30,6 +30,7 @@ const {
   resolveSessionScope,
   storageKey,
   upsertProgress,
+  touchProgress,
 } = require('./state-store');
 
 const DEFAULT_MAX_HZ = (() => {
@@ -67,6 +68,26 @@ function safeWrite(stream, chunk) {
 
 function printUsage(mode, stream) {
   const out = stream || process.stdout;
+  if (mode === 'touch') {
+    out.write(
+      [
+        'Usage: progress-touch --id <id> [--detail <text>]',
+        '',
+        'Refresh an existing entry without changing its status, title, or',
+        'progress. Use it during long single-step work so the reminder engine',
+        'knows the task is still live. Multiple ids: repeat --id.',
+        '',
+        'Options:',
+        '  --id <id>            Entry id to touch (repeatable; or PROGRESS_ID)',
+        '  --detail <text>      Optional replacement detail',
+        '  --session <id>       Session scope (or PROGRESS_SESSION_ID / OPENCODE_SESSION_ID)',
+        '  --state-path <path>  Override ~/.opencode-progress-state.json',
+        '  -h, --help           Show this help',
+        '',
+      ].join('\n')
+    );
+    return;
+  }
   if (mode === 'emit') {
     out.write(
       [
@@ -92,6 +113,9 @@ function printUsage(mode, stream) {
         '',
         'Example:',
         '  progress-emit --id build-1 --status done --title "Build" --progress 1',
+        '',
+        'Touch (refresh without progress):',
+        '  progress-touch --id build-1 --detail "still compiling"',
         '',
       ].join('\n')
     );
@@ -294,9 +318,13 @@ function parseArgs(argv) {
     }
 
     switch (arg) {
-      case '--id':
-        opts.id = argv[++i];
+      case '--id': {
+        const next = argv[++i];
+        if (!opts.ids) opts.ids = [];
+        if (next) opts.ids.push(next);
+        opts.id = next;
         break;
+      }
       case '--parent':
       case '--parent-id':
         opts.parentId = argv[++i];
@@ -771,6 +799,26 @@ function main(argv, mode) {
     );
     printUsage(resolvedMode, process.stderr);
     process.exitCode = 2;
+    return;
+  }
+
+  if (resolvedMode === 'touch') {
+    try {
+      const ids = opts.ids && opts.ids.length > 0 ? opts.ids : opts.id ? [opts.id] : [];
+      const result = touchProgress(ids, opts.detail, opts.stateFile, opts.sessionId);
+      for (const entry of result.touched) {
+        process.stdout.write(`[${entry.id}] (${entry.status}) ${entry.title} — touched\n`);
+      }
+      if (result.missing.length > 0) {
+        process.stderr.write(`progress-touch: not found: ${result.missing.join(', ')}\n`);
+        process.exitCode = 1;
+      } else {
+        process.exitCode = 0;
+      }
+    } catch (err) {
+      process.stderr.write(`progress-touch: ${err.message}\n`);
+      process.exitCode = 1;
+    }
     return;
   }
 

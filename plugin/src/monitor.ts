@@ -32,6 +32,13 @@
  * value. The ladder resets on any real progress write.
  */
 
+import {
+  formatAge,
+  formatReminder,
+  isHealthyWaiting,
+  type NudgeTarget,
+} from "./reminders.js";
+
 export type StrictMode = "nudge" | "force" | "off";
 
 export interface MonitorState {
@@ -72,6 +79,11 @@ export interface ObserveInput {
   progressAdvanced?: boolean;
   /** Epoch ms now. */
   now?: number;
+  /**
+   * Logical steps since the last progress write, when the caller counts model
+   * steps. When omitted, the legacy per-tool-call count is used.
+   */
+  stepsSinceProgress?: number;
 }
 
 export interface ObserveOptions {
@@ -178,7 +190,12 @@ export function observeToolCall(
   // activity: reset the staleness clock, the counter, and the escalation
   // ladder.
   const progressed = input.progressAdvanced === true;
-  const callsSinceProgress = progressed ? 0 : monitor.callsSinceProgress + 1;
+  const stepCount = input.stepsSinceProgress;
+  const callsSinceProgress = progressed
+    ? 0
+    : stepCount != null
+      ? Math.max(0, Math.floor(stepCount))
+      : monitor.callsSinceProgress + 1;
   const now = input.now ?? Date.now();
   const lastProgressAt = input.lastProgressAt ?? now;
   const staleNudges = progressed ? 0 : monitor.staleNudges ?? 0;
@@ -232,7 +249,7 @@ export function observeToolCall(
     };
   }
 
-  const count = monitor.count + 1;
+  const count = stepCount != null ? Math.max(0, Math.floor(stepCount)) : monitor.count + 1;
   if (count >= threshold && !monitor.nudged) {
     if (strictMode === 'force' && !monitor.forced) {
       return {
@@ -265,21 +282,42 @@ export function observeToolCall(
  * behind a "context changed and supersedes the previous value" preamble. The
  * payload must still read as a directive if the model skims that wrapper.
  */
-export function silentRunNudge(count: number): string {
-  return `⚠ STRICT MODE — AUTHORITATIVE INSTRUCTION (current; replaces any earlier progress nudge): ${count} consecutive tool calls with no progress entry. Before your next tool call, call the progress tool with status "running", a stable id, and a short title, then keep it current between steps. This is required now — do not continue working silently.`;
+function targetSuffix(target?: NudgeTarget): string {
+  return target ? ` (${target.id} ${target.status} ${formatAge(target.ageMs)})` : "";
+}
+
+export function silentRunNudge(
+  count: number,
+  target?: NudgeTarget,
+  severity: "info" | "warn" | "block" = "warn"
+): string {
+  return formatReminder(
+    severity,
+    `${count} step${count === 1 ? "" : "s"} with no progress entry${targetSuffix(target)}. Next: start or update the tree.`
+  );
 }
 
 /** The stale-progress nudge text (pending tasks, unchanged %). */
-export function staleProgressNudge(callsSinceProgress: number): string {
-  return `⚠ STRICT MODE — ACTION REQUIRED (current instruction, not a status update): ${callsSinceProgress} tool calls since any progress value changed while tasks are still open. Before your next tool call, update the running entries: call progress with a fresh detail and a 0.0–1.0 progress fraction, close finished work with "done"/"error", or mark blocked work "waiting" with a detail. Do not continue silently.`;
+export function staleProgressNudge(callsSinceProgress: number, target?: NudgeTarget): string {
+  return formatReminder(
+    "warn",
+    `${callsSinceProgress} step${callsSinceProgress === 1 ? "" : "s"} without a progress change${targetSuffix(target)}. Next: update detail/progress or close it.`
+  );
 }
 
 /**
  * Escalated stale-progress message: sent as a synthetic turn input, not a
  * context entry, after the entry-based reminders were ignored.
  */
-export function staleProgressEscalation(callsSinceProgress: number, staleNudges: number): string {
-  return `⚠ STRICT MODE ESCALATION — direct instruction, not context: progress reminder #${staleNudges}, and the task tree is still unchanged after ${callsSinceProgress} tool calls. Stop before your next tool call and update it now: for each running entry call progress with fresh detail and a 0.0–1.0 fraction, close finished work with "done"/"error", or mark blocked work "waiting". Do not resume work until the tree reflects reality.`;
+export function staleProgressEscalation(
+  callsSinceProgress: number,
+  staleNudges: number,
+  target?: NudgeTarget
+): string {
+  return formatReminder(
+    "block",
+    `progress reminder #${staleNudges}: tree unchanged after ${callsSinceProgress} steps${targetSuffix(target)}. Update or close it now.`
+  );
 }
 
 // --- Relay hint (pre-flight, before the command runs) ---------------------
@@ -305,12 +343,7 @@ export function relayHintFor(command: string | null | undefined): string | null 
 
 export function relayHintMessage(command: string): string {
   const shown = command.length > 90 ? `${command.slice(0, 87)}…` : command;
-  return [
-    `⚠ This looks long-running — wrap it in the out-of-band relay so the UI stays live at zero token cost:`,
-    `  progress-relay --id <id> -- ${shown}`,
-    `  # or: ${shown} | progress-relay --id <id>`,
-    `Wrap mode maps the exit code to done/error. Run it in the background and keep working.`,
-  ].join("\n");
+  return `Long command — next time wrap it: progress-relay --id <id> -- ${shown} (or pipe it). Exit code maps to done/error.`;
 }
 
 // --- Idle reminder (turn-end nudge) --------------------------------------
@@ -319,6 +352,7 @@ export interface IdleEntry {
   id: string;
   title?: string;
   status: string;
+  detail?: string | null;
   dismissed?: { at: number } | null;
   /** Epoch ms of the entry's last write; relay ticks keep this fresh. */
   updatedAt?: number;
@@ -370,6 +404,7 @@ export function idleReminder(
       (entry) =>
         (entry.status === "running" || entry.status === "waiting" || entry.status === "pending") &&
         !entry.dismissed &&
+        !isHealthyWaiting(entry, now, staleAfterMs) &&
         (entry.updatedAt == null || now - entry.updatedAt >= staleAfterMs)
     )
     .map((entry) => `${entry.id} (${entry.status})`)
@@ -386,11 +421,12 @@ export function idleReminder(
     return { action: "none", signature, lastAt: tracker.lastAt, count };
   }
 
-  const message = [
-    `⚠ IDLE WITH OPEN TASKS (${open.length}): ${open.join(", ")}.`,
-    `You are about to go idle, but these progress entries are still running/waiting.`,
-    `Close what is finished (status "done" or "error"), mark genuinely blocked work "waiting" with a detail, or continue the work now. Do not leave stale trees behind.`,
-  ].join(" ");
+  const shown = open.slice(0, 4).join(", ");
+  const suffix = open.length > 4 ? ` +${open.length - 4} more` : "";
+  const message = formatReminder(
+    "block",
+    `turn ending with ${open.length} open task${open.length === 1 ? "" : "s"}: ${shown}${suffix}. Close finished work or continue.`
+  );
 
   return { action: "remind", signature, lastAt: now, count: count + 1, message };
 }
@@ -416,6 +452,8 @@ export interface WallClockInput {
   lastToolCallAt?: number;
   /** Epoch ms now. */
   now?: number;
+  /** The entry to name in the reminder. */
+  target?: NudgeTarget;
 }
 
 export interface WallClockOptions {
@@ -480,12 +518,10 @@ export function wallClockNudge(
   if (age < thresholdMs) return { action: "none", lastAt: state.lastAt, streak };
   if (now - state.lastAt < cooldownMs) return { action: "none", lastAt: state.lastAt, streak };
 
-  const minutes = Math.max(1, Math.round(age / 60_000));
-  const message = [
-    `⚠ WALL CLOCK — ACTION REQUIRED (current instruction, not a status update): it has been ~${minutes} minute${minutes === 1 ? "" : "s"} since any progress value changed, and you still have open tasks.`,
-    `Before your next tool call, update the tracker (fresh detail, a 0.0–1.0 progress fraction, or close what is finished).`,
-    `If you are waiting on a long-running command, route it through the out-of-band relay so telemetry stays live without polling: progress-relay --id <id> -- <cmd>.`,
-  ].join(" ");
+  const message = formatReminder(
+    "warn",
+    `no progress for ${formatAge(age)}${targetSuffix(input.target)}. Next: update detail/progress or close it; wrap long commands in the relay.`
+  );
 
   return { action: "remind", lastAt: now, streak: streak + 1, message };
 }

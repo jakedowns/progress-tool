@@ -36,6 +36,7 @@ const path = require('path');
 const {
   upsertProgress,
   upsertManyProgress,
+  touchProgress,
   ensureStateFile,
   readState,
   resolveStatePath,
@@ -63,7 +64,7 @@ function treeHasChildren(parentId) {
   }
 }
 
-const SERVER_VERSION = '2.11.0';
+const SERVER_VERSION = '2.12.0';
 const VALID_STATUSES = ['pending', 'running', 'waiting', 'done', 'error'];
 
 const SERVER_INSTRUCTIONS = [
@@ -310,6 +311,42 @@ function handleToolsList(id) {
         },
         annotations: {
           title: 'Progress',
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+      },
+      {
+        name: 'progress_touch',
+        description:
+          'Refresh an existing progress entry (or several) without changing status, title, progress, or parent. Use it for long single-step work so the staleness/reminder engine knows you are still working, instead of inventing a progress fraction. Bumps updatedAt and optionally replaces detail. Pass exactly one of id / ids.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            id: {
+              type: 'string',
+              description: 'Entry id to touch. Use this or ids[], not both.',
+            },
+            ids: {
+              type: 'array',
+              maxItems: 50,
+              items: { type: 'string' },
+              description: 'Entry ids to touch in one atomic write (max 50). Use this or id, not both.',
+            },
+            detail: {
+              type: 'string',
+              description: 'Optional replacement detail. Omit to keep the current detail.',
+            },
+            sessionId: {
+              type: 'string',
+              description: 'Optional session override; resolved from the environment by default.',
+            },
+          },
+          additionalProperties: false,
+        },
+        annotations: {
+          title: 'Progress Touch',
           readOnlyHint: false,
           destructiveHint: false,
           idempotentHint: true,
@@ -575,6 +612,66 @@ function handleBulkProgress(id, args) {
   toolOk(id, text + affirmation(created[0]?.id));
 }
 
+function handleTouchCall(id, args) {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) {
+    toolError(id, 'Invalid arguments: expected an object.');
+    return;
+  }
+  const hasId = typeof args.id === 'string' && args.id.trim() !== '';
+  const hasIds = Array.isArray(args.ids);
+  if (hasId === hasIds) {
+    toolError(id, 'Pass exactly one of id (string) or ids (array).');
+    return;
+  }
+  let ids;
+  if (hasIds) {
+    if (args.ids.length === 0) {
+      toolError(id, 'ids[] must be a non-empty array.');
+      return;
+    }
+    if (args.ids.length > 50) {
+      toolError(id, `ids[] too large: ${args.ids.length} (max 50).`);
+      return;
+    }
+    if (!args.ids.every((value) => typeof value === 'string' && value.trim())) {
+      toolError(id, 'ids[] must contain non-empty strings.');
+      return;
+    }
+    ids = args.ids.map((value) => value.trim());
+  } else {
+    ids = [args.id.trim()];
+  }
+  if (args.detail !== undefined && args.detail !== null && typeof args.detail !== 'string') {
+    toolError(id, 'Invalid argument: detail must be a string.');
+    return;
+  }
+  if (args.sessionId !== undefined && args.sessionId !== null && typeof args.sessionId !== 'string') {
+    toolError(id, 'Invalid argument: sessionId must be a string.');
+    return;
+  }
+
+  let result;
+  try {
+    result = touchProgress(ids, args.detail, resolveStatePath(), args.sessionId);
+  } catch (err) {
+    toolError(id, err.message);
+    return;
+  }
+
+  const touched = result.touched.map(
+    (entry) => `- [${entry.id}] (${entry.status}) ${entry.title}`
+  );
+  const lines = [];
+  if (touched.length > 0) {
+    lines.push(`Touched ${touched.length} progress ${touched.length === 1 ? 'entry' : 'entries'} (status and progress unchanged):`);
+    lines.push(...touched);
+  }
+  if (result.missing.length > 0) {
+    lines.push(`Not found: ${result.missing.join(', ')} (nothing was invented; start it with the progress tool first).`);
+  }
+  toolOk(id, lines.join('\n') + affirmation(ids[0]));
+}
+
 function handleListCall(id, args) {
   if (args && (typeof args !== 'object' || Array.isArray(args))) {
     toolError(id, 'Invalid arguments: expected an object.');
@@ -706,7 +803,7 @@ function handleRequest(req) {
 
       case 'tools/call': {
         const { name, arguments: args } = params || {};
-        if (name !== 'progress' && name !== 'list') {
+        if (name !== 'progress' && name !== 'progress_touch' && name !== 'list') {
           sendError(id, -32601, `Unknown tool: ${name}`);
           break;
         }
@@ -720,6 +817,10 @@ function handleRequest(req) {
         }
         if (name === 'list') {
           handleListCall(id, callArgs);
+          break;
+        }
+        if (name === 'progress_touch') {
+          handleTouchCall(id, callArgs);
           break;
         }
         handleProgressCall(id, callArgs);
@@ -798,6 +899,8 @@ function printHelp() {
       '                                        Stream command output to state',
       '  node index.js emit --id <id> [--status ...]',
       '                                        Emit one milestone',
+      '  node index.js touch --id <id> [--detail ...]',
+      '                                        Refresh without changing status',
       '  node index.js --version               Print version',
       '',
       'Relay options: relay --help',
@@ -811,7 +914,7 @@ function main() {
   const command = argv[0];
   const invokedAs = path.basename(process.argv[1] || '').replace(/\.(js|cjs)$/i, '');
 
-  if (command === 'relay' || command === 'emit') {
+  if (command === 'relay' || command === 'emit' || command === 'touch') {
     require('./relay').main(argv.slice(1), command);
     return;
   }
@@ -828,6 +931,11 @@ function main() {
 
   if (!command && /emit/i.test(invokedAs)) {
     require('./relay').main(argv, 'emit');
+    return;
+  }
+
+  if (!command && /touch/i.test(invokedAs)) {
+    require('./relay').main(argv, 'touch');
     return;
   }
 

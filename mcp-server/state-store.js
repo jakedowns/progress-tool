@@ -721,6 +721,41 @@ function upsertManyProgress(inputs, stateFile = DEFAULT_STATE_FILE) {
   }, stateFile);
 }
 
+/**
+ * Refresh one or more entries without changing their status, title,
+ * progress, parent, or timestamps other than updatedAt. This is the cheap
+ * "still working" acknowledgement: it resets staleness clocks and nudge
+ * counters without inventing progress.
+ */
+function touchProgress(ids, detail, stateFile = DEFAULT_STATE_FILE, sessionId) {
+  const list = (Array.isArray(ids) ? ids : [ids])
+    .filter((id) => typeof id === 'string' && id.trim())
+    .map((id) => id.trim());
+  if (list.length === 0) throw new Error('touchProgress requires at least one id');
+  const sessionMap = readSessionMap();
+  const rawSessionId = resolveSessionId(sessionId);
+  const resolvedSessionId = resolveParentSession(rawSessionId, sessionMap);
+  const now = Date.now();
+  return mutateState((state) => {
+    const touched = [];
+    const missing = [];
+    for (const id of list) {
+      const key = storageKey(id, resolvedSessionId);
+      const entry = state.entries[key];
+      if (!entry) {
+        missing.push(id);
+        continue;
+      }
+      entry.updatedAt = now;
+      if (detail !== undefined && detail !== null) {
+        entry.detail = normalizeProgressText(detail);
+      }
+      touched.push({ ...entry });
+    }
+    return { touched, missing };
+  }, stateFile, resolvedSessionId);
+}
+
 function clearProgress(id, stateFile = DEFAULT_STATE_FILE, sessionId) {
   const resolvedSessionId = resolveSessionScope(sessionId);
   const key = storageKey(id, resolvedSessionId);
@@ -882,6 +917,7 @@ module.exports = {
   mutateState,
   upsertProgress,
   upsertManyProgress,
+  touchProgress,
   clearProgress,
   getAllProgress,
   buildTree,

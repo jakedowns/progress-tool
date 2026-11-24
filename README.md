@@ -19,8 +19,10 @@ without looking dead, plus a **zero-token-burn out-of-band relay** so the agent
 never has to poll `stdout` just to keep the UI alive. Token cost scales with
 milestones, not with task duration.
 
-Two MCP tools back this: `progress` (write) and `list` (read-only companion:
-your session's trees as text, with dismissed entries hidden). **The tree is the
+Three MCP tools back this: `progress` (write), `progress_touch` (refresh an
+entry's timestamp/detail without changing its status or progress), and `list`
+(read-only companion: your session's trees as text, with dismissed entries
+hidden). **The tree is the
 glance-able layer above the transcript** — thought traces and command output are
 a wall of text; the rollup is the live view of what is happening, what is
 blocked, and what is next.
@@ -29,7 +31,7 @@ Implements the [Agent Progress Tool proposal](https://gist.github.com/jakedowns/
 for OpenCode 2, and is written as a portable reference implementation any
 harness can copy or adapt.
 
-**Versions:** MCP server `2.11.0` · OpenCode plugin `2.21.2`
+**Versions:** MCP server `2.12.0` · OpenCode plugin `2.22.0`
 
 > **Advanced docs:** [schema, relay internals, state store, architecture, all
 > options, file map →](./README-advanced.md)

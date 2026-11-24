@@ -1278,3 +1278,97 @@ test('emit accepts pending and roll-up treats it as open work', () => {
   const root = tree.find((node) => node.id === 'plan');
   assert.equal(root.status, 'pending', 'a pending child keeps the parent pending');
 });
+
+test('touch refreshes an entry without changing status, title, progress, or parent', () => {
+  const { file } = tempState();
+  const created = run(
+    ['emit', '--id', 'touch-1', '--status', 'running', '--title', 'Long investigation', '--detail', 'old detail', '--progress', '0.4', '--parent', 'root'],
+    { state: file }
+  );
+  assert.equal(created.status, 0, created.stderr);
+
+  const before = readState(file).entries['touch-1'];
+  const pinned = { ...before, updatedAt: 1, statusUpdatedAt: 2 };
+  fs.writeFileSync(file, JSON.stringify({ version: 1, entries: { 'touch-1': pinned } }));
+
+  const touched = run(['touch', '--id', 'touch-1', '--detail', 'still compiling'], { state: file });
+  assert.equal(touched.status, 0, touched.stderr);
+  assert.match(touched.stdout, /touched/);
+
+  const after = readState(file).entries['touch-1'];
+  assert.equal(after.id, 'touch-1');
+  assert.equal(after.status, 'running', 'status unchanged');
+  assert.equal(after.title, 'Long investigation', 'title unchanged');
+  assert.equal(after.progress, 0.4, 'progress unchanged');
+  assert.equal(after.parentId, 'root', 'parent unchanged');
+  assert.equal(after.detail, 'still compiling', 'detail replaced');
+  assert.ok(after.updatedAt > 1, 'updatedAt bumped');
+  assert.equal(after.statusUpdatedAt, 2, 'statusUpdatedAt unchanged');
+});
+
+test('touch without --detail keeps the existing detail and reports missing ids', () => {
+  const { file } = tempState();
+  run(['emit', '--id', 'touch-2', '--status', 'waiting', '--title', 'Blocked', '--detail', 'waiting on review'], { state: file });
+
+  const kept = run(['touch', '--id', 'touch-2'], { state: file });
+  assert.equal(kept.status, 0, kept.stderr);
+  assert.equal(readState(file).entries['touch-2'].detail, 'waiting on review');
+
+  const missing = run(['touch', '--id', 'nope'], { state: file });
+  assert.equal(missing.status, 1);
+  assert.match(missing.stderr, /not found: nope/);
+});
+
+test('progress_touch MCP tool: id/ids exclusivity and unchanged lifecycle', async () => {
+  const { file } = tempState();
+  run(['emit', '--id', 'mcp-touch', '--status', 'running', '--title', 'MCP touch', '--progress', '0.25'], { state: file });
+  fs.writeFileSync(
+    file,
+    JSON.stringify({
+      version: 1,
+      entries: { 'mcp-touch': { ...readState(file).entries['mcp-touch'], updatedAt: 1 } },
+    })
+  );
+
+  const child = spawn(process.execPath, [INDEX], {
+    env: stateEnv(file),
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', (chunk) => (stdout += chunk));
+  child.stderr.on('data', (chunk) => (stderr += chunk));
+
+  const requests = [
+    { jsonrpc: '2.0', id: 1, method: 'initialize', params: {} },
+    { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'progress_touch', arguments: { id: 'mcp-touch', detail: 'still going' } } },
+    { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'progress_touch', arguments: { id: 'mcp-touch', ids: ['mcp-touch'] } } },
+    { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'progress_touch', arguments: { id: 'missing' } } },
+  ];
+  for (const request of requests) child.stdin.write(JSON.stringify(request) + '\n');
+  child.stdin.end();
+  await new Promise((resolve, reject) => {
+    child.on('error', reject);
+    child.on('close', resolve);
+  });
+
+  const responses = stdout.split('\n').filter(Boolean).map((line) => JSON.parse(line));
+  assert.equal(stderr, '');
+  const ok = responses.find((r) => r.id === 2);
+  assert.equal(ok.result.isError, false);
+  assert.match(ok.result.content[0].text, /status and progress unchanged/);
+
+  const both = responses.find((r) => r.id === 3);
+  assert.equal(both.result.isError, true);
+  assert.match(both.result.content[0].text, /exactly one of id/);
+
+  const missing = responses.find((r) => r.id === 4);
+  assert.equal(missing.result.isError, false, 'missing ids are reported, not fatal');
+  assert.match(missing.result.content[0].text, /Not found: missing/);
+
+  const entry = readState(file).entries['mcp-touch'];
+  assert.equal(entry.status, 'running');
+  assert.equal(entry.progress, 0.25);
+  assert.equal(entry.detail, 'still going');
+  assert.ok(entry.updatedAt > 1);
+});

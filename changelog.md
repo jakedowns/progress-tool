@@ -223,6 +223,48 @@ Shipped since `mcp-server@2.10.2`:
 - **Store and mirror support** for cleared/dismissed entries plus expanded MCP
   smoke and task-list suites (**57 tests**).
 
+## 2.22.0 — quieter reminders and `progress_touch` (unreleased)
+
+Closes the 13-point nudge feedback from a 2026-11-24 session. Reminder engine
+shared by strict, wall-clock, idle, relay, and `say` nudges.
+
+### Added
+
+- **`progress_touch` MCP tool + `progress-touch` CLI.** Refreshes one entry or
+  `ids[]` without changing status, title, progress, or parent; bumps
+  `updatedAt` and optionally replaces `detail`. Use it for long single-step
+  work instead of inventing a progress fraction. Missing ids are reported, not
+  fabricated, and `progress_touch` still counts as progress for step resets.
+- **Severity tiers.** Reminders render `[info]`, `[warn]`, or `[block]`.
+  `info`/`warn` ride the standing context entry; only `block` may admit a
+  synthetic message (idle-with-open-tasks and explicit escalation).
+- **Healthy waiting.** A `waiting` entry with a non-empty detail touched within
+  `staleAfterMs` is blocked on something external, so strict/idle/wall nudges
+  skip it. Stale or detail-less waiting still counts.
+- **Model-step counting.** `strictThreshold` and stale detection count logical
+  model steps (context hook), so parallel tool calls in one step count once.
+  Any progress write or touch resets the counter; a new prompt resets all
+  per-turn monitors and timers.
+- **One standing reminder key.** `progress-reminder` replaces the per-nudge
+  keys. Priority is `block > warn > info`; identical rendered text is deduped,
+  and only compliance, a new prompt, or a higher tier overwrites it.
+- **In-flight suppression.** Wall-clock reminders pause while a tool is
+  executing or a background job is active; `warn`/`info` do not nag a working
+  agent.
+- **Compact copy.** Reminders are one line naming a target id and one action
+  (`wr03 (running, 12m) — update detail/progress or close it`), with ages
+  measured from `max(lastProgressAt, promptAt)` and clamped (`> 2h`) after a
+  resumed session.
+- **Docs.** One-progress-call-per-execute plus `entries[]` batching guidance is
+  in the injected progress rules and both READMEs.
+
+### Tests
+
+- Plugin: **208** tests (new reminder-engine suite covers severity, dedupe,
+  healthy waiting, target selection, model steps, and compaction).
+- MCP: **60** tests (touch preserves lifecycle fields, updates detail, reports
+  missing ids, and enforces `id`/`ids` exclusivity).
+
 ## Unreleased — theme previews and GUI tree branches
 
 - **Theme preset switcher.** **Progress: switch tree theme** now presents

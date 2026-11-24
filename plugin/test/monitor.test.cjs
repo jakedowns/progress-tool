@@ -319,7 +319,8 @@ test('relay hint: detects long commands, skips relays and quick commands', () =>
   assert.equal(relayHintFor(''), null);
 
   assert.match(relayHintMessage('npm test'), /progress-relay --id <id> -- npm test/);
-  assert.match(relayHintMessage('npm test'), /exit code to done\/error/);
+  assert.match(relayHintMessage('npm test'), /^Long command/);
+  assert.match(relayHintMessage('npm test'), /Exit code maps to done\/error/);
 });
 
 test('normalizers and message texts', () => {
@@ -338,15 +339,19 @@ test('normalizers and message texts', () => {
   assert.equal(normalizeStaleEscalateAfter({ staleEscalateAfter: -1 }), 3, 'invalid → default');
   assert.equal(normalizeStaleEscalateAfter({ staleEscalateAfter: 999 }), 50, 'capped');
 
-  assert.match(silentRunNudge(4), /STRICT MODE — AUTHORITATIVE INSTRUCTION/);
-  assert.match(silentRunNudge(4), /4 consecutive tool calls/);
-  assert.match(staleProgressNudge(7), /STRICT MODE — ACTION REQUIRED/);
-  assert.match(staleProgressNudge(7), /7 tool calls since any progress value changed/);
+  assert.match(silentRunNudge(4), /^\[warn\] /);
+  assert.match(silentRunNudge(4), /4 steps with no progress entry/);
+  assert.match(silentRunNudge(1), /1 step with no progress entry/);
+  assert.match(staleProgressNudge(7), /^\[warn\] /);
+  assert.match(staleProgressNudge(7), /7 steps without a progress change/);
   assert.doesNotMatch(staleProgressNudge(7), /any updates\?/);
-  assert.match(staleProgressNudge(7), /Before your next tool call/);
-  assert.match(staleProgressEscalation(20, 4), /ESCALATION — direct instruction, not context/);
+  assert.match(staleProgressNudge(7), /update detail\/progress or close it/);
+  const target = { id: 'wr03', status: 'running', ageMs: 12 * 60_000 };
+  assert.match(staleProgressNudge(7, target), /wr03 running 12m/);
+  assert.match(staleProgressNudge(7, target), /update detail\/progress or close it/);
+  assert.match(staleProgressEscalation(20, 4), /^\[block\] /);
   assert.match(staleProgressEscalation(20, 4), /progress reminder #4/);
-  assert.match(staleProgressEscalation(20, 4), /still unchanged after 20 tool calls/);
+  assert.match(staleProgressEscalation(20, 4), /tree unchanged after 20 steps/);
 });
 
 test('idle reminder: fires for open entries, skips dismissed/closed, names them', () => {
@@ -359,7 +364,7 @@ test('idle reminder: fires for open entries, skips dismissed/closed, names them'
   ];
   const decision = idleReminder({ signature: '', lastAt: 0, count: 0 }, entries, { now });
   assert.equal(decision.action, 'remind');
-  assert.match(decision.message, /IDLE WITH OPEN TASKS \(2\)/);
+  assert.match(decision.message, /^\[block\] turn ending with 2 open tasks/);
   assert.match(decision.message, /build \(running\)/);
   assert.match(decision.message, /docs \(waiting\)/);
   assert.doesNotMatch(decision.message, /closed/);
@@ -432,8 +437,9 @@ test('wall-clock: fires only with open tasks, after the threshold, with cooldown
     opts
   );
   assert.equal(decision.action, 'remind');
-  assert.match(decision.message, /~20 minutes/);
-  assert.match(decision.message, /progress-relay --id <id>/);
+  assert.match(decision.message, /^\[warn\] no progress for 20m/);
+  assert.match(decision.message, /update detail\/progress or close it/);
+  assert.match(decision.message, /relay/);
 
   assert.equal(
     wallClockNudge(
