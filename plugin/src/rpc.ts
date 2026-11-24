@@ -225,6 +225,27 @@ export const ProgressRpc = Rpc.define({
         additionalProperties: false,
       },
     },
+    setTreeTheme: {
+      input: {
+        type: "object",
+        properties: {
+          theme: { type: "string", enum: ["default", "compact"] },
+        },
+        required: ["theme"],
+        additionalProperties: false,
+      },
+      output: {
+        type: "object",
+        properties: {
+          ok: { type: "boolean" },
+          theme: { type: "string", enum: ["default", "compact"] },
+          file: { type: "string" },
+          error: { type: "string" },
+        },
+        required: ["ok", "theme"],
+        additionalProperties: false,
+      },
+    },
   },
   events: {
     updated: {

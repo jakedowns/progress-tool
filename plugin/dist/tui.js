@@ -440,6 +440,11 @@ function toggleTaskListMode(fallback = "ui", stateFile = stateFilePath()) {
   return next;
 }
 
+// src/tree-theme.ts
+import fs3 from "node:fs";
+import os2 from "node:os";
+import path3 from "node:path";
+
 // src/tree.ts
 var STATUS_ORDER = {
   error: 4,
@@ -572,6 +577,21 @@ function dismissedMap(entries) {
 function normalizeTreeTheme(value) {
   return value === "compact" ? "compact" : "default";
 }
+var TREE_THEME_CHOICES = [
+  {
+    value: "default",
+    title: "Default",
+    description: "Progress bars, started line, configurable detail lines"
+  },
+  {
+    value: "compact",
+    title: "Compact",
+    description: "No bars, one detail line, percentage and hidden-child count"
+  }
+];
+function treeThemeLabel(theme) {
+  return theme === "compact" ? "Compact" : "Default";
+}
 function compactTreeSuffix(progress, hiddenChildren = 0) {
   const parts = [];
   const pct = progressLabel(progress);
@@ -652,6 +672,299 @@ function barParts(progress, options = {}) {
 }
 function progressLabel(progress) {
   return progress == null ? null : `${Math.round(progress * 100)}%`;
+}
+
+// src/tree-theme.ts
+var PROGRESS_PLUGIN_NAME = "@jakedowns/progress-tool-opencode-plugin";
+function globalConfigDir(env = process.env) {
+  const home = env.HOME || env.USERPROFILE || os2.homedir();
+  const xdg = env.XDG_CONFIG_HOME || path3.join(home, ".config");
+  return path3.join(xdg, "opencode");
+}
+function treeThemeConfigCandidates(directory, env = process.env) {
+  const candidates = [];
+  if (directory) {
+    candidates.push(path3.join(directory, "opencode.json"));
+    candidates.push(path3.join(directory, "opencode.jsonc"));
+  }
+  const global = globalConfigDir(env);
+  candidates.push(path3.join(global, "opencode.json"));
+  candidates.push(path3.join(global, "opencode.jsonc"));
+  return [...new Set(candidates)];
+}
+function isProgressPluginPackage(ref, baseDir = process.cwd()) {
+  if (typeof ref !== "string" || !ref.trim()) return false;
+  if (ref.includes("progress-tool-opencode-plugin")) return true;
+  if (ref.startsWith(".") || path3.isAbsolute(ref)) {
+    const dir = path3.isAbsolute(ref) ? ref : path3.resolve(baseDir, ref);
+    try {
+      const pkg = JSON.parse(fs3.readFileSync(path3.join(dir, "package.json"), "utf8"));
+      return pkg?.name === PROGRESS_PLUGIN_NAME;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+function isWhitespace(ch) {
+  return ch === " " || ch === "	" || ch === "\n" || ch === "\r";
+}
+function isDelimiter(ch) {
+  return isWhitespace(ch) || ch === "{" || ch === "}" || ch === "[" || ch === "]" || ch === ":" || ch === "," || ch === '"';
+}
+function tokenize(input) {
+  const tokens = [];
+  const length = input.length;
+  let i = 0;
+  while (i < length) {
+    const ch = input[i];
+    if (isWhitespace(ch)) {
+      i += 1;
+      continue;
+    }
+    if (ch === "/" && input[i + 1] === "/") {
+      i += 2;
+      while (i < length && input[i] !== "\n") i += 1;
+      continue;
+    }
+    if (ch === "/" && input[i + 1] === "*") {
+      i += 2;
+      while (i < length && !(input[i] === "*" && input[i + 1] === "/")) i += 1;
+      i = Math.min(length, i + 2);
+      continue;
+    }
+    if (ch === '"') {
+      const start2 = i;
+      i += 1;
+      let value = "";
+      while (i < length) {
+        const c = input[i];
+        if (c === "\\") {
+          const esc = input[i + 1];
+          if (esc === '"' || esc === "\\" || esc === "/") {
+            value += esc;
+            i += 2;
+          } else if (esc === "b") {
+            value += "\b";
+            i += 2;
+          } else if (esc === "f") {
+            value += "\f";
+            i += 2;
+          } else if (esc === "n") {
+            value += "\n";
+            i += 2;
+          } else if (esc === "r") {
+            value += "\r";
+            i += 2;
+          } else if (esc === "t") {
+            value += "	";
+            i += 2;
+          } else if (esc === "u") {
+            value += String.fromCharCode(parseInt(input.slice(i + 2, i + 6), 16));
+            i += 6;
+          } else {
+            value += esc ?? "";
+            i += 2;
+          }
+        } else if (c === '"') {
+          i += 1;
+          break;
+        } else {
+          value += c;
+          i += 1;
+        }
+      }
+      tokens.push({ type: "string", value, start: start2, end: i });
+      continue;
+    }
+    if ("{}[]:,".includes(ch)) {
+      tokens.push({ type: "punct", value: ch, start: i, end: i + 1 });
+      i += 1;
+      continue;
+    }
+    const start = i;
+    while (i < length) {
+      if (isDelimiter(input[i])) break;
+      if (input[i] === "/" && (input[i + 1] === "/" || input[i + 1] === "*")) break;
+      i += 1;
+    }
+    if (i === start) {
+      i += 1;
+      continue;
+    }
+    tokens.push({ type: "literal", value: input.slice(start, i), start, end: i });
+  }
+  return tokens;
+}
+function parseValue(tokens, index) {
+  const token = tokens[index];
+  if (!token) throw new Error("unexpected end of config");
+  if (token.type === "punct" && token.value === "{") {
+    const members = [];
+    let i = index + 1;
+    while (i < tokens.length) {
+      const next = tokens[i];
+      if (next.type === "punct" && next.value === "}") {
+        i += 1;
+        return { node: { kind: "object", start: token.start, end: next.end, members }, next: i };
+      }
+      if (next.type !== "string") throw new Error("expected an object key");
+      const key = next.value;
+      i += 1;
+      if (!(tokens[i]?.type === "punct" && tokens[i].value === ":")) {
+        throw new Error("expected ':'");
+      }
+      i += 1;
+      const parsed = parseValue(tokens, i);
+      members.push({ key, value: parsed.node });
+      i = parsed.next;
+      if (tokens[i]?.type === "punct" && tokens[i].value === ",") i += 1;
+    }
+    throw new Error("unterminated object");
+  }
+  if (token.type === "punct" && token.value === "[") {
+    const items = [];
+    let i = index + 1;
+    while (i < tokens.length) {
+      const next = tokens[i];
+      if (next.type === "punct" && next.value === "]") {
+        i += 1;
+        return { node: { kind: "array", start: token.start, end: next.end, items }, next: i };
+      }
+      const parsed = parseValue(tokens, i);
+      items.push(parsed.node);
+      i = parsed.next;
+      if (tokens[i]?.type === "punct" && tokens[i].value === ",") i += 1;
+    }
+    throw new Error("unterminated array");
+  }
+  if (token.type === "string") {
+    return {
+      node: {
+        kind: "string",
+        start: token.start,
+        end: token.end,
+        value: token.value
+      },
+      next: index + 1
+    };
+  }
+  if (token.type === "literal") {
+    return {
+      node: { kind: "literal", start: token.start, end: token.end, value: token.value },
+      next: index + 1
+    };
+  }
+  throw new Error("unexpected token");
+}
+function memberOf(node, key) {
+  return node.members?.find((member) => member.key === key);
+}
+function pluginRefOf(node) {
+  if (node.kind === "string") return node.value;
+  if (node.kind !== "object") return void 0;
+  const pkg = memberOf(node, "package");
+  return pkg?.value.kind === "string" ? pkg.value.value : void 0;
+}
+function insertObjectProperty(text, node, property, value) {
+  const object = node;
+  const close = object.end - 1;
+  let cursor = close;
+  while (cursor > object.start && isWhitespace(text[cursor - 1])) cursor -= 1;
+  const hasMembers = (object.members?.length ?? 0) > 0;
+  const trailingComma = cursor > object.start && text[cursor - 1] === ",";
+  const prefix = trailingComma ? " " : hasMembers ? ", " : "";
+  const insert = `${prefix}${JSON.stringify(property)}: ${value}`;
+  return text.slice(0, cursor) + insert + text.slice(cursor);
+}
+function replaceSpan(text, start, end, replacement) {
+  return text.slice(0, start) + replacement + text.slice(end);
+}
+function writeThemeIntoEntry(text, theme, entry) {
+  const themeLiteral = JSON.stringify(theme);
+  const options = memberOf(entry, "options");
+  if (options?.value.kind === "object") {
+    const current = memberOf(options.value, "treeTheme");
+    if (current) {
+      return replaceSpan(text, current.value.start, current.value.end, themeLiteral);
+    }
+    return insertObjectProperty(text, options.value, "treeTheme", themeLiteral);
+  }
+  if (options) {
+    return replaceSpan(
+      text,
+      options.value.start,
+      options.value.end,
+      `{ "treeTheme": ${themeLiteral} }`
+    );
+  }
+  return insertObjectProperty(text, entry, "options", `{ "treeTheme": ${themeLiteral} }`);
+}
+function updateTreeThemeInConfig(text, theme, options) {
+  if (text.charCodeAt(0) === 65279) {
+    const updated = updateTreeThemeInConfig(text.slice(1), theme, options);
+    return updated === void 0 ? void 0 : `\uFEFF${updated}`;
+  }
+  let root;
+  try {
+    const parsed = parseValue(tokenize(text), 0);
+    root = parsed.node;
+  } catch {
+    return void 0;
+  }
+  if (root.kind !== "object") return void 0;
+  const plugins = memberOf(root, "plugins");
+  if (!plugins || plugins.value.kind !== "array" || !plugins.value.items) return void 0;
+  for (const item of plugins.value.items) {
+    const ref = pluginRefOf(item);
+    if (typeof ref !== "string" || !options.matches(ref)) continue;
+    if (item.kind === "object") {
+      return writeThemeIntoEntry(text, theme, item);
+    }
+    if (item.kind === "string") {
+      return replaceSpan(
+        text,
+        item.start,
+        item.end,
+        `{ "package": ${JSON.stringify(item.value ?? "")}, "options": { "treeTheme": ${JSON.stringify(theme)} } }`
+      );
+    }
+  }
+  return void 0;
+}
+function atomicWrite(file, body) {
+  const stat = fs3.statSync(file);
+  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+  fs3.writeFileSync(tmp, body, { encoding: "utf8", mode: stat.mode });
+  fs3.renameSync(tmp, file);
+}
+function writeTreeThemeToConfig(value, options = {}) {
+  const theme = normalizeTreeTheme(value);
+  const env = options.env ?? process.env;
+  const candidates = treeThemeConfigCandidates(options.directory, env);
+  for (const file of candidates) {
+    let text;
+    try {
+      text = fs3.readFileSync(file, "utf8");
+    } catch {
+      continue;
+    }
+    const updated = updateTreeThemeInConfig(text, theme, {
+      matches: (ref) => isProgressPluginPackage(ref, path3.dirname(file))
+    });
+    if (updated === void 0) continue;
+    try {
+      if (updated !== text) atomicWrite(file, updated);
+      return { ok: true, theme, file };
+    } catch (error) {
+      return { ok: false, theme, file, error: String(error) };
+    }
+  }
+  return {
+    ok: false,
+    theme,
+    error: "no OpenCode config entry found for this plugin"
+  };
 }
 
 // src/tui-view.ts
@@ -886,7 +1199,10 @@ var pollers = 0;
 var timer;
 var barOptions = {};
 var visibilityOptions = {};
-var treeTheme = "default";
+var themeState = {
+  value: "default"
+};
+var setTreeThemeState;
 var maxRows = 8;
 var sidebarRows = 0;
 var expandRootsByDefault = false;
@@ -1005,7 +1321,7 @@ function ProgressRow(props) {
     return full.length > 120 ? `${full.slice(0, 120)}\u2026` : full;
   };
   const label = () => {
-    if (treeTheme === "compact") {
+    if (themeState.value === "compact") {
       const meta = compactTreeSuffix(props.row.node.progress, props.row.hiddenChildren);
       return `${glyph(props.row.node.status)} ${title()}${meta ? ` ${meta}` : ""}`;
     }
@@ -1359,6 +1675,29 @@ function swapLayout(context) {
     variant: "info"
   });
 }
+async function switchTreeTheme(context) {
+  const current = themeState.value;
+  const choice = await context.ui.dialog.select({
+    title: "Progress tree theme",
+    current,
+    options: TREE_THEME_CHOICES.map((option) => ({
+      title: option.title,
+      value: option.value,
+      description: option.value === current ? "current" : option.description
+    }))
+  });
+  if (choice == null) return;
+  setTreeThemeState?.((draft) => {
+    draft.value = choice;
+  });
+  const result = writeTreeThemeToConfig(choice, {
+    directory: context.location?.directory
+  });
+  context.ui.toast.show({
+    message: result.ok ? `Tree theme: ${treeThemeLabel(result.theme)} \xB7 saved to config` : `Tree theme: ${treeThemeLabel(result.theme)} \xB7 config not updated`,
+    variant: result.ok ? "success" : "warning"
+  });
+}
 function toggleCollapsed(context) {
   if (!setCollapsed) return;
   const next = !collapsedState.value;
@@ -1705,7 +2044,6 @@ var tui_default = Plugin.define({
   setup(context) {
     barOptions = normalizeBarOptions(context.options);
     visibilityOptions = normalizeVisibilityOptions(context.options);
-    treeTheme = normalizeTreeTheme(context.options?.treeTheme);
     expandRootsByDefault = context.options?.expandRootsByDefault === true;
     const configuredRows = context.options?.tuiMaxRows;
     maxRows = typeof configuredRows === "number" && configuredRows >= 1 ? Math.min(50, Math.floor(configuredRows)) : 8;
@@ -1762,6 +2100,13 @@ var tui_default = Plugin.define({
     });
     collapsedState = collapsedStore;
     setCollapsed = updateCollapsed;
+    const [themeStore, updateTheme] = context.storage.memory("tuiTreeTheme", {
+      initial: {
+        value: normalizeTreeTheme(context.options?.treeTheme)
+      }
+    });
+    themeState = themeStore;
+    setTreeThemeState = updateTheme;
     const stopPolling = startPolling(normalizeRefreshMs(context.options));
     if (context.options?.notifyOnLoad === true) {
       context.ui.toast.show({
@@ -1796,6 +2141,13 @@ var tui_default = Plugin.define({
         group: "progress",
         palette: true,
         run: () => swapLayout(context)
+      }, {
+        id: "progress.switch-tree-theme",
+        title: "Progress: switch tree theme",
+        description: "Pick the tree row theme; saved to your OpenCode config",
+        group: "progress",
+        palette: true,
+        run: () => switchTreeTheme(context)
       }, {
         id: "progress.set-root-cap",
         title: "Progress: set root cap",
@@ -1896,7 +2248,6 @@ var tui_default = Plugin.define({
       sayToastHook = void 0;
       sayLineEnabled = true;
       autoHideTimeoutMs = 6e4;
-      treeTheme = "default";
       unregisterComposer?.();
       unregisterSidebar?.();
       unregisterFooter?.();

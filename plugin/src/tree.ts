@@ -325,6 +325,38 @@ export function normalizeTreeTheme(value: unknown): TreeTheme {
   return value === "compact" ? "compact" : "default";
 }
 
+export const TREE_THEMES: readonly TreeTheme[] = ["default", "compact"];
+
+export interface TreeThemeChoice {
+  value: TreeTheme;
+  title: string;
+  description: string;
+}
+
+/** Picker options for the "switch tree theme" palette command. */
+export const TREE_THEME_CHOICES: readonly TreeThemeChoice[] = [
+  {
+    value: "default",
+    title: "Default",
+    description: "Progress bars, started line, configurable detail lines",
+  },
+  {
+    value: "compact",
+    title: "Compact",
+    description: "No bars, one detail line, percentage and hidden-child count",
+  },
+];
+
+/** Human label used in toasts and command descriptions. */
+export function treeThemeLabel(theme: TreeTheme): string {
+  return theme === "compact" ? "Compact" : "Default";
+}
+
+/** Flip to the other theme; used when no picker is available. */
+export function nextTreeTheme(current: TreeTheme): TreeTheme {
+  return current === "compact" ? "default" : "compact";
+}
+
 /**
  * One-line meta suffix for a compact tree row: the percentage and/or the
  * collapsed-descendant count, joined with ` · `.

@@ -6,7 +6,7 @@
  * tree, including nested children.
  */
 
-import { ComposerPill, Command, Panel, Plugin, Style } from "@opencode/plugin/gui";
+import { ComposerPill, Command, MenuItem, Panel, Plugin, Style } from "@opencode/plugin/gui";
 import type { MountedSession } from "@opencode/plugin/gui";
 import { For, Index, Show, batch, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import pkg from "../package.json";
@@ -52,6 +52,8 @@ import {
   scopeEntries,
   subagentPrefix,
   visibleEntries,
+  TREE_THEME_CHOICES,
+  treeThemeLabel,
   type BarOptions,
   type TreeTheme,
 } from "./tree.js";
@@ -406,7 +408,16 @@ export default Plugin.define({
       });
     const sidebarWidth = normalizeGuiSidebarWidth(ctx.options?.guiSidebarWidth);
     const detailLines = normalizeGuiDetailLines(ctx.options?.guiDetailLines);
-    const treeTheme = normalizeTreeTheme(ctx.options?.treeTheme);
+    // Runtime tree theme; the configured value seeds it and the palette command
+    // updates it, then persists the choice to the OpenCode config.
+    const [themeStore, updateTheme] = ctx.storage.memory("guiTreeTheme", {
+      initial: { value: normalizeTreeTheme(ctx.options?.treeTheme) },
+    });
+    const treeTheme = (): TreeTheme => themeStore.value;
+    const setTreeTheme = (theme: TreeTheme) =>
+      updateTheme((draft) => {
+        draft.value = theme;
+      });
     const sidebarPanelKey = `${ctx.id}:${GUI_PROGRESS_PANEL_ID}`;
     let alive = true;
     let inFlight = false;
@@ -429,6 +440,41 @@ export default Plugin.define({
         variant: "default",
         duration: 2500,
       });
+    };
+
+    /** Pick a tree theme, apply it now, and save it to the OpenCode config. */
+    const switchTreeTheme = async () => {
+      const current = treeTheme();
+      const choice = await ctx.dialogs.select<TreeTheme>({
+        title: "Progress tree theme",
+        current,
+        options: TREE_THEME_CHOICES.map((option) => ({
+          title: option.title,
+          value: option.value,
+          description:
+            option.value === current ? "current" : option.description,
+        })),
+      });
+      if (!choice) return;
+      setTreeTheme(choice);
+      try {
+        const result = await ctx.client.rpc(ProgressRpc).setTreeTheme({ theme: choice });
+        ctx.toast.show({
+          title: `Progress tree theme: ${treeThemeLabel(result.theme)}`,
+          description: result.ok
+            ? `Saved to ${result.file}`
+            : `Applied for this run; config not updated: ${result.error ?? "unknown error"}`,
+          variant: result.ok ? "success" : "default",
+          duration: result.ok ? 2500 : 5000,
+        });
+      } catch (error) {
+        ctx.toast.show({
+          title: `Progress tree theme: ${treeThemeLabel(choice)}`,
+          description: `Applied for this run; config not updated: ${String(error)}`,
+          variant: "default",
+          duration: 5000,
+        });
+      }
     };
 
     // A configured sidebar must be visible on startup, not just add a pinned
@@ -1095,7 +1141,7 @@ export default Plugin.define({
                             depth={0}
                             options={options}
                             detailLines={detailLines}
-                            theme={treeTheme}
+                            theme={treeTheme()}
                             hasChildren={node().children.length > 0}
                             collapsed={isCollapsed()}
                             onToggle={() =>
@@ -1129,7 +1175,7 @@ export default Plugin.define({
                                     depth={depth}
                                     options={options}
                                     detailLines={detailLines}
-                                    theme={treeTheme}
+                                    theme={treeTheme()}
                                   />
                                 )}
                               </For>
@@ -1386,7 +1432,7 @@ export default Plugin.define({
                             depth={0}
                             options={options}
                             detailLines={detailLines}
-                            theme={treeTheme}
+                            theme={treeTheme()}
                             hasChildren={node().children.length > 0}
                             collapsed={isCollapsed()}
                             onToggle={() =>
@@ -1414,7 +1460,7 @@ export default Plugin.define({
                                     depth={depth}
                                     options={options}
                                     detailLines={detailLines}
-                                    theme={treeTheme}
+                                    theme={treeTheme()}
                                   />
                                 )}
                               </For>
@@ -1743,7 +1789,7 @@ export default Plugin.define({
             ...flattenTreeWithDepth(visibleRoots)
               .slice(0, 7)
               .map(({ node, depth }) => {
-                const row = rowFor(node, depth, options, treeTheme);
+                const row = rowFor(node, depth, options, treeTheme());
                 if (depth !== 0) return row;
                 return {
                   ...row,
@@ -1864,6 +1910,45 @@ export default Plugin.define({
       keywords: "progress sidebar composer layout move",
       run: () => swapLayout(),
     }));
+
+    ctx.add(Command, () => ({
+      id: "progress.switch-tree-theme",
+      title: "Progress: switch tree theme",
+      description: "Pick the tree row theme; saved to your OpenCode config",
+      group: "Progress",
+      section: "general" as const,
+      keywords: "progress tree theme compact default rows appearance",
+      run: () => void switchTreeTheme(),
+    }));
+
+    // Launcher for the desktop sidebar's New tab page and + menu, alongside
+    // Review / Browser / Terminal / Open file. `opened` follows this tab's own
+    // state so the launcher stays listed while some other side tab is open.
+    ctx.add(MenuItem, {
+      menu: "session.panel",
+      id: "progress",
+      title: "Progress",
+      icon: "checklist",
+      order: 20,
+      description: "Task tree and notes",
+      get opened() {
+        const session = ctx.sessions.current();
+        if (!session) return false;
+        return ctx.layout.state(sidebarPanelKey, session) !== "closed";
+      },
+      run: () => {
+        const session = ctx.sessions.current();
+        if (!session) return;
+        if (layoutMode() !== "sidebar") {
+          swapLayout();
+          return;
+        }
+        ctx.layout.open(sidebarPanelKey, session, {
+          tab: "select",
+          background: true,
+        });
+      },
+    });
 
     return () => {
       alive = false;

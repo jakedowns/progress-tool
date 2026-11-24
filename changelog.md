@@ -86,6 +86,11 @@ Everything below ships in `plugin@2.20.0`. The earlier development labels
   and shows a `40% · & N more` suffix from the new `compactTreeSuffix` helper.
   View-only: the GUI composer pill capsule and its `barStyle` rendering are
   unchanged.
+- **Tree theme picker.** The palette command **Progress: switch tree theme**
+  (GUI and TUI) picks `Default` or `Compact`, applies it immediately, and saves
+  `plugins[].options.treeTheme` in the OpenCode config that declares the
+  plugin. Project `opencode.json`/`.jsonc` wins over the global config; edits
+  preserve comments, formatting, and unrelated options.
 - **Compact rows in both views.** The GUI pill popover/sidebar and TUI render
   barless compact rows when the theme is enabled, including the
   collapsed-descendant count.

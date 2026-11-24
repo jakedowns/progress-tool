@@ -31,6 +31,7 @@ import {
   toggleTaskListMode as toggleTaskListModePref,
   type TaskListStatus,
 } from "./tasklist-prefs.js";
+import { writeTreeThemeToConfig } from "./tree-theme.js";
 import {
   buildTree,
   barParts,
@@ -48,6 +49,8 @@ import {
   scopeEntries,
   subagentPrefix,
   visibleEntries,
+  TREE_THEME_CHOICES,
+  treeThemeLabel,
   type BarOptions,
   type TreeTheme,
   type VisibilityOptions,
@@ -91,7 +94,10 @@ let timer: ReturnType<typeof setInterval> | undefined;
 let barOptions: BarOptions = {};
 let visibilityOptions: VisibilityOptions = {};
 /** Tree row theme; `compact` drops progress-bar glyphs from tree rows. */
-let treeTheme: TreeTheme = "default";
+let themeState: { value: TreeTheme } = { value: "default" };
+let setTreeThemeState:
+  | ((mutation: (draft: { value: TreeTheme }) => void) => void)
+  | undefined;
 let maxRows = 8;
 let sidebarRows = 0;
 let expandRootsByDefault = false;
@@ -243,7 +249,7 @@ function ProgressRow(props: { row: TuiRow; sessionID: string }) {
   };
 
   const label = () => {
-    if (treeTheme === "compact") {
+    if (themeState.value === "compact") {
       const meta = compactTreeSuffix(props.row.node.progress, props.row.hiddenChildren);
       return `${glyph(props.row.node.status)} ${title()}${meta ? ` ${meta}` : ""}`;
     }
@@ -532,6 +538,33 @@ function swapLayout(context: TuiContext): void {
         ? "Progress moved to the sidebar"
         : "Progress moved above the prompt",
     variant: "info",
+  });
+}
+
+/** Pick a tree theme, apply it now, and save it to the OpenCode config. */
+async function switchTreeTheme(context: TuiContext): Promise<void> {
+  const current = themeState.value;
+  const choice = await context.ui.dialog.select<TreeTheme>({
+    title: "Progress tree theme",
+    current,
+    options: TREE_THEME_CHOICES.map((option) => ({
+      title: option.title,
+      value: option.value,
+      description: option.value === current ? "current" : option.description,
+    })),
+  });
+  if (choice == null) return;
+  setTreeThemeState?.((draft) => {
+    draft.value = choice;
+  });
+  const result = writeTreeThemeToConfig(choice, {
+    directory: context.location?.directory,
+  });
+  context.ui.toast.show({
+    message: result.ok
+      ? `Tree theme: ${treeThemeLabel(result.theme)} · saved to config`
+      : `Tree theme: ${treeThemeLabel(result.theme)} · config not updated`,
+    variant: result.ok ? "success" : "warning",
   });
 }
 
@@ -885,7 +918,6 @@ export default Plugin.define({
   setup(context) {
     barOptions = normalizeBarOptions(context.options);
     visibilityOptions = normalizeVisibilityOptions(context.options);
-    treeTheme = normalizeTreeTheme(context.options?.treeTheme);
     expandRootsByDefault = context.options?.expandRootsByDefault === true;
     const configuredRows = context.options?.tuiMaxRows;
     maxRows =
@@ -956,6 +988,12 @@ export default Plugin.define({
     collapsedState = collapsedStore;
     setCollapsed = updateCollapsed;
 
+    const [themeStore, updateTheme] = context.storage.memory("tuiTreeTheme", {
+      initial: { value: normalizeTreeTheme(context.options?.treeTheme) },
+    });
+    themeState = themeStore;
+    setTreeThemeState = updateTheme;
+
     const stopPolling = startPolling(normalizeRefreshMs(context.options));
     if (context.options?.notifyOnLoad === true) {
       context.ui.toast.show({ message: "Progress plugin loaded", variant: "success" });
@@ -987,6 +1025,14 @@ export default Plugin.define({
           group: "progress",
           palette: true,
           run: () => swapLayout(context),
+        },
+        {
+          id: "progress.switch-tree-theme",
+          title: "Progress: switch tree theme",
+          description: "Pick the tree row theme; saved to your OpenCode config",
+          group: "progress",
+          palette: true,
+          run: () => switchTreeTheme(context),
         },
         {
           id: "progress.set-root-cap",
@@ -1078,7 +1124,6 @@ export default Plugin.define({
       sayToastHook = undefined;
       sayLineEnabled = true;
       autoHideTimeoutMs = 60_000;
-      treeTheme = "default";
       unregisterComposer?.();
       unregisterSidebar?.();
       unregisterFooter?.();
