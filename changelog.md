@@ -86,11 +86,6 @@ Everything below ships in `plugin@2.20.0`. The earlier development labels
   and shows a `40% · & N more` suffix from the new `compactTreeSuffix` helper.
   View-only: the GUI composer pill capsule and its `barStyle` rendering are
   unchanged.
-- **Tree theme picker.** The palette command **Progress: switch tree theme**
-  (GUI and TUI) picks `Default` or `Compact`, applies it immediately, and saves
-  `plugins[].options.treeTheme` in the OpenCode config that declares the
-  plugin. Project `opencode.json`/`.jsonc` wins over the global config; edits
-  preserve comments, formatting, and unrelated options.
 - **Compact rows in both views.** The GUI pill popover/sidebar and TUI render
   barless compact rows when the theme is enabled, including the
   collapsed-descendant count.
@@ -180,6 +175,22 @@ Everything below ships in `plugin@2.20.0`. The earlier development labels
   dismissal, GUI/TUI view normalizers, task-list prefs, roll-up, MCP smoke, the
   task-list mirror, the 17-test `say-monitor` suite, and the 28-test `say` suite.
   Final state: **174 plugin tests**, **57 MCP tests**.
+
+## 2.21.0 — tree theme picker (released, `plugin@2.21.0`)
+
+Follow-up to `plugin@2.20.0`, dated **2026-11-24**. Final state: **187 plugin
+tests**.
+
+- **Tree theme picker.** The palette command **Progress: switch tree theme**
+  (GUI and TUI) picks `Default` or `Compact`, applies it immediately, and saves
+  `plugins[].options.treeTheme` in the OpenCode config that declares the
+  plugin. Project `opencode.json`/`.jsonc` wins over the global config; edits
+  preserve comments, formatting, and unrelated options. If no matching config
+  entry is found, the runtime choice still applies and the toast reports why
+  nothing was saved.
+- **Config editor.** Token-based JSONC editing updates only the matching plugin
+  entry's `options` object (or upgrades a string shorthand entry), handling
+  trailing commas and a UTF-8 BOM without disturbing the rest of the file.
 
 ## mcp-server 2.11.0 — pending, mirror, relay levels (released, `mcp-server@2.11.0`)
 
