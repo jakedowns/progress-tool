@@ -147,8 +147,9 @@ removed with the session or a hard clear.
 | `sayModes` | `["tree"]` | surfaces: string/array of `"pill"`, `"toast"`, `"tree"`; `sayMode` alias; `[]` records only |
 | `sayAutoHideTimeoutMs` | `60000` | hide notes older than this from every surface; `0` keeps until dismissed; view-only |
 | `sayToastScope` | `"own"` | toast `own` notes, own + child `warnings`, or `all`; child notes always roll up in the line/pill |
-| `sayNudge` | `off` | opt-in long-tool reminder: `"long-tool"` or `true`; context-only, never synthetic |
-| `sayNudgeAfterMs` | `20000` | minimum tool duration before a reminder |
+| `sayNudge` | `off` | opt-in reminder, only with `say: true`: `"long-tool"`/`true`, `"silent-run"` (forgot-to-narrate call count), or `"both"`; context-only, never synthetic |
+| `sayNudgeAfterMs` | `20000` | minimum tool duration before a `"long-tool"` reminder |
+| `sayNudgeMinCalls` | `3` | tool calls with no note before a `"silent-run"` reminder (clamp `1..50`) |
 | `sayNudgeCooldownMs` | `120000` | minimum gap between say reminders |
 | `sayNudgeMaxPerTurn` | `1` | max reminders per user turn (max `3`) |
 
