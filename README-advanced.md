@@ -2,7 +2,7 @@
 
 Back to the [main README](./README.md).
 
-**Versions:** MCP server `2.12.0` · OpenCode plugin `2.24.0`
+**Versions:** MCP server `2.12.0` · OpenCode plugin `2.25.0`
 
 This document is the reference half of the project: the portable contract, the
 relay's behaviour, state-store guarantees, architecture, testing, every plugin
@@ -432,17 +432,19 @@ Both the TUI and GUI parts read these options.
 - `taskListView`: `"ui"` (default) hides dismissed/cleared entries and rolls child status up so the Markdown matches the UI; `"raw"` keeps every entry and the stored status. The TUI/GUI palette command **Progress: task-list mirror view** toggles this when the mirror is active; the change applies to the next render, not to existing entries.
 - `taskListDetail`: `"code"` (default) renders detail in a fenced code block; `"escaped"` renders inline Markdown-escaped text; `"raw"` is an explicit opt-in for trusted content.
 - `taskListOrder`: `"newest-first"` (default; newest `createdAt` at the top) or `"oldest-first"` (append at the bottom).
-- `strictMode`: `"nudge"` (default), `"force"`, or `"off"`. Watches **model steps** (not raw tool calls, so parallel tools in one step count once): without any task entry, or with pending tasks whose progress has not changed, it writes one compact standing `progress-reminder` entry (`[info]`/`[warn]`/`[block]` prefix) that names the oldest stale entry and one action. Tune with `strictThreshold` (default `3` steps), `staleAfterMs` (default `5` min), `cooldownMs` (default `2` min), and `staleEscalateAfter` (default `3`). The first `staleEscalateAfter` stale reminders ride the context entry; the next one escalates **once** to a synthetic `[block]` message so it is a real turn input. Set `staleEscalateAfter: 0` to disable escalation. A `waiting` entry with a non-empty detail touched within `staleAfterMs` is considered healthy blocked work and does not trigger strict/idle/wall nudges; stale or detail-less waiting still counts. Unchanged reminder text is deduped inside `cooldownMs`, counters reset on a new prompt and on any progress write, and `warn`-level reminders are suppressed while a tool is in flight.
-- `idleReminder`: set to `false` to disable the turn-end nudge. By default, when a session is about to go idle with stale running/waiting/pending entries still open, the plugin admits **one `[block]` synthetic message** ("turn ending with N open tasks: …") into the same execution. Healthy fresh-detail waiting entries are excluded. Debounced by entry signature, a 2-minute cooldown, and a per-run cap.
+- `strictMode`: `"nudge"` (default), `"force"`, or `"off"`. Watches **model steps** (not raw tool calls, so parallel tools in one step count once): without any task entry, or with pending tasks whose progress has not changed, it writes one compact standing `progress-reminder` entry (`[info]`/`[warn]`/`[block]` prefix) that names the oldest stale entry and one action. Tune with `strictThreshold` (default `3` steps), `staleAfterMs` (default `5` min), `cooldownMs` (default `2` min), and `staleEscalateAfter` (default `3`). The first `staleEscalateAfter` stale reminders ride the context entry; the next one escalates **once** to a synthetic `[block]` message so it is a real turn input. Set `staleEscalateAfter: 0` to disable escalation. A `waiting` entry with a non-empty detail touched within `staleAfterMs` is considered healthy blocked work and does not trigger strict/idle/wall nudges; stale or detail-less waiting still counts. Unchanged reminder text is deduped inside `cooldownMs`, counters reset on a new prompt and on any progress write, `warn`-level reminders are suppressed while a tool is in flight, and a parent blocked on active child sessions is exempt from stale-progress nudges.
+- `idleReminder`: set to `false` to disable the turn-end nudge. By default, when a session is about to go idle, the plugin admits **one `[block]` synthetic message** only for **owned** entries that are stale for `idleStaleMs` (default 10 min) or failed within the last hour. Subagent-owned entries, parents with open child entries, healthy fresh-detail `waiting`, and recently touched work are excluded; the message reports their counts separately. Debounced by entry signature, a 2-minute cooldown, and a per-run cap.
+- `idleStaleMs`: how long an owned entry may go untouched before the turn-end nudge counts it as stale (default `600000`, minimum 60s).
 - `unhinged`: set to `true` to append `[did the user's message just change your workload? update your task list!]` to every user message. **Default `false`** — it edits user input text, so it is strictly opt-in.
 - `expandRootsByDefault`: roots with children are collapsed by default in the pill menu and TUI. Set to `true` to expand them by default; per-root toggles still work.
 - `registerSkills`: set to `false` to skip skill registration entirely. Default: the usage and delegation skills register automatically.
 - `demoSkills`: set to `true` to also register the two demo skills (`osc-demo`, `tree-demo`) shipped in `optional-skills/`. **Default `false`**.
 - `injectInstructions`: set to `false` to skip the injected progress/relay rules (useful if you maintain your own `AGENTS.md`).
-- `relayHints`: set to `false` to disable the pre-flight "wrap this in the relay" hint.
-- `customNudges`: set to `true` to enable custom nudge rules, the `progress_nudge` agent tool, and the TUI/palette commands. **Default `false`**; with it off, rule files are ignored and nothing is registered.
+- `relayHints`: set to `false` to disable the repeating-command relay hint. It fires **once per command shape**, on the second occurrence, so a single already-finished command is not nagged about retrospectively.
+- `customNudges`: set to `true` to enable custom nudge rules and the TUI/palette editors. **Default `false`**. The `progress_nudge` agent tool is always registered so agents can `mute`/`unmute`/`status`, but with the flag off it refuses rule editing and no rule files are read.
 - `notifyOnLoad`: set to `true` for a toast when the plugin loads.
-- `verboseLogging`: record every nudge the plugin injects as JSONL in `~/.opencode-progress-nudges.log` (override with `PROGRESS_NUDGE_LOG`). Events: `config`, `strict` (including `action: "stale-escalate"` and `priorNudged`/`staleNudges`), `compliance` (a standing nudge cleared by a real progress write, with `afterMs`), `wall-clock`, `idle-reminder`, `child-list-error`, `transition`, `relay-hint`, `subagent`, `unhinged`. **Default `false`**. Wall-clock tuning: `wallClockMs` (default 120s), only fires for sessions with a tool call in the last 10 minutes, is measured from `max(lastProgressAt, promptAt)` so resumed sessions do not print absurd ages, pauses while a tool is in flight, and caps at 3 reminders per non-progress stretch.
+- `nudgeGapMs`: global quiet period between non-block reminders from any source (default `60000`, `0` disables). Block-level reminders bypass it.
+- `verboseLogging`: record every nudge the plugin injects as JSONL in `~/.opencode-progress-nudges.log` (override with `PROGRESS_NUDGE_LOG`). Events: `config`, `strict` (including `action: "stale-escalate"` and `priorNudged`/`staleNudges`), `compliance` (a standing nudge cleared by a real progress write, with `afterMs`), `wall-clock`, `idle-reminder`, `child-list-error`, `transition`, `relay-hint` (now includes `pattern`/`count`), `reminder` (with `suppressed: muted|gap|custom-replace`), `custom-nudge`, `subagent`, `unhinged`. **Default `false`**. Wall-clock tuning: `wallClockMs` (default 10 min), only fires for sessions with a tool call in the last 10 minutes, is measured from `max(lastProgressAt, promptAt)` so resumed sessions do not print absurd ages, pauses while a tool is in flight, skips a parent while child sessions are active, and caps at 3 reminders per non-progress stretch.
 - `autoRegisterMcp`: set to `false` to keep the plugin from registering the MCP server itself (you manage `mcp.servers` manually).
 - `mcpRuntime`: absolute path to the `node`/`bun` used to spawn the MCP server (auto-detected). Set it if detection picks the wrong runtime.
 
@@ -639,11 +641,13 @@ Palette commands:
   severity → confirm.
 - **Progress: custom nudge status** — list rules; enable, disable, or clear one.
 
-Agent tool `progress_nudge` (`set`, `list`, `status`, `on`, `off`, `clear`)
-defaults to **session scope**. It refuses project/global rules because the tool
-surface cannot show a host permission prompt; ask the user to create those via
-the slash command, palette, or rule files. Agents should use it for a temporary
-self-reminder, not to nag the user — `say` remains the user-facing channel.
+Agent tool `progress_nudge` (`set`, `list`, `status`, `on`, `off`, `clear`, and
+always-available `mute`/`unmute`/`status`) defaults to **session scope**. Mute
+quiets non-block reminders for 1-240 minutes; safety blocks still land. Rule
+editing refuses project/global scopes because the tool surface cannot show a
+host permission prompt; ask the user to create those via the slash command,
+palette, or rule files. Agents should use it for a temporary self-reminder, not
+to nag the user — `say` remains the user-facing channel.
 
 ### Disable and tombstones
 

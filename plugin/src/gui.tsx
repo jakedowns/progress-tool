@@ -8,7 +8,7 @@
 
 import { ComposerPill, Command, MenuItem, Panel, Plugin, Style } from "@opencode/plugin/gui";
 import type { MountedSession } from "@opencode/plugin/gui";
-import { For, Index, Show, batch, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
+import { ErrorBoundary, For, Index, Show, batch, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import pkg from "../package.json";
 import { feedbackIssueUrl, releasesUrl } from "./feedback.js";
 import { ProgressRpc } from "./rpc.js";
@@ -639,7 +639,7 @@ export default Plugin.define({
     createEffect(() => {
       const hasNotes = state().notes.length > 0;
       if (hasNotes && !notesClockTimer) {
-        notesClockTimer = setInterval(() => setNotesClock(Date.now()), 5000);
+        notesClockTimer = setInterval(() => setNotesClock(Date.now()), 1000);
       } else if (!hasNotes && notesClockTimer) {
         clearInterval(notesClockTimer);
         notesClockTimer = undefined;
@@ -1080,10 +1080,10 @@ export default Plugin.define({
             display: "flex",
             "flex-direction": "column",
             gap: "6px",
-            "flex": "1 1 auto",
-            "min-height": "0",
+            "min-height": "260px",
             "min-width": "260px",
             "max-height": "min(60vh, 520px)",
+            "overflow-y": "auto",
           }}
         >
           <div
@@ -1113,9 +1113,6 @@ export default Plugin.define({
               display: "flex",
               "flex-direction": "column",
               gap: "8px",
-              "flex": "1 1 auto",
-              "min-height": "0",
-              "overflow-y": "auto",
               "padding-right": "4px",
             }}
           >
@@ -1319,7 +1316,17 @@ export default Plugin.define({
         >
           <Show
             when={view() === "tree"}
-            fallback={<SettingsPanel onBack={() => setView("tree")} />}
+            fallback={
+              <ErrorBoundary
+                fallback={(error) => (
+                  <div style={{ padding: "8px", "font-size": "12px", color: "#f87171" }}>
+                    Settings failed to render: {String(error)}
+                  </div>
+                )}
+              >
+                <SettingsPanel onBack={() => setView("tree")} />
+              </ErrorBoundary>
+            }
           >
           <div
             ref={(el) => (listEl = el)}
@@ -1657,7 +1664,17 @@ export default Plugin.define({
           </Show>
           <Show
             when={view() === "tree"}
-            fallback={<SettingsPanel onBack={() => setView("tree")} />}
+            fallback={
+              <ErrorBoundary
+                fallback={(error) => (
+                  <div style={{ padding: "8px", "font-size": "12px", color: "#f87171" }}>
+                    Settings failed to render: {String(error)}
+                  </div>
+                )}
+              >
+                <SettingsPanel onBack={() => setView("tree")} />
+              </ErrorBoundary>
+            }
           >
           <Show
             when={visibleRoots().length > 0}
@@ -1840,6 +1857,54 @@ export default Plugin.define({
       );
     };
 
+    const NOTE_RING_RADIUS = 5;
+    const NOTE_RING_CIRCUMFERENCE = 2 * Math.PI * NOTE_RING_RADIUS;
+
+    /** Countdown ring for the note's auto-hide expiry. */
+    const NoteExpiryRing = (props: { note: GuiNote }) => {
+      const remaining = () => {
+        if (!(autoHideTimeoutMs > 0)) return 1;
+        const at = typeof props.note.at === "number" ? props.note.at : 0;
+        return Math.max(0, Math.min(1, 1 - (notesClock() - at) / autoHideTimeoutMs));
+      };
+      const seconds = () =>
+        Math.max(0, Math.ceil((remaining() * autoHideTimeoutMs) / 1000));
+      return (
+        <Show when={autoHideTimeoutMs > 0}>
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 16 16"
+            role="img"
+            aria-label={`Note expires in ${seconds()}s`}
+            style={{ flex: "0 0 auto", transform: "rotate(-90deg)" }}
+          >
+            <title>{remaining() > 0 ? `Expires in ${seconds()}s` : "Expiring now"}</title>
+            <circle
+              cx="8"
+              cy="8"
+              r={NOTE_RING_RADIUS}
+              fill="none"
+              stroke="currentColor"
+              stroke-opacity="0.2"
+              stroke-width="2"
+            />
+            <circle
+              cx="8"
+              cy="8"
+              r={NOTE_RING_RADIUS}
+              fill="none"
+              stroke={remaining() < 0.25 ? "#f59e0b" : "currentColor"}
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-dasharray={`${NOTE_RING_CIRCUMFERENCE}`}
+              stroke-dashoffset={`${NOTE_RING_CIRCUMFERENCE * (1 - remaining())}`}
+            />
+          </svg>
+        </Show>
+      );
+    };
+
     const NotesMenu = (props: { session: MountedSession; sessionID: string }) => {
       onCleanup(() => setInteracting(false));
       const notes = createMemo(() => notesForSession(props.sessionID));
@@ -1955,6 +2020,7 @@ export default Plugin.define({
                       "flex": "0 0 auto",
                     }}
                   >
+                    <NoteExpiryRing note={note} />
                     <span title={new Date(note.at).toLocaleString()}>
                       {formatRelative(note.at)}
                     </span>

@@ -223,6 +223,35 @@ Shipped since `mcp-server@2.10.2`:
 - **Store and mirror support** for cleared/dismissed entries plus expanded MCP
   smoke and task-list suites (**57 tests**).
 
+## 2.25.0 — quieter multi-agent nudges (unreleased)
+
+Second feedback round from a five-subagent, multi-hour session.
+
+- **Turn-end nudge only for owned neglect.** It now fires only for
+  non-subagent entries that are stale for `idleStaleMs` (default 10m) or
+  errored within the last hour. Parents with open child entries and fresh-detail waiting are
+  excluded; the message reports child-owned/blocked counts instead of a raw
+  total. A 6-minute refresh is no longer "stale".
+- **Child-blocked staleness.** Wall-clock and strict stale nudges skip a parent
+  while descendant sessions are actively running/waiting, and the wall-clock
+  default moves from 2m to 10m.
+- **Relay hints once per pattern.** The hint now keys on the command shape
+  (`gradlew assembleDebug`, env assignments and `cd … &&` stripped) and fires
+  once, on the second occurrence, so a single finished command is not nagged
+  about after the fact.
+- **Global quiet gap.** Non-block reminders from any source share
+  `nudgeGapMs` (default 60s); block reminders bypass it.
+- **Always-available agent mute.** `progress_nudge` is registered even when
+  `customNudges` is off, with `mute`/`unmute`/`status`. Mute quiets non-block
+  reminders for 1-240 minutes; the rule editor remains opt-in.
+- **Note expiry ring.** Note rows show a countdown ring (amber under 25%) that
+  updates every second as the auto-hide timeout approaches.
+- **Say nudge:** remains budget-aware and at most one per turn by default; no
+  change was needed beyond the shared gap.
+
+Tests: plugin **230** (new idle ownership, relay-pattern, and reminder-gap
+cases).
+
 ## 2.24.0 — settings tab and release links (unreleased)
 
 - **Settings tab in the tree view.** The desktop pill popover and pinned
@@ -233,6 +262,8 @@ Shipped since `mcp-server@2.10.2`:
   config that declares the plugin and apply on reload.
 - **Version link.** The footer version is now `[v2.24.0]`, opening
   `https://github.com/jakedowns/progress-tool/releases` for changelog viewing.
+- **Note expiry ring.** Note rows show a countdown ring (amber under 25%) that
+  updates every second toward the auto-hide timeout.
 
 ## 2.23.0 — custom nudges (released, `plugin@2.23.0`)
 

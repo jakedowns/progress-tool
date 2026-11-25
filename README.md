@@ -31,7 +31,7 @@ Implements the [Agent Progress Tool proposal](https://gist.github.com/jakedowns/
 for OpenCode 2, and is written as a portable reference implementation any
 harness can copy or adapt.
 
-**Versions:** MCP server `2.12.0` · OpenCode plugin `2.24.0`
+**Versions:** MCP server `2.12.0` · OpenCode plugin `2.25.0`
 
 > **Advanced docs:** [schema, relay internals, state store, architecture, all
 > options, file map →](./README-advanced.md)
@@ -153,7 +153,10 @@ or `<project>/.opencode/progress-nudge.json`.
 - TTL and a fire cap (one-shot) keep temporary rules temporary.
 
 Agent tool `progress_nudge` is **session-scoped only**; project/global rules
-require the user-facing slash command, palette, or config file. See
+require the user-facing slash command, palette, or config file. Agents can
+always quiet non-block reminders for the session with
+`progress_nudge({ action: "mute", minutes: 30 })`, even when the rule editor is
+disabled. See
 [README-advanced.md](./README-advanced.md#custom-nudges) for the full schema,
 files, presets, and semantics.
 

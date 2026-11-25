@@ -36,6 +36,7 @@ const {
   isHealthyWaiting,
   pickTarget,
   normalizeSeverity,
+  reminderGapAllows,
 } = require(path.join(OUT, 'reminders.cjs'));
 const { observeToolCall, idleReminder, staleProgressNudge } = require(
   path.join(OUT, 'monitor.cjs')
@@ -193,4 +194,13 @@ test('stale nudge copy names the target and one action', () => {
   assert.match(text, /wr03 running 12m/);
   assert.match(text, /update detail\/progress or close it/);
   assert.ok(text.length < 220, 'compact one-line copy');
+});
+
+test('global gap suppresses non-block reminders but never blocks', () => {
+  const now = 1_000_000_000;
+  assert.equal(reminderGapAllows(0, now, 60_000, 'warn'), true);
+  assert.equal(reminderGapAllows(now - 30_000, now, 60_000, 'warn'), false);
+  assert.equal(reminderGapAllows(now - 61_000, now, 60_000, 'warn'), true);
+  assert.equal(reminderGapAllows(now - 1_000, now, 60_000, 'block'), true);
+  assert.equal(reminderGapAllows(now - 1_000, now, 0, 'info'), true);
 });

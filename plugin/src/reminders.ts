@@ -139,3 +139,18 @@ export function pickTarget(
     ageMs: Math.max(0, now - (target.updatedAt ?? now)),
   };
 }
+
+/**
+ * Global quiet period between non-block reminders, regardless of source.
+ * Block reminders bypass it: they exist to resume a stalled turn.
+ */
+export function reminderGapAllows(
+  lastAt: number,
+  now: number,
+  gapMs: number,
+  severity: ReminderSeverity
+): boolean {
+  if (severity === "block") return true;
+  if (!lastAt || gapMs <= 0) return true;
+  return now - lastAt >= gapMs;
+}

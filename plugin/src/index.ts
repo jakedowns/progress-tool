@@ -44,6 +44,7 @@ import {
   formatReminder,
   isHealthyWaiting,
   pickTarget,
+  reminderGapAllows,
   reminderHash,
   shouldReplaceReminder,
   type ReminderSeverity,
@@ -95,8 +96,10 @@ import {
   staleProgressEscalation,
   idleReminder,
   wallClockNudge,
+  relayCommandPattern,
   relayHintFor,
   relayHintMessage,
+  relayPatternHintMessage,
   type MonitorState,
   type IdleTracker,
   type WallClockState,
@@ -203,6 +206,55 @@ export default Plugin.define({
     /** One standing reminder entry per session. */
     const standingReminders = new Map<string, ReminderState>();
     const REMINDER_KEY = 'progress-reminder';
+    /** Non-block reminders stay quiet for this long after any other reminder. */
+    const reminderGapMs = (() => {
+      const raw = ctx.options?.nudgeGapMs;
+      return typeof raw === "number" && Number.isFinite(raw) && raw >= 0
+        ? Math.min(15 * 60_000, Math.floor(raw))
+        : 60_000;
+    })();
+    const lastReminderAt = new Map<string, number>();
+    /** Agent-set snooze; non-block reminders only, so safety blocks still land. */
+    const nudgeMutedUntil = new Map<string, number>();
+    const reminderMuted = (sessionID: string): boolean =>
+      (nudgeMutedUntil.get(sessionID) ?? 0) > Date.now();
+
+    /** Descendant sessions (children, grandchildren) for a root session. */
+    const descendantSessions = (sessionID: string): Set<string> => {
+      const links = readSessionMap();
+      const children = new Set<string>();
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (const [child, link] of Object.entries(links)) {
+          if (!link?.parentID || children.has(child)) continue;
+          if (link.parentID === sessionID || children.has(link.parentID)) {
+            children.add(child);
+            changed = true;
+          }
+        }
+      }
+      return children;
+    };
+
+    /** A parent blocked on live child work is not a stalled parent. */
+    const hasActiveChildren = (
+      sessionID: string,
+      now: number,
+      freshnessMs: number
+    ): boolean => {
+      const children = descendantSessions(sessionID);
+      if (children.size === 0) return false;
+      return Object.values(readProgressState().entries ?? {}).some(
+        (entry) =>
+          entry &&
+          entry.sessionId &&
+          children.has(entry.sessionId) &&
+          (entry.status === 'running' || entry.status === 'waiting') &&
+          !entry.dismissed &&
+          (entry.updatedAt == null || now - entry.updatedAt < freshnessMs)
+      );
+    };
 
     // Custom nudge rules live in dedicated files (global/project/session),
     // never in opencode.json. The scheduler reads them on demand: the files
@@ -254,8 +306,17 @@ export default Plugin.define({
       // Message helpers that already carry a tier prefix must not be wrapped
       // twice; helpers that return only a body get the prefix here.
       const isCustom = source.startsWith("custom:");
+      const now = Date.now();
+      if (severity !== "block" && reminderMuted(sessionID)) {
+        if (verbose) logNudge({ event: 'reminder', sessionID, severity, source, suppressed: 'muted' });
+        return false;
+      }
       if (!isCustom && hasActiveReplace(sessionID)) {
         if (verbose) logNudge({ event: 'reminder', sessionID, severity, source, suppressed: 'custom-replace' });
+        return false;
+      }
+      if (!reminderGapAllows(lastReminderAt.get(sessionID) ?? 0, now, reminderGapMs, severity)) {
+        if (verbose) logNudge({ event: 'reminder', sessionID, severity, source, suppressed: 'gap' });
         return false;
       }
       const text = /^\[(info|warn|block)\]\s/.test(body)
@@ -273,6 +334,7 @@ export default Plugin.define({
         return false;
       }
       standingReminders.set(sessionID, next);
+      lastReminderAt.set(sessionID, now);
       void ctx.session.instructions.entry
         .put({ sessionID, key: REMINDER_KEY, value: text })
         .catch(() => {});
@@ -916,6 +978,12 @@ export default Plugin.define({
             clearReminder(event.sessionID);
           }
           const target = pickTarget(entries, now);
+          if (hasActive && hasActiveChildren(event.sessionID, now, staleAfterMs)) {
+            monitors.delete(event.sessionID);
+            clearReminder(event.sessionID, 'strict');
+            observeTransitions(event.sessionID, entries);
+            return;
+          }
           observeTransitions(event.sessionID, entries);
 
           const monitor = monitors.get(event.sessionID) ?? {
@@ -1080,6 +1148,12 @@ export default Plugin.define({
     // entry signature + cooldown + per-run cap (monitor.ts).
     const idleTrackers = new Map<string, IdleTracker>();
     const idleReminderEnabled = ctx.options?.idleReminder !== false;
+    const idleStaleMs =
+      typeof ctx.options?.idleStaleMs === 'number' &&
+      Number.isFinite(ctx.options.idleStaleMs) &&
+      ctx.options.idleStaleMs >= 60_000
+        ? Math.min(24 * 60 * 60_000, Math.floor(ctx.options.idleStaleMs))
+        : 10 * 60_000;
     let idleHook: Awaited<ReturnType<typeof ctx.session.hook>> | undefined;
     if (idleReminderEnabled) {
       idleHook = await ctx.session.hook('experimental.idle', async (event) => {
@@ -1090,7 +1164,7 @@ export default Plugin.define({
             (entry) => entry && entry.sessionId === event.sessionID
           );
           const tracker = idleTrackers.get(event.sessionID) ?? { signature: '', lastAt: 0, count: 0 };
-          const decision = idleReminder(tracker, entries, { now: Date.now() });
+          const decision = idleReminder(tracker, entries, { now: Date.now(), staleAfterMs: idleStaleMs });
           idleTrackers.set(event.sessionID, {
             signature: decision.signature,
             lastAt: decision.lastAt,
@@ -1257,9 +1331,8 @@ export default Plugin.define({
     // session with pending entries and, after wallClockMs (default 10m) with
     // no progress write, writes a standing instruction — removed again as
     // soon as progress resumes.
-    if (customNudgesOn) {
-    // Agent-facing custom nudge control. Registered as a plugin tool (not
-    // MCP) so it shares the server's runtime state. Session scope only:
+    // Agent-facing nudge control. Registered as a plugin tool (not MCP) so it
+    // shares the server's runtime state. Session scope only:
     // broader scopes change every session, and this host exposes no
     // permission prompt from the tool surface, so they are refused with a
     // pointer to the slash/palette surfaces.
@@ -1325,14 +1398,18 @@ export default Plugin.define({
         editor.add({
           name: nudgeToolName,
           description:
-            "Manage custom progress nudges for THIS session. A nudge is a configurable reminder text with a trigger (interval/steps/event), cooldown, criteria, TTL, and fire cap; it is delivered to the model, not the user. Actions: set, list, status, on, off, clear. Agent-set rules are session-scoped only; project/global rules must be created by the user via /progress nudge, the palette, or the rule files.",
+            "Manage reminders for THIS session. Actions mute/unmute/status work always: mute non-block reminders (say, stale progress, wall-clock, relay hints, custom info/warn) for a number of minutes; block-level safety reminders still land. When customNudges is enabled, set/list/status/on/off/clear also manage configurable nudge rules (text, trigger, cooldown, criteria, TTL, fire cap). Agent-set rules are session-scoped only; project/global rules require the user-facing surfaces.",
           input: {
             type: "object",
             properties: {
               action: {
                 type: "string",
-                enum: ["set", "list", "status", "on", "off", "clear"],
+                enum: ["mute", "unmute", "set", "list", "status", "on", "off", "clear"],
                 description: "What to do. Defaults to list.",
+              },
+              minutes: {
+                type: "number",
+                description: "For mute: how long to quiet non-block reminders (1-240, default 30).",
               },
               preset: {
                 type: "string",
@@ -1389,8 +1466,55 @@ export default Plugin.define({
             const sessionID = context.sessionID;
             knownSessions.add(sessionID);
             const action = String(input?.action ?? "list");
-            if (action === "list" || action === "status") {
-              return { content: nudgeText(sessionID, action === "status") };
+            if (action === "mute" || action === "unmute") {
+              if (action === "unmute") {
+                nudgeMutedUntil.delete(sessionID);
+                return { content: "Session reminders unmuted." };
+              }
+              const raw = Number(input?.minutes);
+              const minutes =
+                Number.isFinite(raw) && raw > 0 ? Math.min(240, Math.max(1, Math.floor(raw))) : 30;
+              nudgeMutedUntil.set(sessionID, Date.now() + minutes * 60_000);
+              return {
+                content:
+                  `Session reminders muted for ${minutes}m (non-block only). ` +
+                  "Block-level safety reminders still land; run this tool with action \"unmute\" to restore.",
+              };
+            }
+            if (action === "status") {
+              const remaining = Math.max(
+                0,
+                (nudgeMutedUntil.get(sessionID) ?? 0) - Date.now()
+              );
+              const muteLine =
+                remaining > 0
+                  ? `Muted for another ${Math.ceil(remaining / 60_000)}m.`
+                  : "Not muted.";
+              if (!customNudgesOn) {
+                return {
+                  content:
+                    `${muteLine} Custom nudge rule editor is disabled (set customNudges: true); ` +
+                    "mute/unmute still work.",
+                };
+              }
+              return { content: `${muteLine}\n${nudgeText(sessionID, true)}` };
+            }
+            if (action === "list") {
+              if (!customNudgesOn) {
+                return {
+                  content:
+                    "Custom nudge rules are disabled (set customNudges: true). " +
+                    "Mute is available: { action: \"mute\", minutes: 30 }.",
+                };
+              }
+              return { content: nudgeText(sessionID, false) };
+            }
+            if (!customNudgesOn) {
+              return {
+                content:
+                  "Custom nudge rules are disabled (set customNudges: true). " +
+                  "Mute is available now: { action: \"mute\", minutes: 30 }.",
+              };
             }
             const id = String(input?.id ?? "").trim();
             if (!id) return { content: "Missing id." };
@@ -1491,7 +1615,6 @@ export default Plugin.define({
     } catch (error) {
       console.warn(`[opencode-progress] custom nudge tool registration failed: ${String(error)}`);
     }
-    }
 
     const wallClockMs = normalizeWallClockMs(ctx.options);
     const wallTrackers = new Map<string, WallClockState>();
@@ -1576,7 +1699,11 @@ export default Plugin.define({
     // Pre-flight relay hint: see a long-running command BEFORE it runs and
     // suggest wrapping it in the relay. Detection only — commands are never
     // rewritten. Opt out with { options: { relayHints: false } }.
-    const relayHintCooldown = new Map<string, number>();
+    // One hint per repeating command shape, emitted on the second occurrence.
+    // A single long command already gets the relay hint in the progress tool
+    // response, so nagging after it has finished is pure noise.
+    const relayPatternCounts = new Map<string, Map<string, number>>();
+    const relayPatternHinted = new Map<string, Set<string>>();
     let relayHintHook: Awaited<ReturnType<typeof ctx.tool.hook>> | undefined;
     if (ctx.options?.relayHints !== false) {
       relayHintHook = await ctx.tool.hook('execute.before', (event) => {
@@ -1586,12 +1713,32 @@ export default Plugin.define({
           const command = typeof input?.command === 'string' ? input.command : '';
           const match = relayHintFor(command);
           if (!match) return;
-          const now = Date.now();
-          if (now - (relayHintCooldown.get(event.sessionID) ?? 0) < 90_000) return;
-          relayHintCooldown.set(event.sessionID, now);
-          putReminder(event.sessionID, 'info', 'relay', relayHintMessage(match));
+          const pattern = relayCommandPattern(command);
+          if (!pattern) return;
+          const counts =
+            relayPatternCounts.get(event.sessionID) ?? new Map<string, number>();
+          const count = (counts.get(pattern) ?? 0) + 1;
+          counts.set(pattern, count);
+          relayPatternCounts.set(event.sessionID, counts);
+          const hinted =
+            relayPatternHinted.get(event.sessionID) ?? new Set<string>();
+          if (count < 2 || hinted.has(pattern)) return;
+          hinted.add(pattern);
+          relayPatternHinted.set(event.sessionID, hinted);
+          putReminder(
+            event.sessionID,
+            'info',
+            'relay',
+            relayPatternHintMessage(pattern, count, match)
+          );
           if (verbose) {
-            logNudge({ event: 'relay-hint', sessionID: event.sessionID, command: match.slice(0, 120) });
+            logNudge({
+              event: 'relay-hint',
+              sessionID: event.sessionID,
+              pattern,
+              count,
+              command: match.slice(0, 120),
+            });
           }
         } catch (error) {
           console.error('[opencode-progress] relay hint failed', String(error));
@@ -1617,6 +1764,15 @@ export default Plugin.define({
                 !entry.dismissed &&
                 !isHealthyWaiting(entry, now, staleAfterMs)
             );
+            if (
+              hasActive &&
+              hasActiveChildren(sessionID, now, Math.max(wallClockMs, staleAfterMs))
+            ) {
+              // Children are working: give the parent a fresh grace window
+              // instead of firing the moment they finish.
+              wallTrackers.set(sessionID, { lastAt: now, streak: 0 });
+              continue;
+            }
             const lastProgressAt = Math.max(
               sessionEntries.reduce((max, entry) => Math.max(max, entry.updatedAt ?? 0), 0),
               promptAt.get(sessionID) ?? 0

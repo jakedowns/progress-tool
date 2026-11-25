@@ -323,7 +323,7 @@ export function staleProgressEscalation(
 // --- Relay hint (pre-flight, before the command runs) ---------------------
 
 const LONG_COMMAND_RE =
-  /\b(?:npm|pnpm|yarn|bun)\s+(?:test|run\s+(?:build|test|lint|check|typecheck))\b|\b(?:vite\s+build|webpack|rollup|jest|vitest|pytest|cargo\s+(?:build|test)|go\s+(?:build|test)|make\b|gradle|mvn|docker\s+build)\b/i;
+  /\b(?:npm|pnpm|yarn|bun)\s+(?:test|run\s+(?:build|test|lint|check|typecheck))\b|\b(?:vite\s+build|webpack|rollup|jest|vitest|pytest|cargo\s+(?:build|test)|go\s+(?:build|test)|make\b|gradlew?(?:\.bat)?|mvnw?|docker\s+build)\b/i;
 
 /**
  * Detect a long-running command that is NOT already piped through the relay.
@@ -341,6 +341,34 @@ export function relayHintFor(command: string | null | undefined): string | null 
   return command.trim();
 }
 
+/**
+ * Stable key for a repeating long-command shape. Strips leading environment
+ * assignments and `cd … &&` wrappers, then keeps the executable basename and
+ * its first non-flag argument. Two `./gradlew assembleDebug` runs share a key.
+ */
+export function relayCommandPattern(command: string | null | undefined): string | null {
+  const hinted = relayHintFor(command);
+  if (!hinted) return null;
+  let rest = hinted
+    .replace(/^(?:export\s+)?(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)+/, "")
+    .replace(/^cd\s+[^&]+\s*&&\s*/, "")
+    .trim();
+  const tokens = rest.split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return null;
+  const executable = tokens[0].replace(/^['"]|['"]$/g, "").split("/").pop() || tokens[0];
+  const subcommand = tokens[1] && !tokens[1].startsWith("-") ? tokens[1] : "";
+  return `${executable}${subcommand ? ` ${subcommand}` : ""}`.slice(0, 80);
+}
+
+export function relayPatternHintMessage(
+  pattern: string,
+  count: number,
+  command: string
+): string {
+  const shown = command.length > 80 ? `${command.slice(0, 77)}…` : command;
+  return `Repeating long command (${count}×): ${pattern}. Next time wrap it: progress-relay --id <id> -- ${shown} (or pipe it).`;
+}
+
 export function relayHintMessage(command: string): string {
   const shown = command.length > 90 ? `${command.slice(0, 87)}…` : command;
   return `Long command — next time wrap it: progress-relay --id <id> -- ${shown} (or pipe it). Exit code maps to done/error.`;
@@ -353,7 +381,10 @@ export interface IdleEntry {
   title?: string;
   status: string;
   detail?: string | null;
+  parentId?: string | null;
   dismissed?: { at: number } | null;
+  /** Written by a child/subagent session and adopted onto this one. */
+  subagent?: boolean;
   /** Epoch ms of the entry's last write; relay ticks keep this fresh. */
   updatedAt?: number;
 }
@@ -393,25 +424,50 @@ export function idleReminder(
   const cooldownMs = options.cooldownMs ?? 120_000;
   const maxPerRun = options.maxPerRun ?? 3;
   const now = options.now ?? Date.now();
-  // Relay-driven tasks tick several times per second; only entries nobody is
-  // writing to deserve an idle nag. Pending entries count as open work: a
-  // queued tree left idle is exactly what the reminder is for. Unknown
-  // timestamps count as stale.
-  const staleAfterMs = options.staleAfterMs ?? 5 * 60_000;
+  // A turn-end reminder should only fire for work the session itself has
+  // neglected. Relay-driven tasks tick several times per second, so only
+  // entries nobody is writing to deserve it; 10 minutes is longer than a
+  // build-and-device pass and avoids nagging healthy long work.
+  const staleAfterMs = options.staleAfterMs ?? 10 * 60_000;
 
-  const open = entries
-    .filter(
-      (entry) =>
-        (entry.status === "running" || entry.status === "waiting" || entry.status === "pending") &&
-        !entry.dismissed &&
-        !isHealthyWaiting(entry, now, staleAfterMs) &&
-        (entry.updatedAt == null || now - entry.updatedAt >= staleAfterMs)
-    )
-    .map((entry) => `${entry.id} (${entry.status})`)
+  const nonTerminal = entries.filter(
+    (entry) =>
+      entry &&
+      !entry.dismissed &&
+      (entry.status === "running" ||
+        entry.status === "waiting" ||
+        entry.status === "pending" ||
+        entry.status === "error")
+  );
+  // A parent whose child entry is still open is blocked on that child, not
+  // abandoned. Do not count it as neglect.
+  const blockedParents = new Set(
+    nonTerminal
+      .map((entry) => entry.parentId)
+      .filter((id): id is string => typeof id === "string" && id.length > 0)
+  );
+  const childOwned = nonTerminal.filter((entry) => entry.subagent).length;
+
+  const neglected = nonTerminal
+    .filter((entry) => !entry.subagent)
+    .filter((entry) => !(entry.id && blockedParents.has(entry.id)))
+    .filter((entry) => {
+      // An old terminal error is history, not a task the agent can close.
+      // Only surface errors that are recent enough to act on.
+      if (entry.status === "error") {
+        return entry.updatedAt == null || now - entry.updatedAt <= 60 * 60_000;
+      }
+      if (isHealthyWaiting(entry, now, staleAfterMs)) return false;
+      return entry.updatedAt == null || now - entry.updatedAt >= staleAfterMs;
+    })
+    .map((entry) => {
+      const age = entry.updatedAt == null ? "unknown" : formatAge(now - entry.updatedAt);
+      return `${entry.id} (${entry.status}, ${age})`;
+    })
     .sort();
-  const signature = open.join(" | ");
+  const signature = neglected.join(" | ");
 
-  if (open.length === 0) {
+  if (neglected.length === 0) {
     return { action: "none", signature, lastAt: tracker.lastAt, count: 0 };
   }
 
@@ -421,11 +477,15 @@ export function idleReminder(
     return { action: "none", signature, lastAt: tracker.lastAt, count };
   }
 
-  const shown = open.slice(0, 4).join(", ");
-  const suffix = open.length > 4 ? ` +${open.length - 4} more` : "";
+  const shown = neglected.slice(0, 3).join(", ");
+  const suffix = neglected.length > 3 ? ` +${neglected.length - 3} more` : "";
+  const excluded: string[] = [];
+  if (childOwned > 0) excluded.push(`${childOwned} child-owned`);
+  if (blockedParents.size > 0) excluded.push(`${blockedParents.size} blocked on children`);
+  const tail = excluded.length > 0 ? ` (${excluded.join(", ")} excluded)` : "";
   const message = formatReminder(
     "block",
-    `turn ending with ${open.length} open task${open.length === 1 ? "" : "s"}: ${shown}${suffix}. Close finished work or continue.`
+    `turn ending with ${neglected.length} stale/error own task${neglected.length === 1 ? "" : "s"}: ${shown}${suffix}${tail}. Close or continue.`
   );
 
   return { action: "remind", signature, lastAt: now, count: count + 1, message };
@@ -471,7 +531,7 @@ export interface WallClockOptions {
   maxStreak?: number;
 }
 
-export function normalizeWallClockMs(raw: unknown, fallback = 2 * 60 * 1000): number {
+export function normalizeWallClockMs(raw: unknown, fallback = 10 * 60 * 1000): number {
   const value = (raw ?? {}) as Record<string, unknown>;
   const ms = value.wallClockMs;
   if (ms === 0) return 0; // explicitly disabled

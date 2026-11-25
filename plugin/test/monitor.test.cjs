@@ -32,8 +32,10 @@ const {
   staleProgressEscalation,
   idleReminder,
   wallClockNudge,
+  relayCommandPattern,
   relayHintFor,
   relayHintMessage,
+  relayPatternHintMessage,
 } = require(path.join(OUT, 'monitor.cjs'));
 
 const idle = () => ({
@@ -245,8 +247,8 @@ test('idle reminder: fresh relay ticks are excluded (only stale entries nag)', (
   ];
   const decision = idleReminder({ signature: '', lastAt: 0, count: 0 }, entries, { now, staleAfterMs: 60_000 });
   assert.equal(decision.action, 'remind');
-  assert.match(decision.message, /stale \(running\)/);
-  assert.match(decision.message, /unknown \(waiting\)/);
+  assert.match(decision.message, /stale \(running, 10m\)/);
+  assert.match(decision.message, /unknown \(waiting, unknown\)/);
   assert.doesNotMatch(decision.message, /live \(running\)/);
 });
 
@@ -364,11 +366,76 @@ test('idle reminder: fires for open entries, skips dismissed/closed, names them'
   ];
   const decision = idleReminder({ signature: '', lastAt: 0, count: 0 }, entries, { now });
   assert.equal(decision.action, 'remind');
-  assert.match(decision.message, /^\[block\] turn ending with 2 open tasks/);
-  assert.match(decision.message, /build \(running\)/);
-  assert.match(decision.message, /docs \(waiting\)/);
+  assert.match(decision.message, /^\[block\] turn ending with 2 stale\/error own tasks/);
+  assert.match(decision.message, /build \(running, unknown\)/);
+  assert.match(decision.message, /docs \(waiting, unknown\)/);
   assert.doesNotMatch(decision.message, /closed/);
   assert.doesNotMatch(decision.message, /muted/);
+});
+
+test('idle reminder: ignores child-owned work, blocked parents, and fresh entries', () => {
+  const now = 1_000_000_000;
+  const stale = now - 20 * 60_000;
+  const fresh = now - 2 * 60_000;
+  const entries = [
+    { id: 'own', status: 'running', updatedAt: stale },
+    { id: 'sub', status: 'running', updatedAt: stale, subagent: true },
+    { id: 'parent', status: 'running', updatedAt: stale },
+    { id: 'child', status: 'running', updatedAt: fresh, parentId: 'parent' },
+    { id: 'failed', status: 'error', updatedAt: fresh },
+    { id: 'young', status: 'running', updatedAt: now - 6 * 60_000 },
+  ];
+  const decision = idleReminder({ signature: '', lastAt: 0, count: 0 }, entries, { now });
+  assert.equal(decision.action, 'remind');
+  assert.match(decision.message, /turn ending with 2 stale\/error own tasks/);
+  assert.match(decision.message, /own \(running, 20m\)/);
+  assert.match(decision.message, /failed \(error, 2m\)/);
+  assert.doesNotMatch(decision.message, /\((sub|parent|child|young),/);
+  assert.match(decision.message, /1 child-owned/);
+  assert.match(decision.message, /1 blocked on children/);
+});
+
+test('idle reminder: old terminal errors are history, not nagging material', () => {
+  const now = 1_000_000_000;
+  const oldError = idleReminder(
+    { signature: '', lastAt: 0, count: 0 },
+    [{ id: 'old-failure', status: 'error', updatedAt: now - 2 * 60 * 60_000 }],
+    { now }
+  );
+  assert.equal(oldError.action, 'none');
+
+  const recentError = idleReminder(
+    { signature: '', lastAt: 0, count: 0 },
+    [{ id: 'fresh-failure', status: 'error', updatedAt: now - 5 * 60_000 }],
+    { now }
+  );
+  assert.equal(recentError.action, 'remind');
+  assert.match(recentError.message, /fresh-failure \(error, 5m\)/);
+});
+
+test('idle reminder: 6m without progress is not stale (10m default)', () => {
+  const now = 1_000_000_000;
+  const decision = idleReminder(
+    { signature: '', lastAt: 0, count: 0 },
+    [{ id: 'building', status: 'running', updatedAt: now - 6 * 60_000 }],
+    { now }
+  );
+  assert.equal(decision.action, 'none');
+});
+
+test('relay patterns: stable per command shape, one hint per pattern', () => {
+  assert.equal(relayCommandPattern('export JAVA_HOME=/opt/jdk gradlew assembleDebug'), 'gradlew assembleDebug');
+  assert.equal(relayCommandPattern('cd /repo && ./gradlew assembleDebug'), 'gradlew assembleDebug');
+  assert.equal(relayCommandPattern('npm test'), 'npm test');
+  assert.equal(relayCommandPattern('npm test | progress-relay --id t1'), null);
+  assert.equal(relayCommandPattern('git status'), null);
+  assert.notEqual(
+    relayCommandPattern('gradlew assembleDebug'),
+    relayCommandPattern('gradlew test')
+  );
+  const message = relayPatternHintMessage('gradlew assembleDebug', 3, 'gradlew assembleDebug');
+  assert.match(message, /Repeating long command \(3×\)/);
+  assert.match(message, /progress-relay --id <id>/);
 });
 
 test('idle reminder: no open entries → silent', () => {
@@ -465,8 +532,8 @@ test('wall-clock: threshold 0 disables; normalizer defaults to 120s and floors a
     wallClockNudge({ lastAt: 0 }, { hasActive: true, lastProgressAt: 0, now: 10 ** 12 }, { thresholdMs: 0 }).action,
     'none'
   );
-  assert.equal(normalizeWallClockMs({}), 2 * 60 * 1000);
+  assert.equal(normalizeWallClockMs({}), 10 * 60 * 1000);
   assert.equal(normalizeWallClockMs({ wallClockMs: 0 }), 0);
-  assert.equal(normalizeWallClockMs({ wallClockMs: 5_000 }), 2 * 60 * 1000, 'below floor → default');
+  assert.equal(normalizeWallClockMs({ wallClockMs: 5_000 }), 10 * 60 * 1000, 'below floor → default');
   assert.equal(normalizeWallClockMs({ wallClockMs: 120_000 }), 120_000);
 });
