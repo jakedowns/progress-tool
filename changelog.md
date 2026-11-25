@@ -223,7 +223,7 @@ Shipped since `mcp-server@2.10.2`:
 - **Store and mirror support** for cleared/dismissed entries plus expanded MCP
   smoke and task-list suites (**57 tests**).
 
-## 2.23.0 — custom nudges (unreleased)
+## 2.23.0 — custom nudges (released, `plugin@2.23.0`)
 
 User- and agent-configurable reminders, built on the 2.22.0 reminder engine.
 **Opt-in:** the whole feature is gated behind `{ customNudges: true }`
@@ -274,7 +274,16 @@ is registered until it is enabled.
   caps, replace suppression, stores, project-root discovery, session scoping).
   GUI/TUI bundles rebuilt.
 
-## 2.22.0 — quieter reminders and `progress_touch` (unreleased)
+## mcp-server 2.12.0 — `progress_touch` (released, `mcp-server@2.12.0`)
+
+- **`progress_touch` MCP tool + `progress-touch` CLI.** Refreshes one entry or
+  `ids[]` without changing status, title, progress, or parent; bumps
+  `updatedAt` and optionally replaces `detail`. Missing ids are reported, not
+  fabricated.
+- Plugin `2.22.0` consumes the released MCP `2.12.0` through the existing
+  `^2.10.1` dependency range.
+
+## 2.22.0 — quieter reminders and `progress_touch` (shipped in `plugin@2.23.0`)
 
 Closes the 13-point nudge feedback from a 2026-11-24 session. Reminder engine
 shared by strict, wall-clock, idle, relay, and `say` nudges.
