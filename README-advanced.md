@@ -2,7 +2,7 @@
 
 Back to the [main README](./README.md).
 
-**Versions:** MCP server `2.12.0` · OpenCode plugin `2.23.0`
+**Versions:** MCP server `2.12.0` · OpenCode plugin `2.24.0`
 
 This document is the reference half of the project: the portable contract, the
 relay's behaviour, state-store guarantees, architecture, testing, every plugin

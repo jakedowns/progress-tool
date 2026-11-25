@@ -20,7 +20,7 @@ execFileSync(
   [path.join(ROOT, 'src', 'feedback.ts'), '--bundle', '--format=cjs', `--outfile=${path.join(OUT, 'feedback.cjs')}`],
   { stdio: 'pipe' }
 );
-const { feedbackIssueUrl } = require(path.join(OUT, 'feedback.cjs'));
+const { feedbackIssueUrl, releasesUrl } = require(path.join(OUT, 'feedback.cjs'));
 
 test('feedback link prefills a versioned issue title', () => {
   assert.equal(
@@ -33,4 +33,11 @@ test('feedback link survives unusual version strings', () => {
   const url = feedbackIssueUrl('3.0.0-beta.1+build');
   const title = new URL(url).searchParams.get('title');
   assert.equal(title, '[Feedback] v3.0.0-beta.1+build');
+});
+
+test('release notes link points at the repo releases page', () => {
+  assert.equal(
+    releasesUrl(),
+    'https://github.com/jakedowns/progress-tool/releases'
+  );
 });

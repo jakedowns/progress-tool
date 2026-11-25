@@ -10,7 +10,7 @@ import { ComposerPill, Command, MenuItem, Panel, Plugin, Style } from "@opencode
 import type { MountedSession } from "@opencode/plugin/gui";
 import { For, Index, Show, batch, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import pkg from "../package.json";
-import { feedbackIssueUrl } from "./feedback.js";
+import { feedbackIssueUrl, releasesUrl } from "./feedback.js";
 import { ProgressRpc } from "./rpc.js";
 import {
   GUI_PROGRESS_PANEL_ID,
@@ -1022,6 +1022,157 @@ export default Plugin.define({
       "font-size": "12px",
     };
 
+    /**
+     * Read-only settings tab for the pill popover and sidebar. Values are the
+     * effective runtime options; edits belong in the OpenCode config that
+     * declares the plugin and apply on reload.
+     */
+    const SettingsPanel = (props: { onBack: () => void }) => {
+      const sections = () => [
+        {
+          title: "View",
+          rows: [
+            ["Placement", layoutMode()],
+            ["Tree theme", treeTheme()],
+            ["Bar style", themeStore.barStyle],
+            ["Detail lines", String(detailLines)],
+            ["Refresh", `${refreshMs}ms`],
+            ["Done entries", visibility.showDone ? (visibility.autoHideDone ? "auto-hide" : "shown") : "hidden"],
+            ["Expand roots", expandRootsByDefault ? "yes" : "no"],
+          ] as Array<[string, string]>,
+        },
+        {
+          title: "Reminders",
+          rows: [
+            ["Strict mode", String(ctx.options?.strictMode ?? "nudge")],
+            ["Wall clock", `${Math.round((typeof ctx.options?.wallClockMs === "number" ? ctx.options.wallClockMs : 120_000) / 1000)}s`],
+            ["Idle reminder", ctx.options?.idleReminder === false ? "off" : "on"],
+            ["Relay hints", ctx.options?.relayHints === false ? "off" : "on"],
+            ["Custom nudges", ctx.options?.customNudges === true ? "on" : "off (opt-in)"],
+            ["Say notes", ctx.options?.say === true ? "on" : "off"],
+            ["Say surfaces", sayModes.length > 0 ? sayModes.join(", ") : "none"],
+          ] as Array<[string, string]>,
+        },
+        {
+          title: "Data",
+          rows: [
+            ["Scope", visibility.scope],
+            ["Task-list mirror", taskListStatus()?.enabled ? taskListStatus()?.mode ?? "on" : "off"],
+            ["Workspace", ctx.location?.directory ?? "unknown"],
+          ] as Array<[string, string]>,
+        },
+      ];
+
+      const linkStyle = {
+        border: "none",
+        background: "transparent",
+        color: "inherit",
+        cursor: "pointer",
+        padding: "0",
+        "font-size": "10px",
+        "text-decoration": "underline",
+        opacity: "0.75",
+      } as const;
+
+      return (
+        <div
+          style={{
+            display: "flex",
+            "flex-direction": "column",
+            gap: "6px",
+            "flex": "1 1 auto",
+            "min-height": "0",
+            "min-width": "260px",
+            "max-height": "min(60vh, 520px)",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              "align-items": "center",
+              gap: "6px",
+              "padding-bottom": "6px",
+              "border-bottom": "1px solid rgba(127,127,127,0.2)",
+              "flex": "0 0 auto",
+            }}
+          >
+            <span style={{ flex: "1 1 auto", "font-size": "12px", opacity: "0.75" }}>
+              Plugin settings
+            </span>
+            <button
+              type="button"
+              class="progress-pill-button"
+              onClick={props.onBack}
+              style={{ ...footerButtonStyle, flex: "0 0 auto", padding: "0", opacity: "1", "font-size": "10px", "text-decoration": "underline" }}
+            >
+              [Tree]
+            </button>
+          </div>
+          <div
+            style={{
+              display: "flex",
+              "flex-direction": "column",
+              gap: "8px",
+              "flex": "1 1 auto",
+              "min-height": "0",
+              "overflow-y": "auto",
+              "padding-right": "4px",
+            }}
+          >
+            <For each={sections()}>
+              {(section) => (
+                <div style={{ display: "flex", "flex-direction": "column", gap: "2px" }}>
+                  <div style={{ "font-size": "10px", "text-transform": "uppercase", "letter-spacing": "0.04em", opacity: "0.45" }}>
+                    {section.title}
+                  </div>
+                  <For each={section.rows}>
+                    {([label, value]) => (
+                      <div
+                        style={{
+                          display: "flex",
+                          "align-items": "baseline",
+                          gap: "8px",
+                          "font-size": "11px",
+                          "line-height": "1.35",
+                        }}
+                      >
+                        <span style={{ flex: "0 0 96px", opacity: "0.55" }}>{label}</span>
+                        <span style={{ flex: "1 1 auto", "min-width": "0", overflow: "hidden", "text-overflow": "ellipsis", "white-space": "nowrap" }} title={value}>
+                          {value}
+                        </span>
+                      </div>
+                    )}
+                  </For>
+                </div>
+              )}
+            </For>
+          </div>
+          <div
+            style={{
+              display: "flex",
+              "align-items": "center",
+              gap: "10px",
+              "padding-top": "4px",
+              "border-top": "1px solid rgba(127,127,127,0.2)",
+              "font-size": "10px",
+              opacity: "0.6",
+              "flex": "0 0 auto",
+            }}
+          >
+            <button type="button" class="progress-pill-button" style={linkStyle} onClick={() => ctx.system.openExternal(releasesUrl())}>
+              v{pkg.version} release notes ↗
+            </button>
+            <button type="button" class="progress-pill-button" style={linkStyle} onClick={() => ctx.system.openExternal("https://github.com/jakedowns/progress-tool#readme")}>
+              Docs ↗
+            </button>
+          </div>
+          <div style={{ "font-size": "10px", opacity: "0.45", "flex": "0 0 auto" }}>
+            Edit these in the OpenCode config that declares the plugin; reload to apply.
+          </div>
+        </div>
+      );
+    };
+
     const sidebarHeaderButtonStyle = {
       flex: "0 0 auto",
       border: "1px solid rgba(127,127,127,0.35)",
@@ -1043,6 +1194,7 @@ export default Plugin.define({
       // The popover removes this component without a pointerleave; make sure
       // closing it never leaves refresh paused forever.
       onCleanup(() => setInteracting(false));
+      const [view, setView] = createSignal<"tree" | "settings">("tree");
       const scoped = createMemo(() =>
         scopeEntries(state().entries, props.sessionID, visibility)
       );
@@ -1165,6 +1317,10 @@ export default Plugin.define({
             "max-width": "520px",
           }}
         >
+          <Show
+            when={view() === "tree"}
+            fallback={<SettingsPanel onBack={() => setView("tree")} />}
+          >
           <div
             ref={(el) => (listEl = el)}
             onScroll={(event) => {
@@ -1265,7 +1421,8 @@ export default Plugin.define({
             </For>
           </Show>
           </div>
-          <Show when={rows().length > 0}>
+          </Show>
+          <Show when={view() === "tree" && rows().length > 0}>
             <div
               style={{
                 display: "flex",
@@ -1307,7 +1464,39 @@ export default Plugin.define({
               "user-select": "none",
             }}
           >
-            <span>progress plugin desktop v{pkg.version}</span>
+            <span>progress plugin desktop</span>
+            <button
+              type="button"
+              class="progress-pill-button"
+              title="Open release notes"
+              onClick={() => ctx.system.openExternal(releasesUrl())}
+              style={{
+                ...footerButtonStyle,
+                flex: "0 0 auto",
+                padding: "0",
+                opacity: "1",
+                "font-size": "10px",
+                "text-decoration": "underline",
+              }}
+            >
+              [v{pkg.version}]
+            </button>
+            <button
+              type="button"
+              class="progress-pill-button"
+              title="Show plugin settings"
+              onClick={() => setView((current) => (current === "settings" ? "tree" : "settings"))}
+              style={{
+                ...footerButtonStyle,
+                flex: "0 0 auto",
+                padding: "0",
+                opacity: "1",
+                "font-size": "10px",
+                "text-decoration": "underline",
+              }}
+            >
+              {view() === "settings" ? "[Tree]" : "[Settings]"}
+            </button>
             <button
               type="button"
               class="progress-pill-button"
@@ -1356,6 +1545,7 @@ export default Plugin.define({
       session: () => MountedSession;
       sessionID: () => string;
     }) => {
+      const [view, setView] = createSignal<"tree" | "settings">("tree");
       const scoped = createMemo(() =>
         scopeEntries(state().entries, props.sessionID(), visibility)
       );
@@ -1466,6 +1656,10 @@ export default Plugin.define({
             </div>
           </Show>
           <Show
+            when={view() === "tree"}
+            fallback={<SettingsPanel onBack={() => setView("tree")} />}
+          >
+          <Show
             when={visibleRoots().length > 0}
             fallback={
               <div
@@ -1550,7 +1744,8 @@ export default Plugin.define({
               </For>
             </div>
           </Show>
-          <Show when={visibleRoots().length > 0}>
+          </Show>
+          <Show when={view() === "tree" && visibleRoots().length > 0}>
             <div
               style={{
                 display: "flex",
@@ -1592,7 +1787,39 @@ export default Plugin.define({
               "flex": "0 0 auto",
             }}
           >
-            <span>progress plugin desktop v{pkg.version}</span>
+            <span>progress plugin desktop</span>
+            <button
+              type="button"
+              class="progress-pill-button"
+              title="Open release notes"
+              onClick={() => ctx.system.openExternal(releasesUrl())}
+              style={{
+                ...footerButtonStyle,
+                flex: "0 0 auto",
+                padding: "0",
+                opacity: "1",
+                "font-size": "10px",
+                "text-decoration": "underline",
+              }}
+            >
+              [v{pkg.version}]
+            </button>
+            <button
+              type="button"
+              class="progress-pill-button"
+              title="Show plugin settings"
+              onClick={() => setView((current) => (current === "settings" ? "tree" : "settings"))}
+              style={{
+                ...footerButtonStyle,
+                flex: "0 0 auto",
+                padding: "0",
+                opacity: "1",
+                "font-size": "10px",
+                "text-decoration": "underline",
+              }}
+            >
+              {view() === "settings" ? "[Tree]" : "[Settings]"}
+            </button>
             <button
               type="button"
               class="progress-pill-button"

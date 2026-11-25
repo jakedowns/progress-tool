@@ -31,7 +31,7 @@ Implements the [Agent Progress Tool proposal](https://gist.github.com/jakedowns/
 for OpenCode 2, and is written as a portable reference implementation any
 harness can copy or adapt.
 
-**Versions:** MCP server `2.12.0` · OpenCode plugin `2.23.0`
+**Versions:** MCP server `2.12.0` · OpenCode plugin `2.24.0`
 
 > **Advanced docs:** [schema, relay internals, state store, architecture, all
 > options, file map →](./README-advanced.md)
@@ -162,7 +162,9 @@ files, presets, and semantics.
 ## What the views do
 
 - **Desktop/web pill:** one row per root, with `(N · agg%)` when several roots
-  exist, hover details, and a menu with the full tree. Set
+  exist, hover details, and a menu with the full tree. The footer links the
+  plugin version to the repo's **Releases** page, and **[Settings]** opens a
+  read-only panel of the effective view, reminder, and data options. Set
   `guiLayout: "sidebar"` to move the tree into a pinned tab in the session's
   side panel (`guiSidebarWidth` sets its initial width), or use the pill's
   `[Sidebar]` action / the "Progress: swap layout" command at runtime.

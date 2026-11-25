@@ -223,6 +223,17 @@ Shipped since `mcp-server@2.10.2`:
 - **Store and mirror support** for cleared/dismissed entries plus expanded MCP
   smoke and task-list suites (**57 tests**).
 
+## 2.24.0 — settings tab and release links (unreleased)
+
+- **Settings tab in the tree view.** The desktop pill popover and pinned
+  sidebar footer now has a **[Settings]** tab beside **[Feedback]**. It shows
+  the effective view, reminder, and data options (layout, theme, refresh,
+  strict/wall/idle, say, custom nudges, mirror, workspace) and links to the
+  release notes and docs. Values are read-only; edits belong in the OpenCode
+  config that declares the plugin and apply on reload.
+- **Version link.** The footer version is now `[v2.24.0]`, opening
+  `https://github.com/jakedowns/progress-tool/releases` for changelog viewing.
+
 ## 2.23.0 — custom nudges (released, `plugin@2.23.0`)
 
 User- and agent-configurable reminders, built on the 2.22.0 reminder engine.
