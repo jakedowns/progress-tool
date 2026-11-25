@@ -686,6 +686,117 @@ There is deliberately no free-form path, so project config cannot point it at
 
 ---
 
+## Reminder flow (cooldowns, snoozing, coalescing)
+
+All built-in and custom reminders pass through one delivery gate, so severity,
+snoozing, dedupe, and the global quiet period behave the same way regardless of
+which rule produced the text.
+
+### Event → reminder
+
+```mermaid
+flowchart TD
+  subgraph Sources
+    STRICT["Strict monitor<br/>model steps + stale tree"]
+    WALL["Wall-clock timer<br/>no progress for 10m"]
+    IDLE["Turn end<br/>owned stale/error tasks"]
+    SAY["Say nudge<br/>long tool / silent run"]
+    RELAY["Relay hint<br/>2nd repeat of a command shape"]
+    CUSTOM["Custom rules<br/>interval / steps / either / event"]
+  end
+
+  STRICT --> GATE
+  WALL --> GATE
+  IDLE --> GATE
+  SAY --> GATE
+  RELAY --> GATE
+  CUSTOM --> GATE
+
+  GATE["putReminder(session, severity, source, text)"]
+```
+
+`IDLE` and strict escalation may also emit a **synthetic** turn input, but check
+replace-suppression before doing so.
+
+### Delivery gate
+
+```mermaid
+flowchart TD
+  A[Reminder from any source] --> M{Session muted?<br/>and severity != block}
+  M -->|yes| MX[Suppress · reason: muted]
+  M -->|no| R{Non-custom source<br/>and a live context-replace rule?}
+  R -->|yes| RX[Suppress · reason: custom-replace]
+  R -->|no| G{Non-block<br/>and last reminder < nudgeGapMs?}
+  G -->|yes| GX[Suppress · reason: gap]
+  G -->|no| F[Add info/warn/block prefix<br/>hash rendered text]
+  F --> D{Identical text already standing?}
+  D -->|yes| DX[Suppress · reason: dedupe]
+  D -->|no| P{New tier >= standing tier?}
+  P -->|no| PX[Suppress · lower priority]
+  P -->|yes| W[Write one standing<br/>progress-reminder context entry]
+  W --> L[Record lastReminderAt]
+  L --> MODEL[Model reads it on the next step]
+```
+
+Blocks **bypass** mute and the global gap because they exist to resume a stalled
+turn. They do **not** bypass a live `context-replace` custom rule.
+
+### Custom-rule evaluation
+
+```mermaid
+flowchart LR
+  T1["5s timer"] --> E
+  T2["Tool completed"] --> E
+  T3["Turn end"] --> E
+  E[Evaluate session] --> M[Read global → project → session files]
+  M --> U[Union + tombstones<br/>narrower scope wins]
+  U --> L[Each rule, narrowest first]
+  L --> EN{enabled<br/>TTL left<br/>fires left?}
+  EN -->|no| S[Skip]
+  EN -->|yes| IF{in flight<br/>and severity != block?}
+  IF -->|yes| S
+  IF -->|no| CD{now - lastFired<br/>< cooldown?}
+  CD -->|yes| S
+  CD -->|no| TR{trigger due?<br/>interval / steps / either / event}
+  TR -->|no| S
+  TR -->|yes| CR{criteria match?<br/>AND across categories}
+  CR -->|no| S
+  CR -->|yes| R[Render id/title/status/age/count/action]
+  R --> GATE[putReminder<br/>+ synthetic only if block]
+```
+
+### Cooldown and snooze knobs
+
+| Control | Default | Applies to |
+|---|---|---|
+| `cooldownMs` (strict) | 2 min | stale-progress nudges; one silent-run nudge per run |
+| `wallClockMs` | 10 min | wall-clock reminder; also its cooldown, max 3 per stretch |
+| Idle cooldown / cap | 2 min / 3 | same open-entry signature |
+| `idleStaleMs` | 10 min | what counts as a stale owned entry |
+| `sayNudgeCooldownMs` | 2 min | say nudge |
+| `sayNudgeMaxPerTurn` | 1 | say nudge per turn |
+| Relay pattern | once | 2nd occurrence of the same command shape |
+| Custom `cooldownMs` | 2 min | per custom rule |
+| `nudgeGapMs` | 60 s | global quiet period between any two non-block reminders |
+| `progress_nudge { action: "mute", minutes }` | 30 min | non-block reminders for this session (1–240 min) |
+| `progress_nudge { action: "unmute" }` | — | clears the session mute |
+
+**Snooze vs. gap.** Mute is an explicit session-wide suppression controlled by
+the agent; `nudgeGapMs` is automatic coalescing so several rules cannot fire
+back-to-back. Mute is not cleared by a new prompt; it expires by time or
+`unmute`.
+
+### Clearing the standing reminder
+
+```mermaid
+flowchart LR
+  PW[Any progress write / touch] --> C[Clear progress-reminder<br/>reset step counter]
+  PR[New prompt] --> C2[Clear reminder<br/>reset monitors, wall, idle, steps, say counts]
+  COMPL[Compliance] --> C3[Clear only that source<br/>strict / say / wall]
+```
+
+Custom rules survive prompts; their counters and TTL do not reset.
+
 ## Components and files
 
 | Component | Path |
@@ -705,6 +816,9 @@ There is deliberately no free-form path, so project config cannot point it at
 | Tree helpers (scope, visibility, roll-up, labels) | `plugin/src/tree.ts` |
 | Injected rules + session attribution block | `plugin/src/instructions.ts` |
 | Strict/wall-clock/idle logic | `plugin/src/monitor.ts` |
+| Shared reminder gate, severity, dedupe, ages | `plugin/src/reminders.ts` |
+| Custom nudge schema, stores, matcher, scheduler | `plugin/src/custom-nudges.ts` |
+| Say-nudge decisions | `plugin/src/say-monitor.ts` |
 | Subagent prompt stamping | `plugin/src/subagent.ts` |
 | Skill registry tiers | `plugin/src/skills.ts` |
 | MCP launch resolution | `plugin/src/mcp.ts` |

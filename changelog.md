@@ -249,8 +249,11 @@ Second feedback round from a five-subagent, multi-hour session.
 - **Say nudge:** remains budget-aware and at most one per turn by default; no
   change was needed beyond the shared gap.
 
-Tests: plugin **230** (new idle ownership, relay-pattern, and reminder-gap
-cases).
+- **Docs:** added reminder-flow diagrams covering event sources, the delivery
+  gate, custom-rule evaluation, cooldown/snooze knobs, and clearing.
+
+Tests: plugin **231** (new idle ownership, old-error grace, relay-pattern, and
+reminder-gap cases).
 
 ## 2.24.0 — settings tab and release links (unreleased)
 
