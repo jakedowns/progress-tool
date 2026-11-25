@@ -223,6 +223,54 @@ Shipped since `mcp-server@2.10.2`:
 - **Store and mirror support** for cleared/dismissed entries plus expanded MCP
   smoke and task-list suites (**57 tests**).
 
+## 2.23.0 — custom nudges (unreleased)
+
+User- and agent-configurable reminders, built on the 2.22.0 reminder engine.
+
+### Added
+
+- **Rule schema + stores.** `id`, `text` (with `{id}` `{title}` `{status}`
+  `{age}` `{count}` `{action}`), `severity`, `trigger`, `cooldownMs`,
+  `criteria`, `delivery`, `ttlMs`, `maxFires`. Dedicated, atomic files:
+  `~/.config/opencode/progress-nudge.json` (global),
+  `<projectRoot>/.opencode/progress-nudge.json` (project), and
+  `~/.config/opencode/progress-nudge-sessions.json` (session). Session rules
+  are stored per session id rather than in server memory so the TUI, GUI, and
+  server all see the same rule without an IPC bridge.
+- **Triggers.** Interval, model steps, either, and event-only. Step rules use
+  the logical model-step counter from 2.22.0; every progress write resets it.
+- **Criteria.** Status, stale age, no-progress time/steps, in-flight only/never,
+  tree empty/non-empty, idle-only, entry ids, and `self`/`children`/`all`
+  session scope. AND across categories, OR inside lists. Fresh-detail
+  `waiting` stays healthy unless `waiting` is listed explicitly.
+- **Delivery.** `context-replace` (pauses built-in progress/wall/idle/relay/say
+  reminders while live), `context-alongside` (deduped), and `synthetic`
+  (block-only). Shared one standing key and `block > warn > info` priority.
+- **Lifetime.** Per-rule TTL and fire cap (one-shot included), runtime counters
+  scoped per session; expired/exhausted rules remain listed until cleared.
+- **Merge/tombstones.** Global → project → session union; narrower scopes win
+  identical rendered output; `enabled: false` in a narrower scope mutes that
+  id in broader scopes.
+- **Surfaces.**
+  - TUI: `/progress nudge` wizard plus `list|status|set|on|off|clear`, with
+    flags for trigger, criteria, cooldown, TTL, and fire cap.
+  - GUI palette: **Progress: custom nudge…** wizard and **Progress: custom
+    nudge status** (enable/disable/clear), backed by new `nudge*` RPC methods.
+  - Agent tool `progress_nudge` (`set|list|status|on|off|clear`),
+    session-scoped only; broader scopes are refused with a pointer to the
+    user surfaces because the host exposes no tool permission prompt.
+  - Direct JSON editing, documented with the full schema.
+- **Telemetry.** `custom-nudge` events for fired rules and expired skips;
+  built-in suppression is recorded as `reminder` with `suppressed:
+  custom-replace`.
+
+### Tests
+
+- Plugin: **224** tests (16 new custom-nudge core tests: normalization,
+  presets, merge/tombstones, criteria, rendering, triggers, cooldown/TTL/fire
+  caps, replace suppression, stores, project-root discovery, session scoping).
+  GUI/TUI bundles rebuilt.
+
 ## 2.22.0 — quieter reminders and `progress_touch` (unreleased)
 
 Closes the 13-point nudge feedback from a 2026-11-24 session. Reminder engine

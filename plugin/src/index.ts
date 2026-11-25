@@ -50,6 +50,32 @@ import {
   type ReminderState,
 } from "./reminders.js";
 import {
+  clearNudgeRule,
+  clearSessionNudgeRule,
+  describeNudgeCriteria,
+  describeNudgeTrigger,
+  emptyNudgeRuntime,
+  entriesForSessions,
+  evaluateNudgeRule,
+  formatNudgeDuration,
+  mergeNudgeRules,
+  nextNudgeFireAt,
+  readNudgeRuleFile,
+  readSessionNudgeRules,
+  resolveNudgePaths,
+  ruleRuntimeKey,
+  ruleSuppressesBuiltins,
+  setNudgeRuleEnabled,
+  setSessionNudgeRuleEnabled,
+  upsertNudgeRule,
+  upsertSessionNudgeRule,
+  buildNudgeRule,
+  type CustomNudgeRule,
+  type NudgeEntry,
+  type NudgeRuntime,
+  type NudgeScope,
+} from "./custom-nudges.js";
+import {
   decideSayNudge,
   emptySayNudgeState,
   normalizeSayNudgeOptions,
@@ -177,6 +203,45 @@ export default Plugin.define({
     const standingReminders = new Map<string, ReminderState>();
     const REMINDER_KEY = 'progress-reminder';
 
+    // Custom nudge rules live in dedicated files (global/project/session),
+    // never in opencode.json. The scheduler reads them on demand: the files
+    // are tiny, and this keeps the TUI and server in sync without IPC.
+    const nudgePaths = resolveNudgePaths({ directory: ctx.location?.directory ?? process.cwd() });
+    const nudgeRuntimes = new Map<string, NudgeRuntime>();
+    const knownSessions = new Set<string>();
+    const nudgeRuntimeFor = (
+      rule: CustomNudgeRule,
+      sessionID: string,
+      now: number
+    ): NudgeRuntime => {
+      const key = ruleRuntimeKey(rule, sessionID);
+      const current = nudgeRuntimes.get(key);
+      if (current) return current;
+      const runtime = emptyNudgeRuntime(rule, now);
+      nudgeRuntimes.set(key, runtime);
+      return runtime;
+    };
+    const effectiveNudgeRules = (sessionID: string) => {
+      const global = readNudgeRuleFile(nudgePaths.globalFile, "global");
+      const project = readNudgeRuleFile(nudgePaths.projectFile, "project");
+      const session = readSessionNudgeRules(nudgePaths.sessionFile, sessionID);
+      return {
+        rules: mergeNudgeRules({
+          global: global.rules,
+          project: project.rules,
+          session: session.rules,
+        }),
+        errors: [...global.errors, ...project.errors, ...session.errors],
+      };
+    };
+    /** True while a replace rule is live; built-in reminders stay quiet. */
+    const hasActiveReplace = (sessionID: string): boolean => {
+      const now = Date.now();
+      return effectiveNudgeRules(sessionID).rules.some((rule) =>
+        ruleSuppressesBuiltins(rule, nudgeRuntimeFor(rule, sessionID, now), now)
+      );
+    };
+
     const putReminder = (
       sessionID: string,
       severity: ReminderSeverity,
@@ -185,6 +250,11 @@ export default Plugin.define({
     ): boolean => {
       // Message helpers that already carry a tier prefix must not be wrapped
       // twice; helpers that return only a body get the prefix here.
+      const isCustom = source.startsWith("custom:");
+      if (!isCustom && hasActiveReplace(sessionID)) {
+        if (verbose) logNudge({ event: 'reminder', sessionID, severity, source, suppressed: 'custom-replace' });
+        return false;
+      }
       const text = /^\[(info|warn|block)\]\s/.test(body)
         ? body.trim()
         : formatReminder(severity, body);
@@ -216,6 +286,111 @@ export default Plugin.define({
         .remove({ sessionID, key: REMINDER_KEY })
         .catch(() => {});
     };
+
+    /**
+     * Evaluate the session's effective custom rules (narrower scopes first).
+     * Called on tool completion, at turn end, and on the interval timer.
+     * `timer` limits the pass to clock-triggered rules so event rules do not
+     * fire just because the timer ticked.
+     */
+    function evaluateCustomNudges(
+      sessionID: string,
+      options: { idle?: boolean; timer?: boolean } = {}
+    ): void {
+      try {
+        knownSessions.add(sessionID);
+        const now = Date.now();
+        const { rules } = effectiveNudgeRules(sessionID);
+        if (rules.length === 0) return;
+        const all = Object.entries(readProgressState().entries ?? {}).map(
+          ([key, entry]) => ({ ...(entry as NudgeEntry), key })
+        );
+        const links = readSessionMap();
+        const steps = stepsSinceProgress.get(sessionID) ?? 0;
+        const inFlight = (activeToolCounts.get(sessionID) ?? 0) > 0;
+        const seen = new Set<string>();
+        for (const rule of rules) {
+          if (
+            options.timer &&
+            rule.trigger.type !== "interval" &&
+            rule.trigger.type !== "either"
+          ) {
+            continue;
+          }
+          const sessionMode = rule.criteria.sessions ?? "self";
+          const scoped = entriesForSessions(all, sessionMode, sessionID, links);
+          const scopedProgress = scoped.reduce(
+            (max, entry) => Math.max(max, entry.updatedAt ?? 0),
+            0
+          );
+          // The newest real signal; fall back to the prompt baseline so a
+          // resumed session does not look stale from a previous day.
+          const progressBase =
+            scopedProgress > 0
+              ? Math.max(scopedProgress, promptAt.get(sessionID) ?? 0)
+              : promptAt.get(sessionID) ?? now;
+          const runtime = nudgeRuntimeFor(rule, sessionID, now);
+          const result = evaluateNudgeRule(rule, runtime, {
+            now,
+            entries: scoped,
+            stepsSinceProgress: steps,
+            lastProgressAt: progressBase,
+            inFlight,
+            idle: options.idle === true,
+          });
+          if (!result.fire || !result.text) {
+            if (verbose && result.reason === "expired") {
+              logNudge({
+                event: "custom-nudge",
+                sessionID,
+                ruleId: rule.id,
+                scope: rule.scope,
+                reason: "expired",
+              });
+            }
+            continue;
+          }
+          nudgeRuntimes.set(ruleRuntimeKey(rule, sessionID), result.runtime);
+          if (seen.has(result.text)) {
+            if (verbose) {
+              logNudge({
+                event: "custom-nudge",
+                sessionID,
+                ruleId: rule.id,
+                scope: rule.scope,
+                reason: "deduped",
+              });
+            }
+            continue;
+          }
+          seen.add(result.text);
+          const source = `custom:${rule.id}`;
+          putReminder(sessionID, rule.severity, source, result.text);
+          if (rule.delivery === "synthetic") {
+            void ctx.session
+              .synthetic({
+                sessionID,
+                text: formatReminder(rule.severity, result.text),
+              })
+              .catch(() => {});
+          }
+          if (verbose) {
+            logNudge({
+              event: "custom-nudge",
+              sessionID,
+              ruleId: rule.id,
+              scope: rule.scope,
+              severity: rule.severity,
+              delivery: rule.delivery,
+              text: result.text,
+            });
+          }
+        }
+      } catch (error) {
+        console.error("[opencode-progress] custom nudge evaluation failed", String(error));
+      }
+    }
+
     let sayController: SayController | undefined;
     let sayToolName = "say";
     let sayRegistration: Awaited<ReturnType<typeof ctx.tool.transform>> | undefined;
@@ -243,7 +418,10 @@ export default Plugin.define({
               sayCallsSinceNote.set(note.sessionID, 0);
               clearReminder(note.sessionID, 'say');
             },
-            synthetic: (input) => ctx.session.synthetic(input),
+            synthetic: (input) =>
+              hasActiveReplace(input.sessionID)
+                ? Promise.resolve()
+                : ctx.session.synthetic(input),
             log: (message, error) =>
               console.warn(`[opencode-progress] ${message}`, error ?? ""),
           },
@@ -420,6 +598,114 @@ export default Plugin.define({
         console.log(`[opencode-progress] v${pluginVersion} task-list mode=${mode}`);
         return { ok: true, mode };
       },
+      nudgeList: async ({ sessionID }) => {
+        const global = readNudgeRuleFile(nudgePaths.globalFile, "global");
+        const project = readNudgeRuleFile(nudgePaths.projectFile, "project");
+        const session = readSessionNudgeRules(nudgePaths.sessionFile, sessionID);
+        const merged = mergeNudgeRules({
+          global: global.rules,
+          project: project.rules,
+          session: session.rules,
+        });
+        const effective = new Set(merged.map((rule) => ruleRuntimeKey(rule, sessionID)));
+        const now = Date.now();
+        const rows = [
+          ...global.rules.map((rule) => ({ rule, scope: "global" as const })),
+          ...project.rules.map((rule) => ({ rule, scope: "project" as const })),
+          ...session.rules.map((rule) => ({ rule, scope: "session" as const })),
+        ].map(({ rule }) => {
+          const runtime = nudgeRuntimeFor(rule, sessionID, now);
+          const nextFireAt = nextNudgeFireAt(rule, runtime, now);
+          return {
+            id: rule.id,
+            ...(rule.title ? { title: rule.title } : {}),
+            scope: rule.scope,
+            enabled: rule.enabled,
+            text: rule.text,
+            severity: rule.severity,
+            delivery: rule.delivery,
+            trigger: describeNudgeTrigger(rule),
+            criteria: describeNudgeCriteria(rule),
+            ttlMs: rule.ttlMs,
+            maxFires: rule.maxFires,
+            fires: runtime.fires,
+            expiresAt: rule.ttlMs > 0 ? runtime.createdAt + rule.ttlMs : 0,
+            nextFireAt: nextFireAt ?? 0,
+            lastFiredAt: runtime.lastFiredAt,
+            effective: effective.has(ruleRuntimeKey(rule, sessionID)),
+          };
+        });
+        return {
+          rules: rows,
+          errors: [...global.errors, ...project.errors, ...session.errors],
+        };
+      },
+      nudgeSet: async ({ sessionID, preset, rule }) => {
+        const rawRule = (rule ?? {}) as Record<string, unknown>;
+        const result = buildNudgeRule(
+          { ...rawRule, source: rawRule.source ?? "user" },
+          (preset ?? "custom") as "replace" | "alongside" | "block" | "custom",
+          (rawRule.scope as NudgeScope) ?? "session"
+        );
+        if (!result.ok || !result.rule) {
+          return { ok: false, error: result.errors.join("; "), rule: {} };
+        }
+        const scope = result.rule.scope;
+        if (scope === "session") {
+          const saved = upsertSessionNudgeRule(nudgePaths.sessionFile, sessionID, result.rule);
+          if (saved.errors.length > 0) return { ok: false, error: saved.errors.join("; "), rule: {} };
+        } else {
+          const file = scope === "global" ? nudgePaths.globalFile : nudgePaths.projectFile;
+          const saved = upsertNudgeRule(file, scope, result.rule);
+          if (saved.errors.length > 0) return { ok: false, error: saved.errors.join("; "), rule: {} };
+        }
+        nudgeRuntimes.delete(ruleRuntimeKey(result.rule, sessionID));
+        console.log(
+          `[opencode-progress] v${pluginVersion} custom nudge set ${scope}:${result.rule.id}`
+        );
+        return {
+          ok: true,
+          rule: {
+            id: result.rule.id,
+            scope,
+            severity: result.rule.severity,
+            delivery: result.rule.delivery,
+            trigger: describeNudgeTrigger(result.rule),
+            criteria: describeNudgeCriteria(result.rule),
+            text: result.rule.text,
+            warnings: result.warnings,
+          },
+        };
+      },
+      nudgeSetEnabled: async ({ sessionID, scope, id, enabled }) => {
+        const result =
+          scope === "session"
+            ? setSessionNudgeRuleEnabled(nudgePaths.sessionFile, sessionID, id, enabled)
+            : setNudgeRuleEnabled(
+                scope === "global" ? nudgePaths.globalFile : nudgePaths.projectFile,
+                scope,
+                id,
+                enabled
+              );
+        nudgeRuntimes.delete(`${sessionID}:${scope}:${id}`);
+        return result.errors.length > 0
+          ? { ok: false, error: result.errors.join("; ") }
+          : { ok: true };
+      },
+      nudgeClear: async ({ sessionID, scope, id }) => {
+        const result =
+          scope === "session"
+            ? clearSessionNudgeRule(nudgePaths.sessionFile, sessionID, id)
+            : clearNudgeRule(
+                scope === "global" ? nudgePaths.globalFile : nudgePaths.projectFile,
+                scope,
+                id
+              );
+        nudgeRuntimes.delete(`${sessionID}:${scope}:${id}`);
+        return result.errors.length > 0
+          ? { ok: false, error: result.errors.join("; ") }
+          : { ok: true };
+      },
       setTreeTheme: async ({ theme, barStyle }) => {
         const result = writeThemeToConfig(
           { treeTheme: theme, barStyle },
@@ -583,6 +869,7 @@ export default Plugin.define({
           // Guidance is only meaningful when the progress tool exists; the
           // context hook flips this on once the MCP server has connected.
           if (!progressTool.available) return;
+          knownSessions.add(event.sessionID);
           const isProgressCall = /(^|_)progress(_touch)?$/.test(event.tool);
           const now = Date.now();
           const entries = Object.values(readProgressState().entries ?? {}).filter(
@@ -702,9 +989,11 @@ export default Plugin.define({
           }
           if (step.action === 'force' || step.action === 'stale-escalate') {
             clearReminder(event.sessionID, 'strict');
-            void ctx.session
-              .synthetic({ sessionID: event.sessionID, text })
-              .catch(() => {});
+            if (!hasActiveReplace(event.sessionID)) {
+              void ctx.session
+                .synthetic({ sessionID: event.sessionID, text })
+                .catch(() => {});
+            }
           }
           if (step.action === 'clear') {
             clearReminder(event.sessionID, 'strict');
@@ -738,8 +1027,13 @@ export default Plugin.define({
               adoptChildEntries(child, parent, agent);
             }
           } else if (event.type === 'session.deleted') {
+            const deletedID = event.data.sessionID;
+            knownSessions.delete(deletedID);
+            for (const key of nudgeRuntimes.keys()) {
+              if (key.startsWith(`${deletedID}:`)) nudgeRuntimes.delete(key);
+            }
             if (retainDeletedSessionProgress) continue;
-            const result = hardDeleteSession(event.data.sessionID);
+            const result = hardDeleteSession(deletedID);
             if (result.removed > 0) {
               console.log(
                 `[opencode-progress] purged ${result.removed} entries for deleted session ${event.data.sessionID}`
@@ -773,6 +1067,8 @@ export default Plugin.define({
     if (idleReminderEnabled) {
       idleHook = await ctx.session.hook('experimental.idle', async (event) => {
         try {
+          knownSessions.add(event.sessionID);
+          evaluateCustomNudges(event.sessionID, { idle: true });
           const entries = Object.values(readProgressState().entries ?? {}).filter(
             (entry) => entry && entry.sessionId === event.sessionID
           );
@@ -788,7 +1084,9 @@ export default Plugin.define({
           if (verbose) {
             logNudge({ event: 'idle-reminder', sessionID: event.sessionID, count: decision.count, openEntries: decision.signature.split(' | ').filter(Boolean).length });
           }
-          await ctx.session.synthetic({ sessionID: event.sessionID, text: decision.message });
+          if (!hasActiveReplace(event.sessionID)) {
+            await ctx.session.synthetic({ sessionID: event.sessionID, text: decision.message });
+          }
         } catch (error) {
           console.error('[opencode-progress] idle reminder failed', String(error));
         }
@@ -942,6 +1240,240 @@ export default Plugin.define({
     // session with pending entries and, after wallClockMs (default 10m) with
     // no progress write, writes a standing instruction — removed again as
     // soon as progress resumes.
+    // Agent-facing custom nudge control. Registered as a plugin tool (not
+    // MCP) so it shares the server's runtime state. Session scope only:
+    // broader scopes change every session, and this host exposes no
+    // permission prompt from the tool surface, so they are refused with a
+    // pointer to the slash/palette surfaces.
+    const nudgeRows = (sessionID: string) => {
+      const global = readNudgeRuleFile(nudgePaths.globalFile, "global");
+      const project = readNudgeRuleFile(nudgePaths.projectFile, "project");
+      const session = readSessionNudgeRules(nudgePaths.sessionFile, sessionID);
+      const merged = mergeNudgeRules({
+        global: global.rules,
+        project: project.rules,
+        session: session.rules,
+      });
+      const effective = new Set(merged.map((rule) => ruleRuntimeKey(rule, sessionID)));
+      const now = Date.now();
+      return {
+        rows: [
+          ...global.rules.map((rule) => ({ rule })),
+          ...project.rules.map((rule) => ({ rule })),
+          ...session.rules.map((rule) => ({ rule })),
+        ].map(({ rule }) => {
+          const runtime = nudgeRuntimeFor(rule, sessionID, now);
+          const next = nextNudgeFireAt(rule, runtime, now);
+          return {
+            rule,
+            runtime,
+            next,
+            effective: effective.has(ruleRuntimeKey(rule, sessionID)),
+          };
+        }),
+        errors: [...global.errors, ...project.errors, ...session.errors],
+      };
+    };
+
+    const nudgeText = (sessionID: string, detailed: boolean): string => {
+      const { rows, errors } = nudgeRows(sessionID);
+      if (rows.length === 0) {
+        return "No custom nudge rules. Set one with action \"set\" (session scope) or /progress nudge.";
+      }
+      const lines = rows.map(({ rule, runtime, next, effective }) => {
+        const state = rule.enabled
+          ? effective
+            ? "on"
+            : "muted"
+          : "off";
+        const base = `${rule.scope}:${rule.id} [${state}] ${rule.text}`;
+        if (!detailed) return base;
+        const bits = [
+          base,
+          `  ${describeNudgeTrigger(rule)}; ${describeNudgeCriteria(rule)}`,
+          `  severity ${rule.severity}, ${rule.delivery}, cooldown ${formatNudgeDuration(rule.cooldownMs)}, ttl ${formatNudgeDuration(rule.ttlMs)}, fires ${runtime.fires}${rule.maxFires > 0 ? `/${rule.maxFires}` : ""}`,
+        ];
+        if (next != null) bits.push(`  next ${new Date(next).toISOString()}`);
+        return bits.join("\n");
+      });
+      if (errors.length > 0) lines.push(`Invalid rules: ${errors.join("; ")}`);
+      return lines.join("\n");
+    };
+
+    try {
+      const taken = new Set((await ctx.tool.list()).map((tool) => tool.id));
+      const nudgeToolName = taken.has("progress_nudge") ? "custom_progress_nudge" : "progress_nudge";
+      await ctx.tool.transform((editor) => {
+        editor.add({
+          name: nudgeToolName,
+          description:
+            "Manage custom progress nudges for THIS session. A nudge is a configurable reminder text with a trigger (interval/steps/event), cooldown, criteria, TTL, and fire cap; it is delivered to the model, not the user. Actions: set, list, status, on, off, clear. Agent-set rules are session-scoped only; project/global rules must be created by the user via /progress nudge, the palette, or the rule files.",
+          input: {
+            type: "object",
+            properties: {
+              action: {
+                type: "string",
+                enum: ["set", "list", "status", "on", "off", "clear"],
+                description: "What to do. Defaults to list.",
+              },
+              preset: {
+                type: "string",
+                enum: ["replace", "alongside", "block", "custom"],
+                description: "Preset for set: replace built-ins, alongside, synthetic block, or custom.",
+              },
+              id: { type: "string", description: "Rule id slug (required for on/off/clear/set)." },
+              title: { type: "string", description: "Optional human-readable title." },
+              text: {
+                type: "string",
+                description:
+                  "Reminder text. Supports {id}, {title}, {status}, {age}, {count}, {action}; max 240 chars.",
+              },
+              severity: { type: "string", enum: ["info", "warn", "block"] },
+              scope: {
+                type: "string",
+                enum: ["session"],
+                description: "Agent rules are session-scoped only.",
+              },
+              delivery: {
+                type: "string",
+                enum: ["context-replace", "context-alongside", "synthetic"],
+                description: "context-replace pauses built-ins while active; synthetic requires block.",
+              },
+              every: { type: "string", description: "Interval trigger, e.g. 5m or 30s." },
+              steps: { type: "number", description: "Step trigger (model steps), e.g. 3." },
+              eventOnly: {
+                type: "boolean",
+                description: "Event-only trigger: evaluate on tool/idle events, gated by cooldown.",
+              },
+              cooldown: { type: "string", description: "Minimum gap between fires, e.g. 2m." },
+              ttl: { type: "string", description: "Lifetime, e.g. 1h. Defaults to 1h." },
+              maxFires: { type: "number", description: "0 = unlimited, 1 = one-shot." },
+              oneShot: { type: "boolean", description: "Convenience for maxFires: 1." },
+              statuses: {
+                type: "array",
+                items: { type: "string", enum: ["pending", "running", "waiting", "done", "error"] },
+                description: "Only entries with one of these statuses.",
+              },
+              staleAfter: { type: "string", description: "Only entries untouched longer than this, e.g. 10m." },
+              noProgressAfter: { type: "string", description: "Only when no progress write for this long." },
+              noProgressAfterSteps: { type: "number" },
+              inFlight: { type: "string", enum: ["only", "never", "any"] },
+              tree: { type: "string", enum: ["empty", "nonempty"] },
+              idleOnly: { type: "boolean", description: "Evaluate only at turn end." },
+              entryIds: { type: "array", items: { type: "string" } },
+              sessions: { type: "string", enum: ["self", "children", "all"] },
+            },
+            required: [],
+            additionalProperties: false,
+          },
+          options: { codemode: true },
+          execute: async (input: Record<string, unknown>, context: { sessionID: string }) => {
+            const sessionID = context.sessionID;
+            knownSessions.add(sessionID);
+            const action = String(input?.action ?? "list");
+            if (action === "list" || action === "status") {
+              return { content: nudgeText(sessionID, action === "status") };
+            }
+            const id = String(input?.id ?? "").trim();
+            if (!id) return { content: "Missing id." };
+            if (action === "on" || action === "off") {
+              const result = setSessionNudgeRuleEnabled(
+                nudgePaths.sessionFile,
+                sessionID,
+                id,
+                action === "on"
+              );
+              nudgeRuntimes.delete(`${sessionID}:session:${id}`);
+              return {
+                content:
+                  result.errors.length > 0
+                    ? result.errors.join("; ")
+                    : `Custom nudge session:${id} ${action === "on" ? "enabled" : "disabled"}.`,
+              };
+            }
+            if (action === "clear") {
+              clearSessionNudgeRule(nudgePaths.sessionFile, sessionID, id);
+              nudgeRuntimes.delete(`${sessionID}:session:${id}`);
+              return { content: `Custom nudge session:${id} cleared.` };
+            }
+            if (action !== "set") return { content: `Unknown action: ${action}` };
+            const requestedScope = String(input?.scope ?? "session");
+            if (requestedScope !== "session") {
+              return {
+                content:
+                  `Refused: agent rules are session-scoped. ${requestedScope} rules affect every session, ` +
+                  "and this tool surface cannot show a host permission prompt. Ask the user to create it " +
+                  "with /progress nudge, the palette command, or the progress-nudge.json file.",
+              };
+            }
+            const criteria: Record<string, unknown> = {};
+            for (const key of [
+              "statuses",
+              "staleAfter",
+              "noProgressAfter",
+              "noProgressAfterSteps",
+              "inFlight",
+              "tree",
+              "idleOnly",
+              "entryIds",
+              "sessions",
+            ]) {
+              if (input?.[key] !== undefined) criteria[key] = input[key];
+            }
+            let trigger: Record<string, unknown> | undefined;
+            const every = input?.every;
+            const steps = input?.steps;
+            if (input?.eventOnly === true) {
+              trigger = { type: "event" };
+            } else if (every !== undefined && steps !== undefined) {
+              trigger = { type: "either", everyMs: every, everySteps: steps };
+            } else if (steps !== undefined) {
+              trigger = { type: "steps", everySteps: steps };
+            } else if (every !== undefined) {
+              trigger = { type: "interval", everyMs: every };
+            }
+            const result = buildNudgeRule(
+              {
+                id,
+                title: input?.title,
+                text: input?.text,
+                severity: input?.severity,
+                delivery: input?.delivery,
+                trigger,
+                cooldownMs: input?.cooldown,
+                ttlMs: input?.ttl,
+                maxFires: input?.oneShot === true ? 1 : input?.maxFires,
+                criteria,
+                scope: "session",
+                source: "agent",
+                createdAt: Date.now(),
+              },
+              (input?.preset as string as any) ?? "custom",
+              "session"
+            );
+            if (!result.ok || !result.rule) {
+              return { content: `Not saved: ${result.errors.join("; ")}` };
+            }
+            const saved = upsertSessionNudgeRule(nudgePaths.sessionFile, sessionID, result.rule);
+            if (saved.errors.length > 0) {
+              return { content: `Not saved: ${saved.errors.join("; ")}` };
+            }
+            nudgeRuntimes.delete(ruleRuntimeKey(result.rule, sessionID));
+            const warning = result.warnings.length > 0 ? ` (${result.warnings.join("; ")})` : "";
+            return {
+              content:
+                `Saved session:${result.rule.id}${warning}. ${describeNudgeTrigger(result.rule)}; ` +
+                `${describeNudgeCriteria(result.rule)}; delivery ${result.rule.delivery}. ` +
+                `Model-facing text: "${result.rule.text}".`,
+            };
+          },
+        } as Parameters<typeof editor.add>[0]);
+      });
+      console.log(`[opencode-progress] v${pluginVersion} custom nudge tool registered as ${nudgeToolName}`);
+    } catch (error) {
+      console.warn(`[opencode-progress] custom nudge tool registration failed: ${String(error)}`);
+    }
+
     const wallClockMs = normalizeWallClockMs(ctx.options);
     const wallTrackers = new Map<string, WallClockState>();
     const lastToolCallAt = new Map<string, number>();
@@ -949,6 +1481,7 @@ export default Plugin.define({
     promptResetHook = await ctx.session.hook("prompt", (event) => {
       const sessionID = (event as { sessionID?: string }).sessionID;
       if (!sessionID) return;
+      knownSessions.add(sessionID);
       const now = Date.now();
       monitors.delete(sessionID);
       wallTrackers.delete(sessionID);
@@ -994,6 +1527,28 @@ export default Plugin.define({
         });
       }
     });
+
+    // Custom nudges: evaluate event/step rules after each tool completes,
+    // when in-flight suppression has already been decremented.
+    const customNudgeToolHook = await ctx.tool.hook('execute.after', (event) => {
+      knownSessions.add(event.sessionID);
+      evaluateCustomNudges(event.sessionID);
+      // A child session's rule may watch the parent tree (`sessions: self`);
+      // reevaluate the root so a parent rule can react to child activity.
+      const root = rootSessionFor(event.sessionID, readSessionMap());
+      if (root && root !== event.sessionID) {
+        knownSessions.add(root);
+        evaluateCustomNudges(root);
+      }
+    });
+
+    // Clock-triggered rules need their own tick; 5s keeps 5s intervals usable
+    // without a per-rule timer.
+    const customNudgeTimer = setInterval(() => {
+      for (const sessionID of knownSessions) {
+        evaluateCustomNudges(sessionID, { timer: true });
+      }
+    }, 5_000);
 
     // Pre-flight relay hint: see a long-running command BEFORE it runs and
     // suggest wrapping it in the relay. Detection only — commands are never
@@ -1092,6 +1647,8 @@ export default Plugin.define({
       void promptReminderHook?.dispose();
       void activityHook?.dispose();
       void activeToolHook?.dispose();
+      void customNudgeToolHook?.dispose();
+      clearInterval(customNudgeTimer);
       void promptResetHook?.dispose();
       void relayHintHook?.dispose();
       void sayNudgeBeforeHook?.dispose();

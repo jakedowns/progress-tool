@@ -2,7 +2,7 @@
 
 Back to the [main README](./README.md).
 
-**Versions:** MCP server `2.12.0` · OpenCode plugin `2.22.0`
+**Versions:** MCP server `2.12.0` · OpenCode plugin `2.23.0`
 
 This document is the reference half of the project: the portable contract, the
 relay's behaviour, state-store guarantees, architecture, testing, every plugin
@@ -510,6 +510,143 @@ transcript and of `sayChatNotes`:
 - **Lifecycle:** notes survive **Progress: clear list**; they are deleted with
   the session and by the hard-clear commands. The per-session ring buffer keeps
   the store bounded.
+
+---
+
+## Custom nudges
+
+A **custom nudge** is a user- or agent-defined reminder delivered to the
+**model**, not the user. It reuses the reminder engine from 2.22.0 (severity
+tiers, one standing `progress-reminder` entry, dedupe, model-step counting,
+in-flight suppression) and adds configurable text, trigger, cooldown,
+criteria, lifetime, and delivery.
+
+### Rule files
+
+Rules live in dedicated files; `opencode.json` is never modified.
+
+| Scope | File | Applies to |
+|---|---|---|
+| global | `~/.config/opencode/progress-nudge.json` | every session |
+| project | `<projectRoot>/.opencode/progress-nudge.json` | sessions in that project |
+| session | `~/.config/opencode/progress-nudge-sessions.json` | one session id, stored separately |
+
+`<projectRoot>` is the nearest ancestor containing `.git` or `.opencode`
+(falling back to the current directory). Writes are atomic (temp + rename).
+Invalid rules are ignored at load and reported by `status`/`list`; a malformed
+file never breaks startup.
+
+```json
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "stale-build",
+      "title": "Stale build reminder",
+      "enabled": true,
+      "scope": "project",
+      "text": "{count} open: {id} ({status}, {age}) — {action}",
+      "severity": "warn",
+      "trigger": { "type": "interval", "everyMs": 300000 },
+      "cooldownMs": 120000,
+      "criteria": { "statuses": ["running", "waiting"], "staleAfterMs": 600000 },
+      "delivery": "context-replace",
+      "ttlMs": 3600000,
+      "maxFires": 0
+    }
+  ]
+}
+```
+
+Durations accept milliseconds or strings (`30s`, `5m`, `2h`, `1d`).
+Placeholders: `{id}`, `{title}`, `{status}`, `{age}`, `{count}`, `{action}`.
+Unknown placeholders are rejected at save/preview time; text is capped at 240
+characters. Limits: 20 rules per scope, 50 total.
+
+### Triggers
+
+- `{ "type": "interval", "everyMs": ... }` — clock-based; minimum 5s.
+- `{ "type": "steps", "everySteps": n }` — logical model steps (parallel tool
+  calls in one step count once); resets on any progress write.
+- `{ "type": "either", "everyMs"?: ..., "everySteps"?: ... }` — whichever comes
+  first.
+- `{ "type": "event" }` — evaluated on tool completion, turn end, and progress
+  events; `cooldownMs` is the only rate gate.
+
+### Criteria
+
+All specified categories must pass (**AND**); arrays are **OR** inside the
+category. Entry categories narrow the matched set used for `{id}`/`{count}`.
+
+| Field | Meaning |
+|---|---|
+| `statuses` | any entry with one of these statuses |
+| `staleAfterMs` | an entry untouched longer than this; fresh-detail `waiting` is healthy unless `waiting` is listed explicitly |
+| `noProgressAfterMs` | no progress write for this long |
+| `noProgressAfterSteps` | at least this many model steps since progress |
+| `inFlight` | `only`, `never`, or `any` (tool/background work) |
+| `tree` | `empty` or `nonempty` |
+| `idleOnly` | evaluate only at turn end |
+| `entryIds` | restrict to specific storage keys/ids |
+| `sessions` | `self` (default), `children`, or `all` |
+
+### Delivery and lifetime
+
+- `context-replace` — standing context entry; **pauses built-in nudges**
+  (strict/wall/idle/relay/say) while the rule is live.
+- `context-alongside` — crowds in beside built-ins; identical rendered text is
+  deduped, narrower scope wins.
+- `synthetic` — a real turn input; allowed only with `severity: "block"` because
+  it resumes the model.
+- `ttlMs` (`0` = no expiry) and `maxFires` (`0` = unlimited, `1` = one-shot).
+  Expired/exhausted rules stay listed until cleared.
+- Priority is `block > warn > info`; a lower tier cannot overwrite a standing
+  higher-tier reminder.
+- Runtime counters are per session, even for global/project rules.
+
+### Presets
+
+1. **Replace built-ins (recommended)** — context `warn`, every 5m, 2m cooldown,
+   1h TTL, unlimited fires; suppresses built-ins while active.
+2. **Alongside** — same timing, built-ins remain.
+3. **Synthetic block** — one-shot `block` + synthetic delivery.
+4. **Custom** — choose trigger, criteria, delivery, TTL, and fire cap.
+
+### Surfaces
+
+```text
+/progress nudge                         # wizard
+/progress nudge list
+/progress nudge status
+/progress nudge set --id build --text "{id} stale — {action}" --every 5m --cooldown 2m --status running
+/progress nudge on  session:build
+/progress nudge off session:build
+/progress nudge clear project:build
+```
+
+CLI `set` flags: `--scope`, `--severity`, `--delivery`, `--preset`, `--every`,
+`--steps`, `--cooldown`, `--ttl`, `--max-fires`, `--one-shot`, `--status`,
+`--stale`, `--no-progress`, `--in-flight`, `--tree`, `--idle`, `--ids`,
+`--sessions`, `--event`. With no `--id`/`--text`, the wizard runs.
+
+Palette commands:
+
+- **Progress: custom nudge…** — preset → scope → id → text → interval →
+  severity → confirm.
+- **Progress: custom nudge status** — list rules; enable, disable, or clear one.
+
+Agent tool `progress_nudge` (`set`, `list`, `status`, `on`, `off`, `clear`)
+defaults to **session scope**. It refuses project/global rules because the tool
+surface cannot show a host permission prompt; ask the user to create those via
+the slash command, palette, or rule files. Agents should use it for a temporary
+self-reminder, not to nag the user — `say` remains the user-facing channel.
+
+### Disable and tombstones
+
+`enabled: false` in a narrower scope with the same `id` mutes that id in broader
+scopes (project mutes global; session mutes both). This lets a user silence one
+project rule without editing the global file. `on`/`off <scope>:<id>` targets a
+single rule.
 
 ---
 

@@ -1,6 +1,6 @@
 {
   "name": "@jakedowns/progress-tool-opencode-plugin",
-  "version": "2.22.0",
+  "version": "2.23.0",
   "description": "OpenCode plugin: native progress indicators for the TUI and desktop GUI, with an out-of-band relay for zero-token long-running command telemetry",
   "type": "module",
   "exports": {
@@ -20,7 +20,7 @@
     "build": "../scripts/build-gui.sh && node scripts/build-tui.mjs",
     "dev": "vite build --watch",
     "bench:tree": "node scripts/bench-tree.mjs",
-    "test": "node --test test/clear.test.cjs test/dismissal.test.cjs test/feedback.test.cjs test/gui-view.test.cjs test/instructions.test.cjs test/mcp.test.cjs test/monitor.test.cjs test/notes.test.cjs test/reminders.test.cjs test/rollup.test.cjs test/say-monitor.test.cjs test/say.test.cjs test/session-map.test.cjs test/skills-registry.test.cjs test/subagent.test.cjs test/subagent-label.test.cjs test/skills.test.cjs test/tasklist-prefs.test.cjs test/telemetry.test.cjs test/tree-theme.test.cjs test/tui-build.test.cjs test/tui-view.test.cjs",
+    "test": "node --test test/clear.test.cjs test/custom-nudges.test.cjs test/dismissal.test.cjs test/feedback.test.cjs test/gui-view.test.cjs test/instructions.test.cjs test/mcp.test.cjs test/monitor.test.cjs test/notes.test.cjs test/reminders.test.cjs test/rollup.test.cjs test/say-monitor.test.cjs test/say.test.cjs test/session-map.test.cjs test/skills-registry.test.cjs test/subagent.test.cjs test/subagent-label.test.cjs test/skills.test.cjs test/tasklist-prefs.test.cjs test/telemetry.test.cjs test/tree-theme.test.cjs test/tui-build.test.cjs test/tui-view.test.cjs",
     "prepublishOnly": "npm test && npm run build"
   },
   "dependencies": {

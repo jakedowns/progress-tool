@@ -225,6 +225,134 @@ export const ProgressRpc = Rpc.define({
         additionalProperties: false,
       },
     },
+    nudgeList: {
+      input: {
+        type: "object",
+        properties: {
+          sessionID: { type: "string" },
+        },
+        required: ["sessionID"],
+        additionalProperties: false,
+      },
+      output: {
+        type: "object",
+        properties: {
+          rules: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "string" },
+                title: { type: "string" },
+                scope: { type: "string", enum: ["global", "project", "session"] },
+                enabled: { type: "boolean" },
+                text: { type: "string" },
+                severity: { type: "string", enum: ["info", "warn", "block"] },
+                delivery: {
+                  type: "string",
+                  enum: ["context-replace", "context-alongside", "synthetic"],
+                },
+                trigger: { type: "string" },
+                criteria: { type: "string" },
+                ttlMs: { type: "number" },
+                maxFires: { type: "number" },
+                fires: { type: "number" },
+                expiresAt: { type: "number" },
+                nextFireAt: { type: "number" },
+                lastFiredAt: { type: "number" },
+                effective: { type: "boolean" },
+              },
+              required: [
+                "id",
+                "scope",
+                "enabled",
+                "text",
+                "severity",
+                "delivery",
+                "trigger",
+                "criteria",
+                "ttlMs",
+                "maxFires",
+                "fires",
+                "effective",
+              ],
+              additionalProperties: false,
+            },
+          },
+          errors: { type: "array", items: { type: "string" } },
+        },
+        required: ["rules", "errors"],
+        additionalProperties: false,
+      },
+    },
+    nudgeSet: {
+      input: {
+        type: "object",
+        properties: {
+          sessionID: { type: "string" },
+          preset: {
+            type: "string",
+            enum: ["replace", "alongside", "block", "custom"],
+          },
+          rule: { type: "object", additionalProperties: true },
+        },
+        required: ["sessionID", "rule"],
+        additionalProperties: false,
+      },
+      output: {
+        type: "object",
+        properties: {
+          ok: { type: "boolean" },
+          error: { type: "string" },
+          rule: { type: "object", additionalProperties: true },
+        },
+        required: ["ok"],
+        additionalProperties: false,
+      },
+    },
+    nudgeSetEnabled: {
+      input: {
+        type: "object",
+        properties: {
+          sessionID: { type: "string" },
+          scope: { type: "string", enum: ["global", "project", "session"] },
+          id: { type: "string" },
+          enabled: { type: "boolean" },
+        },
+        required: ["sessionID", "scope", "id", "enabled"],
+        additionalProperties: false,
+      },
+      output: {
+        type: "object",
+        properties: {
+          ok: { type: "boolean" },
+          error: { type: "string" },
+        },
+        required: ["ok"],
+        additionalProperties: false,
+      },
+    },
+    nudgeClear: {
+      input: {
+        type: "object",
+        properties: {
+          sessionID: { type: "string" },
+          scope: { type: "string", enum: ["global", "project", "session"] },
+          id: { type: "string" },
+        },
+        required: ["sessionID", "scope", "id"],
+        additionalProperties: false,
+      },
+      output: {
+        type: "object",
+        properties: {
+          ok: { type: "boolean" },
+          error: { type: "string" },
+        },
+        required: ["ok"],
+        additionalProperties: false,
+      },
+    },
     setTreeTheme: {
       input: {
         type: "object",

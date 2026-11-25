@@ -31,7 +31,7 @@ Implements the [Agent Progress Tool proposal](https://gist.github.com/jakedowns/
 for OpenCode 2, and is written as a portable reference implementation any
 harness can copy or adapt.
 
-**Versions:** MCP server `2.12.0` · OpenCode plugin `2.22.0`
+**Versions:** MCP server `2.12.0` · OpenCode plugin `2.23.0`
 
 > **Advanced docs:** [schema, relay internals, state store, architecture, all
 > options, file map →](./README-advanced.md)
@@ -126,6 +126,36 @@ progress({ id: "link-lib", status: "running", title: "Linking libSDL2.a", parent
 ```
 
 Multi-line titles and details accept real newlines, `\n` / `\r\n`, or `<br>`.
+
+---
+
+## Custom nudges
+
+The built-in strict/wall/idle/say reminders are fixed. **Custom nudges** let a
+user or agent define the text, trigger, cooldown, criteria, lifetime, and
+delivery of an additional **model-facing** reminder.
+
+```text
+/progress nudge                 # wizard (session, project, or global scope)
+/progress nudge list
+/progress nudge on project:stale-build
+```
+
+Palette: **Progress: custom nudge…** and **Progress: custom nudge status**.
+Rules can also be edited directly in `~/.config/opencode/progress-nudge.json`
+or `<project>/.opencode/progress-nudge.json`.
+
+- Text supports `{id}`, `{title}`, `{status}`, `{age}`, `{count}`, `{action}`.
+- Triggers: interval, model steps, either, or event-only.
+- Criteria: status, stale age, no-progress time/steps, in-flight, tree
+  empty/non-empty, idle-only, entry ids, and session scope.
+- Delivery: replace built-ins, alongside them, or a synthetic `block` message.
+- TTL and a fire cap (one-shot) keep temporary rules temporary.
+
+Agent tool `progress_nudge` is **session-scoped only**; project/global rules
+require the user-facing slash command, palette, or config file. See
+[README-advanced.md](./README-advanced.md#custom-nudges) for the full schema,
+files, presets, and semantics.
 
 ---
 

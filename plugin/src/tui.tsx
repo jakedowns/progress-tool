@@ -81,6 +81,7 @@ import {
   visibleSayNotes,
 } from "./say.js";
 import type { ProgressEntry, ProgressStatus, ProgressState, SayNote, TreeNode } from "./types.js";
+import { runNudgeCommand } from "./tui-nudges.js";
 
 const [state, setState] = createSignal<ProgressState>(readProgressState());
 /** Mirror status is written by the MCP server next to the state file. */
@@ -1025,9 +1026,18 @@ export default Plugin.define({
           palette: true,
           slash: { name: "progress", arguments: true },
           run: (input) => {
-            if ((input ?? "").trim().toLowerCase() === "swap-layout") {
+            const args = (input ?? "").trim();
+            const lower = args.toLowerCase();
+            if (lower === "swap-layout") {
               swapLayout(context);
               return;
+            }
+            if (lower === "nudge" || lower.startsWith("nudge ")) {
+              return runNudgeCommand(
+                context,
+                currentSessionID(context),
+                args.slice("nudge".length).trim()
+              );
             }
             return openProgressDialog(context);
           },

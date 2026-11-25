@@ -566,6 +566,41 @@ export default Plugin.define({
         cleared: number;
         bytes: number;
       }>;
+      nudgeList(input: { sessionID: string }): Promise<{
+        rules: Array<{
+          id: string;
+          title?: string;
+          scope: "global" | "project" | "session";
+          enabled: boolean;
+          text: string;
+          severity: "info" | "warn" | "block";
+          delivery: string;
+          trigger: string;
+          criteria: string;
+          ttlMs: number;
+          maxFires: number;
+          fires: number;
+          nextFireAt: number;
+          effective: boolean;
+        }>;
+        errors: string[];
+      }>;
+      nudgeSet(input: {
+        sessionID: string;
+        preset?: "replace" | "alongside" | "block" | "custom";
+        rule: Record<string, unknown>;
+      }): Promise<{ ok: boolean; error?: string }>;
+      nudgeSetEnabled(input: {
+        sessionID: string;
+        scope: "global" | "project" | "session";
+        id: string;
+        enabled: boolean;
+      }): Promise<{ ok: boolean; error?: string }>;
+      nudgeClear(input: {
+        sessionID: string;
+        scope: "global" | "project" | "session";
+        id: string;
+      }): Promise<{ ok: boolean; error?: string }>;
     };
     const rpcFor = (session: MountedSession) =>
       session.server.client.rpc(ProgressRpc) as unknown as ProgressClient;
@@ -1915,6 +1950,204 @@ export default Plugin.define({
       run: () => void toggleTaskListView(),
     }));
 
+    type NudgePreset = "replace" | "alongside" | "block" | "custom";
+    const NUDGE_PRESET_CHOICES: Array<{
+      value: NudgePreset;
+      title: string;
+      description: string;
+    }> = [
+      {
+        value: "replace",
+        title: "Replace built-ins (recommended)",
+        description: "One [warn] context reminder every 5m; pauses built-in nudges while active.",
+      },
+      {
+        value: "alongside",
+        title: "Alongside built-ins",
+        description: "Same timing; built-in nudges keep running and identical text is deduped.",
+      },
+      {
+        value: "block",
+        title: "Synthetic block",
+        description: "One-shot synthetic turn input. Use for hard stop conditions only.",
+      },
+      {
+        value: "custom",
+        title: "Custom",
+        description: "Choose trigger, severity, delivery, TTL, and fire cap yourself.",
+      },
+    ];
+
+    const openNudgeWizard = async () => {
+      const session = ctx.sessions.current();
+      if (!session) return;
+      const rpc = rpcFor(session);
+      const preset = await ctx.dialogs.select<NudgePreset>({
+        title: "Progress custom nudge",
+        options: NUDGE_PRESET_CHOICES.map((choice) => ({
+          title: choice.title,
+          value: choice.value,
+          description: choice.description,
+        })),
+      });
+      if (!preset) return;
+
+      const scope = await ctx.dialogs.select<"session" | "project" | "global">({
+        title: "Where should this rule live?",
+        options: [
+          { title: "Session", value: "session", description: "This session only" },
+          { title: "Project", value: "project", description: "Every session in this project" },
+          { title: "Global", value: "global", description: "Every session, in ~/.config/opencode" },
+        ],
+        current: "session",
+      });
+      if (!scope) return;
+
+      const id = (
+        await ctx.dialogs.prompt({
+          title: "Rule id",
+          description: "Slug used by on/off/clear, e.g. stale-build",
+          placeholder: "stale-build",
+        })
+      )?.trim();
+      if (!id) return;
+
+      const text = (
+        await ctx.dialogs.prompt({
+          title: "Reminder text",
+          description:
+            "Model-facing. Placeholders: {id} {title} {status} {age} {count} {action}",
+          placeholder: "{id} has been {status} for {age} — {action}",
+        })
+      )?.trim();
+      if (!text) return;
+
+      let every: string | undefined;
+      if (preset === "custom") {
+        every =
+          (
+            await ctx.dialogs.prompt({
+              title: "Interval (blank for event-only)",
+              description: "5m, 30s, 2h",
+              placeholder: "5m",
+            })
+          )?.trim() || undefined;
+      }
+
+      const severity =
+        preset === "block"
+          ? "block"
+          : ((await ctx.dialogs.select<"info" | "warn" | "block">({
+              title: "Severity",
+              options: [
+                { title: "warn (context)", value: "warn" },
+                { title: "info (context)", value: "info" },
+                { title: "block", value: "block" },
+              ],
+              current: "warn",
+            })) ?? "warn");
+
+      const confirmed = await ctx.dialogs.confirm({
+        title: "Save custom nudge?",
+        description: `${scope}:${id} · ${severity} · ${preset}\n${
+          every ? `every ${every}` : preset === "custom" ? "event-only" : "preset timing"
+        }\n${text}`,
+      });
+      if (!confirmed) return;
+
+      const result = await withTimeout(
+        rpc.nudgeSet({
+          sessionID: session.id,
+          preset,
+          rule: {
+            id,
+            text,
+            scope,
+            severity,
+            source: "user",
+            createdAt: Date.now(),
+            ...(every
+              ? { trigger: { type: "interval", everyMs: every } }
+              : preset === "custom"
+                ? { trigger: { type: "event" } }
+                : {}),
+          },
+        }),
+        4000
+      );
+      ctx.toast.show({
+        title: result.ok ? "Custom nudge saved" : "Custom nudge not saved",
+        description: result.ok
+          ? `${scope}:${id}`
+          : result.error ?? "unknown error",
+        variant: result.ok ? "success" : "error",
+        duration: result.ok ? 2500 : 6000,
+      });
+    };
+
+    const openNudgeStatus = async () => {
+      const session = ctx.sessions.current();
+      if (!session) return;
+      const rpc = rpcFor(session);
+      let listed: Awaited<ReturnType<typeof rpc.nudgeList>>;
+      try {
+        listed = await withTimeout(rpc.nudgeList({ sessionID: session.id }), 4000);
+      } catch (error) {
+        ctx.toast.show({
+          title: "Custom nudge status failed",
+          description: String(error),
+          variant: "error",
+        });
+        return;
+      }
+      if (listed.rules.length === 0) {
+        await ctx.dialogs.alert({
+          title: "Progress custom nudges",
+          description: listed.errors.join("\n") || "No rules yet. Use the custom nudge wizard to add one.",
+        });
+        return;
+      }
+      const choice = await ctx.dialogs.select<string>({
+        title: "Progress custom nudges",
+        options: listed.rules.map((rule) => ({
+          title: `${rule.enabled ? "on" : "off"} · ${rule.scope}:${rule.id}`,
+          value: `${rule.scope}:${rule.id}`,
+          description: `${rule.severity} · ${rule.delivery} · ${rule.trigger} · ${rule.criteria}`,
+        })),
+      });
+      if (!choice) return;
+      const [scope, id] = choice.split(":", 2) as [
+        "global" | "project" | "session",
+        string
+      ];
+      const action = await ctx.dialogs.select<"enable" | "disable" | "clear">({
+        title: `Action for ${choice}`,
+        options: [
+          { title: "Enable", value: "enable" },
+          { title: "Disable", value: "disable" },
+          { title: "Clear", value: "clear" },
+        ],
+      });
+      if (!action) return;
+      const result =
+        action === "clear"
+          ? await withTimeout(rpc.nudgeClear({ sessionID: session.id, scope, id }), 4000)
+          : await withTimeout(
+              rpc.nudgeSetEnabled({
+                sessionID: session.id,
+                scope,
+                id,
+                enabled: action === "enable",
+              }),
+              4000
+            );
+      ctx.toast.show({
+        title: result.ok ? `Custom nudge ${action}d` : "Custom nudge unchanged",
+        description: result.ok ? choice : result.error ?? "unknown error",
+        variant: result.ok ? "success" : "error",
+      });
+    };
+
     const progressTab = {
       id: GUI_PROGRESS_PANEL_ID,
       title: "Progress",
@@ -1952,6 +2185,26 @@ export default Plugin.define({
       section: "session" as const,
       keywords: "progress sidebar composer layout move",
       run: () => swapLayout(),
+    }));
+
+    ctx.add(Command, () => ({
+      id: "progress.custom-nudge",
+      title: "Progress: custom nudge…",
+      description: "Create a configurable reminder rule for this or every session",
+      group: "Progress",
+      section: "session" as const,
+      keywords: "progress nudge custom reminder rule interval",
+      run: () => void openNudgeWizard(),
+    }));
+
+    ctx.add(Command, () => ({
+      id: "progress.custom-nudge-status",
+      title: "Progress: custom nudge status",
+      description: "List custom nudge rules; enable, disable, or clear one",
+      group: "Progress",
+      section: "session" as const,
+      keywords: "progress nudge custom list status disable clear",
+      run: () => void openNudgeStatus(),
     }));
 
     ctx.add(Command, () => ({

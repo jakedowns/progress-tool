@@ -625,12 +625,12 @@ function scopeEntries(entries, sessionID, options = {}) {
   if (options.scope === "all") return entries;
   if (!sessionID) return {};
   const prefix = `${sessionID}:`;
-  const scoped = {};
+  const scoped2 = {};
   for (const [key, entry] of Object.entries(entries)) {
     if (!entry || typeof entry !== "object") continue;
-    if (entry.sessionId === sessionID || key.startsWith(prefix)) scoped[key] = entry;
+    if (entry.sessionId === sessionID || key.startsWith(prefix)) scoped2[key] = entry;
   }
-  return scoped;
+  return scoped2;
 }
 function visibleEntries(entries, now, options = {}) {
   const hold = options.successHoldMs ?? 8e3;
@@ -1265,6 +1265,752 @@ function sayToastDurationMs(kind) {
   return kind === "blocked" || kind === "question" ? SAY_WARNING_TOAST_DURATION_MS : SAY_TOAST_DURATION_MS;
 }
 
+// src/custom-nudges.ts
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import path4 from "node:path";
+var NUDGE_RULE_LIMIT = 20;
+var NUDGE_TEXT_LIMIT = 240;
+var NUDGE_PLACEHOLDERS = ["id", "title", "status", "age", "count", "action"];
+var KNOWN_STATUSES = [
+  "pending",
+  "running",
+  "waiting",
+  "done",
+  "error"
+];
+var SCOPES = ["global", "project", "session"];
+var DELIVERIES = [
+  "context-replace",
+  "context-alongside",
+  "synthetic"
+];
+var SEVERITIES = ["info", "warn", "block"];
+var MIN_TRIGGER_MS = 5e3;
+var MAX_TRIGGER_MS = 24 * 60 * 60 * 1e3;
+var MIN_COOLDOWN_MS = 0;
+var MAX_COOLDOWN_MS = 24 * 60 * 60 * 1e3;
+var MIN_TTL_MS = 1e4;
+var MAX_TTL_MS = 7 * 24 * 60 * 60 * 1e3;
+var MIN_STALE_MS = 3e4;
+var clampInt = (value, min, max, fallback) => {
+  const number = typeof value === "number" ? value : Number.NaN;
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(max, Math.max(min, Math.floor(number)));
+};
+var asScope = (value, fallback = "session") => SCOPES.includes(value) ? value : fallback;
+var asSeverity = (value, fallback = "warn") => SEVERITIES.includes(value) ? value : fallback;
+var asDelivery = (value, fallback = "context-alongside") => DELIVERIES.includes(value) ? value : fallback;
+var asId = (value) => String(value ?? "").trim().replace(/\s+/g, "-");
+function parseNudgeDuration(value) {
+  if (typeof value === "number" && Number.isFinite(value)) return Math.max(0, Math.floor(value));
+  if (typeof value !== "string" || !value.trim()) return void 0;
+  const match = /^(\d+(?:\.\d+)?)\s*(ms|s|m|h|d)?$/i.exec(value.trim());
+  if (!match) return void 0;
+  const amount = Number.parseFloat(match[1]);
+  const unit = (match[2] ?? "ms").toLowerCase();
+  const factor = unit === "d" ? 864e5 : unit === "h" ? 36e5 : unit === "m" ? 6e4 : unit === "s" ? 1e3 : 1;
+  return Math.max(0, Math.round(amount * factor));
+}
+function formatNudgeDuration(ms) {
+  if (ms == null || !Number.isFinite(ms) || ms <= 0) return "off";
+  if (ms < 6e4) return `${Math.round(ms / 1e3)}s`;
+  if (ms < 36e5) return `${Math.round(ms / 6e4)}m`;
+  if (ms < 864e5) return `${Math.round(ms / 36e5)}h`;
+  return `${Math.round(ms / 864e5)}d`;
+}
+function invalidNudgePlaceholders(text) {
+  const found = /* @__PURE__ */ new Set();
+  for (const match of String(text ?? "").matchAll(/\{([a-zA-Z][a-zA-Z0-9_]*)\}/g)) {
+    if (!NUDGE_PLACEHOLDERS.includes(match[1])) found.add(match[1]);
+  }
+  return [...found];
+}
+function normalizeTrigger(raw) {
+  const errors = [];
+  const value = raw ?? {};
+  const type = String(value.type ?? "interval");
+  const everyMsRaw = parseNudgeDuration(value.everyMs ?? value.every);
+  const everyStepsRaw = typeof value.everySteps === "number" ? value.everySteps : Number(value.everySteps ?? Number.NaN);
+  if (type === "event") return { trigger: { type: "event" }, errors };
+  if (type === "steps") {
+    if (!Number.isFinite(everyStepsRaw) || everyStepsRaw < 1) {
+      errors.push("trigger.everySteps must be at least 1");
+      return { trigger: { type: "steps", everySteps: 3 }, errors };
+    }
+    return {
+      trigger: { type: "steps", everySteps: clampInt(everyStepsRaw, 1, 1e4, 3) },
+      errors
+    };
+  }
+  if (type === "either") {
+    const everyMs = everyMsRaw == null ? void 0 : clampInt(everyMsRaw, MIN_TRIGGER_MS, MAX_TRIGGER_MS, 3e5);
+    const everySteps = Number.isFinite(everyStepsRaw) && everyStepsRaw > 0 ? clampInt(everyStepsRaw, 1, 1e4, 3) : void 0;
+    if (everyMs == null && everySteps == null) {
+      errors.push("trigger.either needs everyMs and/or everySteps");
+      return { trigger: { type: "either", everyMs: 3e5 }, errors };
+    }
+    return {
+      trigger: {
+        type: "either",
+        ...everyMs != null ? { everyMs } : {},
+        ...everySteps != null ? { everySteps } : {}
+      },
+      errors
+    };
+  }
+  return {
+    trigger: {
+      type: "interval",
+      everyMs: everyMsRaw == null ? 3e5 : clampInt(everyMsRaw, MIN_TRIGGER_MS, MAX_TRIGGER_MS, 3e5)
+    },
+    errors
+  };
+}
+function normalizeCriteria(raw) {
+  if (!raw || typeof raw !== "object") return {};
+  const value = raw;
+  const criteria = {};
+  if (Array.isArray(value.statuses)) {
+    const statuses = value.statuses.map((status) => String(status)).filter(
+      (status) => KNOWN_STATUSES.includes(status)
+    );
+    if (statuses.length > 0) criteria.statuses = [...new Set(statuses)];
+  }
+  const stale = parseNudgeDuration(value.staleAfterMs ?? value.staleAfter);
+  if (stale != null && stale >= MIN_STALE_MS) criteria.staleAfterMs = stale;
+  const noProgressMs = parseNudgeDuration(value.noProgressAfterMs ?? value.noProgressAfter);
+  if (noProgressMs != null && noProgressMs >= MIN_STALE_MS) {
+    criteria.noProgressAfterMs = noProgressMs;
+  }
+  const noProgressSteps = typeof value.noProgressAfterSteps === "number" ? value.noProgressAfterSteps : Number(value.noProgressAfterSteps ?? Number.NaN);
+  if (Number.isFinite(noProgressSteps) && noProgressSteps >= 1) {
+    criteria.noProgressAfterSteps = clampInt(noProgressSteps, 1, 1e4, 3);
+  }
+  if (value.inFlight === "only" || value.inFlight === "never" || value.inFlight === "any") {
+    criteria.inFlight = value.inFlight;
+  }
+  if (value.tree === "empty" || value.tree === "nonempty") criteria.tree = value.tree;
+  if (value.idleOnly === true) criteria.idleOnly = true;
+  if (Array.isArray(value.entryIds)) {
+    const ids = value.entryIds.map((id) => String(id).trim()).filter(Boolean);
+    if (ids.length > 0) criteria.entryIds = [...new Set(ids)].slice(0, 50);
+  }
+  if (value.sessions === "self" || value.sessions === "children" || value.sessions === "all") {
+    criteria.sessions = value.sessions;
+  }
+  return criteria;
+}
+function normalizeNudgeRule(raw, fallbackScope = "session") {
+  const errors = [];
+  const warnings = [];
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { ok: false, errors: ["rule must be an object"], warnings };
+  }
+  const value = raw;
+  const id = asId(value.id);
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(id)) {
+    errors.push("id must be a 1-64 character slug (letters, numbers, . _ -)");
+  }
+  let text = String(value.text ?? "").replace(/\s+/g, " ").trim();
+  if (!text) errors.push("text is required");
+  if (text.length > NUDGE_TEXT_LIMIT) {
+    warnings.push(`text truncated to ${NUDGE_TEXT_LIMIT} characters`);
+    text = `${text.slice(0, NUDGE_TEXT_LIMIT - 1).trimEnd()}\u2026`;
+  }
+  const unknown = invalidNudgePlaceholders(text);
+  if (unknown.length > 0) {
+    errors.push(`unknown placeholder(s): ${unknown.map((name) => `{${name}}`).join(", ")}`);
+  }
+  const severity = asSeverity(value.severity);
+  const delivery = asDelivery(value.delivery);
+  if (delivery === "synthetic" && severity !== "block") {
+    errors.push('delivery "synthetic" requires severity "block"');
+  }
+  const { trigger, errors: triggerErrors } = normalizeTrigger(value.trigger);
+  errors.push(...triggerErrors);
+  const rule = {
+    id,
+    enabled: value.enabled !== false,
+    scope: asScope(value.scope, fallbackScope),
+    text,
+    severity,
+    trigger,
+    cooldownMs: clampInt(
+      parseNudgeDuration(value.cooldownMs ?? value.cooldown) ?? 12e4,
+      MIN_COOLDOWN_MS,
+      MAX_COOLDOWN_MS,
+      12e4
+    ),
+    criteria: normalizeCriteria(value.criteria ?? value),
+    delivery,
+    ttlMs: value.ttlMs === 0 || value.ttl === 0 ? 0 : clampInt(
+      parseNudgeDuration(value.ttlMs ?? value.ttl) ?? 36e5,
+      MIN_TTL_MS,
+      MAX_TTL_MS,
+      36e5
+    ),
+    maxFires: clampInt(value.maxFires ?? 0, 0, 1e3, 0)
+  };
+  if (value.title != null && String(value.title).trim()) {
+    rule.title = String(value.title).trim().slice(0, 120);
+  }
+  if (typeof value.createdAt === "number" && Number.isFinite(value.createdAt)) {
+    rule.createdAt = Math.floor(value.createdAt);
+  }
+  if (value.source === "user" || value.source === "agent" || value.source === "config") {
+    rule.source = value.source;
+  }
+  return { ok: errors.length === 0, rule, errors, warnings };
+}
+var NUDGE_PRESETS = [
+  {
+    value: "replace",
+    title: "Replace built-ins (recommended)",
+    description: "One [warn] context reminder every 5m; pauses the built-in nudges while active."
+  },
+  {
+    value: "alongside",
+    title: "Alongside built-ins",
+    description: "Same timing, but built-in nudges keep running; identical text is deduped."
+  },
+  {
+    value: "block",
+    title: "Synthetic block",
+    description: "A real turn input when it fires. Use for hard stop conditions only."
+  },
+  {
+    value: "custom",
+    title: "Custom",
+    description: "Choose trigger, criteria, delivery, TTL, and fire cap yourself."
+  }
+];
+function presetDefaults(preset) {
+  switch (preset) {
+    case "replace":
+      return {
+        delivery: "context-replace",
+        severity: "warn",
+        trigger: { type: "interval", everyMs: 3e5 },
+        cooldownMs: 12e4,
+        ttlMs: 36e5,
+        maxFires: 0
+      };
+    case "alongside":
+      return {
+        delivery: "context-alongside",
+        severity: "warn",
+        trigger: { type: "interval", everyMs: 3e5 },
+        cooldownMs: 12e4,
+        ttlMs: 36e5,
+        maxFires: 0
+      };
+    case "block":
+      return {
+        delivery: "synthetic",
+        severity: "block",
+        trigger: { type: "interval", everyMs: 3e5 },
+        cooldownMs: 12e4,
+        ttlMs: 36e5,
+        maxFires: 1
+      };
+    default:
+      return {};
+  }
+}
+function buildNudgeRule(input, preset = "custom", fallbackScope = "session") {
+  return normalizeNudgeRule({ ...presetDefaults(preset), ...input }, fallbackScope);
+}
+function mergeNudgeRules(layers) {
+  const disabled = (rules) => new Set((rules ?? []).filter((rule) => !rule.enabled).map((rule) => rule.id));
+  const projectTombstones = disabled(layers.project);
+  const sessionTombstones = disabled(layers.session);
+  const effective = [];
+  for (const rule of layers.session ?? []) {
+    if (rule.enabled) effective.push(rule);
+  }
+  for (const rule of layers.project ?? []) {
+    if (rule.enabled && !sessionTombstones.has(rule.id)) effective.push(rule);
+  }
+  for (const rule of layers.global ?? []) {
+    if (rule.enabled && !sessionTombstones.has(rule.id) && !projectTombstones.has(rule.id)) {
+      effective.push(rule);
+    }
+  }
+  return effective;
+}
+function describeNudgeTrigger(rule) {
+  const trigger = rule.trigger;
+  if (trigger.type === "event") return "on event";
+  if (trigger.type === "steps") return `every ${trigger.everySteps} steps`;
+  if (trigger.type === "either") {
+    const parts = [
+      trigger.everyMs != null ? `every ${formatNudgeDuration(trigger.everyMs)}` : null,
+      trigger.everySteps != null ? `${trigger.everySteps} steps` : null
+    ].filter(Boolean);
+    return parts.length > 0 ? `either ${parts.join(" or ")}` : "either";
+  }
+  return `every ${formatNudgeDuration(trigger.everyMs)}`;
+}
+function describeNudgeCriteria(rule) {
+  const parts = [];
+  const c = rule.criteria;
+  if (c.statuses?.length) parts.push(`status ${c.statuses.join("/")}`);
+  if (c.staleAfterMs != null) parts.push(`stale > ${formatNudgeDuration(c.staleAfterMs)}`);
+  if (c.noProgressAfterMs != null) parts.push(`no progress > ${formatNudgeDuration(c.noProgressAfterMs)}`);
+  if (c.noProgressAfterSteps != null) parts.push(`${c.noProgressAfterSteps}+ steps`);
+  if (c.inFlight && c.inFlight !== "any") parts.push(c.inFlight === "only" ? "in flight" : "idle only");
+  if (c.tree) parts.push(`tree ${c.tree}`);
+  if (c.idleOnly) parts.push("turn end");
+  if (c.entryIds?.length) parts.push(`ids ${c.entryIds.join(",")}`);
+  if (c.sessions && c.sessions !== "self") parts.push(`sessions ${c.sessions}`);
+  return parts.length > 0 ? parts.join("; ") : "any open tree";
+}
+function findProjectRoot(directory, exists = existsSync) {
+  let current = path4.resolve(directory);
+  while (true) {
+    if (exists(path4.join(current, ".git")) || exists(path4.join(current, ".opencode"))) {
+      return current;
+    }
+    const parent = path4.dirname(current);
+    if (parent === current) return path4.resolve(directory);
+    current = parent;
+  }
+}
+function resolveNudgePaths(options) {
+  const home = options.home ?? homedir();
+  const config = path4.join(home, ".config", "opencode");
+  const projectRoot = findProjectRoot(options.directory);
+  return {
+    globalFile: path4.join(config, "progress-nudge.json"),
+    projectFile: path4.join(projectRoot, ".opencode", "progress-nudge.json"),
+    sessionFile: path4.join(config, "progress-nudge-sessions.json"),
+    projectRoot
+  };
+}
+function readJson2(file) {
+  try {
+    return JSON.parse(readFileSync(file, "utf8"));
+  } catch {
+    return void 0;
+  }
+}
+function atomicWriteJson(file, value) {
+  mkdirSync(path4.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify(value, null, 2)}
+`, "utf8");
+  renameSync(tmp, file);
+}
+function readNudgeRuleFile(file, scope) {
+  const raw = readJson2(file);
+  if (!raw || typeof raw !== "object") return { rules: [], errors: [] };
+  const list = Array.isArray(raw.rules) ? raw.rules : [];
+  const rules = [];
+  const errors = [];
+  for (const item of list) {
+    const result = normalizeNudgeRule({ ...item, scope }, scope);
+    if (result.ok && result.rule) {
+      rules.push(result.rule);
+    } else {
+      errors.push(
+        `${scope}:${String(item?.id ?? "?")}: ${result.errors.join("; ")}`
+      );
+    }
+  }
+  return { rules: rules.slice(0, NUDGE_RULE_LIMIT), errors };
+}
+function writeNudgeRuleFile(file, rules) {
+  const payload = { version: 1, rules: rules.slice(0, NUDGE_RULE_LIMIT) };
+  atomicWriteJson(file, payload);
+}
+function upsertNudgeRule(file, scope, rule) {
+  const existing = readNudgeRuleFile(file, scope);
+  const rules = existing.rules.filter((candidate) => candidate.id !== rule.id);
+  rules.push({ ...rule, scope });
+  if (rules.length > NUDGE_RULE_LIMIT) {
+    return {
+      rules: existing.rules,
+      errors: [`${scope} scope is limited to ${NUDGE_RULE_LIMIT} rules`]
+    };
+  }
+  writeNudgeRuleFile(file, rules);
+  return { rules, errors: existing.errors };
+}
+function setNudgeRuleEnabled(file, scope, id, enabled) {
+  const existing = readNudgeRuleFile(file, scope);
+  const found = existing.rules.find((rule) => rule.id === id);
+  if (!found) {
+    if (!enabled) {
+      const tombstone = {
+        id,
+        enabled: false,
+        scope,
+        text: "disabled",
+        severity: "warn",
+        trigger: { type: "event" },
+        cooldownMs: 0,
+        criteria: {},
+        delivery: "context-alongside",
+        ttlMs: 0,
+        maxFires: 0,
+        createdAt: Date.now()
+      };
+      const rules2 = [...existing.rules, tombstone];
+      writeNudgeRuleFile(file, rules2);
+      return { rules: rules2, errors: existing.errors };
+    }
+    return { rules: existing.rules, errors: [`${scope}:${id} not found`] };
+  }
+  const rules = existing.rules.map((rule) => rule.id === id ? { ...rule, enabled } : rule);
+  writeNudgeRuleFile(file, rules);
+  return { rules, errors: existing.errors };
+}
+function clearNudgeRule(file, scope, id) {
+  const existing = readNudgeRuleFile(file, scope);
+  const rules = existing.rules.filter((rule) => rule.id !== id);
+  writeNudgeRuleFile(file, rules);
+  return { rules, errors: existing.errors };
+}
+function readSessionNudgeRules(file, sessionID) {
+  const raw = readJson2(file);
+  const list = raw?.sessions?.[sessionID];
+  if (!Array.isArray(list)) return { rules: [], errors: [] };
+  const rules = [];
+  const errors = [];
+  for (const item of list) {
+    const result = normalizeNudgeRule({ ...item, scope: "session" }, "session");
+    if (result.ok && result.rule) rules.push(result.rule);
+    else {
+      errors.push(
+        `session:${String(item?.id ?? "?")}: ${result.errors.join("; ")}`
+      );
+    }
+  }
+  return { rules: rules.slice(0, NUDGE_RULE_LIMIT), errors };
+}
+function readSessionMapFile(file) {
+  const raw = readJson2(file);
+  if (!raw || typeof raw !== "object" || typeof raw.sessions !== "object" || raw.sessions == null) {
+    return { version: 1, sessions: {} };
+  }
+  return { version: 1, sessions: raw.sessions };
+}
+function upsertSessionNudgeRule(file, sessionID, rule) {
+  const store = readSessionMapFile(file);
+  const existing = readSessionNudgeRules(file, sessionID);
+  const rules = existing.rules.filter((candidate) => candidate.id !== rule.id);
+  rules.push({ ...rule, scope: "session" });
+  if (rules.length > NUDGE_RULE_LIMIT) {
+    return {
+      rules: existing.rules,
+      errors: [`session scope is limited to ${NUDGE_RULE_LIMIT} rules`]
+    };
+  }
+  store.sessions[sessionID] = rules;
+  atomicWriteJson(file, store);
+  return { rules, errors: existing.errors };
+}
+function setSessionNudgeRuleEnabled(file, sessionID, id, enabled) {
+  const existing = readSessionNudgeRules(file, sessionID);
+  const found = existing.rules.find((rule) => rule.id === id);
+  if (!found) {
+    return { rules: existing.rules, errors: [`session:${id} not found`] };
+  }
+  const rules = existing.rules.map((rule) => rule.id === id ? { ...rule, enabled } : rule);
+  const store = readSessionMapFile(file);
+  store.sessions[sessionID] = rules;
+  atomicWriteJson(file, store);
+  return { rules, errors: existing.errors };
+}
+function clearSessionNudgeRule(file, sessionID, id) {
+  const existing = readSessionNudgeRules(file, sessionID);
+  const rules = existing.rules.filter((rule) => rule.id !== id);
+  const store = readSessionMapFile(file);
+  if (rules.length > 0) store.sessions[sessionID] = rules;
+  else delete store.sessions[sessionID];
+  atomicWriteJson(file, store);
+  return { rules, errors: existing.errors };
+}
+
+// src/tui-nudges.ts
+function parseFlags(args) {
+  const tokens = args.match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
+  const positional = [];
+  const values = {};
+  const booleans = /* @__PURE__ */ new Set();
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i];
+    if (!token.startsWith("--")) {
+      positional.push(token.replace(/^["']|["']$/g, ""));
+      continue;
+    }
+    const key = token.slice(2);
+    if (key === "idle" || key === "one-shot" || key === "event") {
+      booleans.add(key);
+      continue;
+    }
+    const next = tokens[i + 1];
+    if (next != null && !next.startsWith("--")) {
+      values[key] = next.replace(/^["']|["']$/g, "");
+      i += 1;
+    } else {
+      booleans.add(key);
+    }
+  }
+  return { positional, values, booleans };
+}
+function scoped(context) {
+  return resolveNudgePaths({ directory: context.location?.directory ?? process.cwd() });
+}
+function allRules(context, sessionID) {
+  const paths = scoped(context);
+  const global = readNudgeRuleFile(paths.globalFile, "global");
+  const project = readNudgeRuleFile(paths.projectFile, "project");
+  const session = readSessionNudgeRules(paths.sessionFile, sessionID);
+  const merged = mergeNudgeRules({
+    global: global.rules,
+    project: project.rules,
+    session: session.rules
+  });
+  return {
+    paths,
+    global,
+    project,
+    session,
+    merged,
+    errors: [...global.errors, ...project.errors, ...session.errors]
+  };
+}
+function row(rule, effective, detailed) {
+  const state2 = rule.enabled ? effective ? "on" : "muted" : "off";
+  const base = `${rule.scope}:${rule.id} [${state2}] ${rule.text}`;
+  if (!detailed) return base;
+  return [
+    base,
+    `  ${describeNudgeTrigger(rule)}; ${describeNudgeCriteria(rule)}`,
+    `  severity ${rule.severity}, ${rule.delivery}, cooldown ${formatNudgeDuration(rule.cooldownMs)}, ttl ${formatNudgeDuration(rule.ttlMs)}, max fires ${rule.maxFires === 0 ? "unlimited" : rule.maxFires}`
+  ].join("\n");
+}
+async function showList(context, sessionID, detailed) {
+  const { global, project, session, merged, errors } = allRules(context, sessionID);
+  const effective = new Set(merged.map((rule) => `${rule.scope}:${rule.id}`));
+  const rows = [
+    ...session.rules.map((rule) => row(rule, effective.has(`session:${rule.id}`), detailed)),
+    ...project.rules.map((rule) => row(rule, effective.has(`project:${rule.id}`), detailed)),
+    ...global.rules.map((rule) => row(rule, effective.has(`global:${rule.id}`), detailed))
+  ];
+  const notes = [];
+  if (rows.length === 0) notes.push("No custom nudge rules yet.");
+  if (errors.length > 0) notes.push(`Invalid rules: ${errors.join("; ")}`);
+  await context.ui.dialog.alert({
+    title: "Progress custom nudges",
+    message: [...rows, ...notes].join("\n\n")
+  });
+}
+function parseTarget(raw, sessionID) {
+  if (!raw) return null;
+  const [maybeScope, maybeId] = raw.includes(":") ? raw.split(":", 2) : ["session", raw];
+  const scope = maybeScope === "global" || maybeScope === "project" || maybeScope === "session" ? maybeScope : "session";
+  const id = (maybeId ?? "").trim();
+  if (!id) return null;
+  return { scope, id };
+}
+async function toggle(context, sessionID, args, enabled, clear) {
+  const flags = parseFlags(args);
+  const target = parseTarget(flags.positional[0] ?? flags.values.id, sessionID);
+  if (!target) {
+    context.ui.toast.show({ message: "Use <scope>:<id>, e.g. session:build", variant: "warning" });
+    return;
+  }
+  const paths = scoped(context);
+  if (target.scope === "session") {
+    const result2 = clear ? clearSessionNudgeRule(paths.sessionFile, sessionID, target.id) : setSessionNudgeRuleEnabled(paths.sessionFile, sessionID, target.id, enabled);
+    context.ui.toast.show({
+      message: result2.errors.length > 0 ? result2.errors.join("; ") : `Nudge session:${target.id} ${clear ? "cleared" : enabled ? "enabled" : "disabled"}.`,
+      variant: result2.errors.length > 0 ? "warning" : "success"
+    });
+    return;
+  }
+  const file = target.scope === "global" ? paths.globalFile : paths.projectFile;
+  const result = clear ? clearNudgeRule(file, target.scope, target.id) : setNudgeRuleEnabled(file, target.scope, target.id, enabled);
+  context.ui.toast.show({
+    message: result.errors.length > 0 ? result.errors.join("; ") : `Nudge ${target.scope}:${target.id} ${clear ? "cleared" : enabled ? "enabled" : "disabled"}.`,
+    variant: result.errors.length > 0 ? "warning" : "success"
+  });
+}
+async function saveRule(context, sessionID, rule) {
+  const paths = scoped(context);
+  const result = rule.scope === "session" ? upsertSessionNudgeRule(paths.sessionFile, sessionID, rule) : upsertNudgeRule(rule.scope === "global" ? paths.globalFile : paths.projectFile, rule.scope, rule);
+  if (result.errors.length > 0) {
+    context.ui.toast.show({ message: result.errors.join("; "), variant: "warning", duration: 7e3 });
+    return false;
+  }
+  context.ui.toast.show({
+    message: `Saved nudge ${rule.scope}:${rule.id} \xB7 ${describeNudgeTrigger(rule)}`,
+    variant: "success"
+  });
+  return true;
+}
+async function wizard(context, sessionID) {
+  const preset = await context.ui.dialog.select({
+    title: "Custom nudge preset",
+    options: NUDGE_PRESETS.map((choice) => ({
+      title: choice.title,
+      value: choice.value,
+      description: choice.description
+    }))
+  });
+  if (!preset) return;
+  const scope = await context.ui.dialog.select({
+    title: "Where should this rule live?",
+    options: [
+      { title: "Session", value: "session", description: "This session only (stored separately)" },
+      { title: "Project", value: "project", description: "Every session in this project" },
+      { title: "Global", value: "global", description: "Every session, in ~/.config/opencode" }
+    ],
+    current: "session"
+  });
+  if (!scope) return;
+  const id = (await context.ui.dialog.prompt({
+    title: "Rule id",
+    description: "Slug used by on/off/clear, e.g. stale-build",
+    placeholder: "stale-build"
+  }))?.trim();
+  if (!id) return;
+  const text = (await context.ui.dialog.prompt({
+    title: "Reminder text",
+    description: "Model-facing. Placeholders: {id} {title} {status} {age} {count} {action}",
+    placeholder: "{id} has been {status} for {age} \u2014 {action}"
+  }))?.trim();
+  if (!text) return;
+  let every;
+  if (preset === "custom") {
+    every = (await context.ui.dialog.prompt({
+      title: "Interval (blank for event-only)",
+      description: "5m, 30s, 2h",
+      placeholder: "5m"
+    }))?.trim() || void 0;
+  }
+  const severity = preset === "block" ? "block" : await context.ui.dialog.select({
+    title: "Severity",
+    options: [
+      { title: "warn (context)", value: "warn" },
+      { title: "info (context)", value: "info" },
+      { title: "block (synthetic only if delivery is synthetic)", value: "block" }
+    ],
+    current: "warn"
+  }) ?? "warn";
+  const result = buildNudgeRule(
+    {
+      id,
+      text,
+      scope,
+      severity,
+      ...every ? { trigger: { type: "interval", everyMs: every } } : {},
+      ...preset === "custom" && !every ? { trigger: { type: "event" } } : {},
+      source: "user",
+      createdAt: Date.now()
+    },
+    preset,
+    scope
+  );
+  if (!result.ok || !result.rule) {
+    context.ui.toast.show({ message: result.errors.join("; "), variant: "warning", duration: 7e3 });
+    return;
+  }
+  const confirmed = await context.ui.dialog.confirm({
+    title: "Save custom nudge?",
+    message: [
+      `${result.rule.scope}:${result.rule.id} \xB7 ${result.rule.severity} \xB7 ${result.rule.delivery}`,
+      `${describeNudgeTrigger(result.rule)}; ${describeNudgeCriteria(result.rule)}`,
+      `Text: ${result.rule.text}`
+    ].join("\n")
+  });
+  if (!confirmed) return;
+  await saveRule(context, sessionID, result.rule);
+}
+async function runNudgeCommand(context, sessionID, rawArgs) {
+  const args = rawArgs.trim();
+  if (!sessionID) {
+    context.ui.toast.show({ message: "Open a session to manage custom nudges", variant: "warning" });
+    return;
+  }
+  const sub = (args.split(/\s+/)[0] ?? "").toLowerCase();
+  const rest = args.slice(sub.length).trim();
+  if (!sub || sub === "wizard") {
+    await wizard(context, sessionID);
+    return;
+  }
+  if (sub === "list" || sub === "status") {
+    await showList(context, sessionID, sub === "status" || rest.includes("--detailed"));
+    return;
+  }
+  if (sub === "on") {
+    await toggle(context, sessionID, rest, true, false);
+    return;
+  }
+  if (sub === "off") {
+    await toggle(context, sessionID, rest, false, false);
+    return;
+  }
+  if (sub === "clear") {
+    await toggle(context, sessionID, rest, false, true);
+    return;
+  }
+  if (sub !== "set") {
+    context.ui.toast.show({
+      message: "Usage: /progress nudge [list|status|set|on|off|clear]",
+      variant: "warning"
+    });
+    return;
+  }
+  const flags = parseFlags(rest);
+  if (!flags.values.id || !flags.values.text) {
+    await wizard(context, sessionID);
+    return;
+  }
+  const scope = flags.values.scope === "global" || flags.values.scope === "project" ? flags.values.scope : "session";
+  const criteria = {};
+  if (flags.values.status) criteria.statuses = flags.values.status.split(",").map((s) => s.trim());
+  if (flags.values.stale) criteria.staleAfter = flags.values.stale;
+  if (flags.values["no-progress"]) criteria.noProgressAfter = flags.values["no-progress"];
+  if (flags.values["no-progress-steps"]) criteria.noProgressAfterSteps = Number(flags.values["no-progress-steps"]);
+  if (flags.values["in-flight"]) criteria.inFlight = flags.values["in-flight"];
+  if (flags.values.tree) criteria.tree = flags.values.tree;
+  if (flags.booleans.has("idle")) criteria.idleOnly = true;
+  if (flags.values.ids) criteria.entryIds = flags.values.ids.split(",").map((s) => s.trim());
+  if (flags.values.sessions) criteria.sessions = flags.values.sessions;
+  const every = flags.values.every;
+  const steps = flags.values.steps ? Number(flags.values.steps) : void 0;
+  const trigger = flags.booleans.has("event") ? { type: "event" } : every && steps ? { type: "either", everyMs: parseNudgeDuration(every), everySteps: steps } : steps ? { type: "steps", everySteps: steps } : every ? { type: "interval", everyMs: parseNudgeDuration(every) } : void 0;
+  const preset = flags.values.preset ?? "custom";
+  const result = buildNudgeRule(
+    {
+      id: flags.values.id,
+      title: flags.values.title,
+      text: flags.values.text,
+      scope,
+      severity: flags.values.severity,
+      delivery: flags.values.delivery,
+      trigger,
+      cooldownMs: flags.values.cooldown,
+      ttlMs: flags.values.ttl,
+      maxFires: flags.booleans.has("one-shot") ? 1 : flags.values["max-fires"] ? Number(flags.values["max-fires"]) : void 0,
+      criteria,
+      source: "user",
+      createdAt: Date.now()
+    },
+    preset,
+    scope
+  );
+  if (!result.ok || !result.rule) {
+    context.ui.toast.show({ message: result.errors.join("; "), variant: "warning", duration: 7e3 });
+    return;
+  }
+  await saveRule(context, sessionID, result.rule);
+}
+
 // src/tui.js
 var [state, setState] = createSignal(readProgressState());
 var [taskListStatus, setTaskListStatus] = createSignal(readTaskListStatus());
@@ -1509,7 +2255,7 @@ function ProgressTree(props) {
     expanded: expandedFor(props.sessionID),
     expandByDefault: expandRootsByDefault
   });
-  const lineCount = (rows) => rows.reduce((total, row) => total + 1 + (row.node.detail ? 1 : 0), 0);
+  const lineCount = (rows) => rows.reduce((total, row2) => total + 1 + (row2.node.detail ? 1 : 0), 0);
   const viewportHeight = () => Math.max(1, Math.min(capacity, lineCount(view().rows)));
   const overflowLines = () => Math.max(0, lineCount(view().rows) - capacity);
   const onDismissDone = (event) => {
@@ -1659,8 +2405,8 @@ function ProgressTree(props) {
                 get each() {
                   return view().rows;
                 },
-                children: (row) => _$createComponent(ProgressRow, {
-                  row,
+                children: (row2) => _$createComponent(ProgressRow, {
+                  row: row2,
                   get sessionID() {
                     return props.sessionID;
                   }
@@ -1676,8 +2422,8 @@ function ProgressTree(props) {
                 get each() {
                   return view().rows;
                 },
-                children: (row) => _$createComponent(ProgressRow, {
-                  row,
+                children: (row2) => _$createComponent(ProgressRow, {
+                  row: row2,
                   get sessionID() {
                     return props.sessionID;
                   }
@@ -2204,9 +2950,14 @@ var tui_default = Plugin.define({
           arguments: true
         },
         run: (input) => {
-          if ((input ?? "").trim().toLowerCase() === "swap-layout") {
+          const args = (input ?? "").trim();
+          const lower = args.toLowerCase();
+          if (lower === "swap-layout") {
             swapLayout(context);
             return;
+          }
+          if (lower === "nudge" || lower.startsWith("nudge ")) {
+            return runNudgeCommand(context, currentSessionID(context), args.slice("nudge".length).trim());
           }
           return openProgressDialog(context);
         }
