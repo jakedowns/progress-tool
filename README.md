@@ -131,9 +131,9 @@ Multi-line titles and details accept real newlines, `\n` / `\r\n`, or `<br>`.
 
 ## Custom nudges
 
-The built-in strict/wall/idle/say reminders are fixed. **Custom nudges** let a
-user or agent define the text, trigger, cooldown, criteria, lifetime, and
-delivery of an additional **model-facing** reminder.
+Custom nudges are **opt-in**: add `customNudges: true` to the plugin's options.
+They let a user or agent define the text, trigger, cooldown, criteria,
+lifetime, and delivery of an additional **model-facing** reminder.
 
 ```text
 /progress nudge                 # wizard (session, project, or global scope)
@@ -240,6 +240,7 @@ files, presets, and semantics.
 | `guiSidebarWidth` | Desktop sidebar initial width in CSS pixels (default 360, clamp 240-800) |
 | `guiDetailLines` | Detail line cap in pill menu and sidebar: `-1` full, `0` hidden, `n` lines (default 1) |
 | `treeTheme` | Tree row theme: `"default"` or `"compact"` (no bars/started line, one detail line; pill capsule unaffected). The **Progress: switch tree theme** preset picker writes this and `barStyle` back to the config |
+| `customNudges` | Enable custom nudge rules, the `progress_nudge` tool, and their TUI/palette commands (default `false`) |
 | `taskListFile` | Mirror tasks to a local Markdown checklist (default off) |
 | `taskListLocation` | `1` = project root (default), `0` = `.progress/`, `2` = `~/.opencode-progress/` |
 | `taskListView` | `"ui"` (hide dismissed + rolled-up status) or `"raw"` |

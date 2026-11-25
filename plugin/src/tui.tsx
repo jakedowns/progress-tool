@@ -1033,6 +1033,14 @@ export default Plugin.define({
               return;
             }
             if (lower === "nudge" || lower.startsWith("nudge ")) {
+              if (context.options?.customNudges !== true) {
+                context.ui.toast.show({
+                  message:
+                    "Custom nudges are opt-in. Add { customNudges: true } to this plugin's options.",
+                  variant: "warning",
+                });
+                return;
+              }
               return runNudgeCommand(
                 context,
                 currentSessionID(context),

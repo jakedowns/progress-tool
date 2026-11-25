@@ -440,6 +440,7 @@ Both the TUI and GUI parts read these options.
 - `demoSkills`: set to `true` to also register the two demo skills (`osc-demo`, `tree-demo`) shipped in `optional-skills/`. **Default `false`**.
 - `injectInstructions`: set to `false` to skip the injected progress/relay rules (useful if you maintain your own `AGENTS.md`).
 - `relayHints`: set to `false` to disable the pre-flight "wrap this in the relay" hint.
+- `customNudges`: set to `true` to enable custom nudge rules, the `progress_nudge` agent tool, and the TUI/palette commands. **Default `false`**; with it off, rule files are ignored and nothing is registered.
 - `notifyOnLoad`: set to `true` for a toast when the plugin loads.
 - `verboseLogging`: record every nudge the plugin injects as JSONL in `~/.opencode-progress-nudges.log` (override with `PROGRESS_NUDGE_LOG`). Events: `config`, `strict` (including `action: "stale-escalate"` and `priorNudged`/`staleNudges`), `compliance` (a standing nudge cleared by a real progress write, with `afterMs`), `wall-clock`, `idle-reminder`, `child-list-error`, `transition`, `relay-hint`, `subagent`, `unhinged`. **Default `false`**. Wall-clock tuning: `wallClockMs` (default 120s), only fires for sessions with a tool call in the last 10 minutes, is measured from `max(lastProgressAt, promptAt)` so resumed sessions do not print absurd ages, pauses while a tool is in flight, and caps at 3 reminders per non-progress stretch.
 - `autoRegisterMcp`: set to `false` to keep the plugin from registering the MCP server itself (you manage `mcp.servers` manually).
@@ -516,7 +517,10 @@ transcript and of `sayChatNotes`:
 ## Custom nudges
 
 A **custom nudge** is a user- or agent-defined reminder delivered to the
-**model**, not the user. It reuses the reminder engine from 2.22.0 (severity
+**model**, not the user. The feature is **opt-in**: set
+`{ "customNudges": true }` on the plugin entry to enable the rule engine, the
+`progress_nudge` agent tool, and the TUI/palette commands. With the flag off,
+no rule files are read and no commands or tools are registered. It reuses the reminder engine from 2.22.0 (severity
 tiers, one standing `progress-reminder` entry, dedupe, model-step counting,
 in-flight suppression) and adds configurable text, trigger, cooldown,
 criteria, lifetime, and delivery.

@@ -93,6 +93,7 @@ Pass under the plugin entry's `options` in `opencode.json`:
 | `staleEscalateAfter` | `3` | entry-based stale reminders before one synthetic escalation (`0` disables) |
 | `wallClockMs` | `120000` | wall-clock nudge threshold (`0` disables) |
 | `idleReminder` | `true` | turn-end nudge when open tasks remain |
+| `customNudges` | `false` | opt-in custom rule engine, `progress_nudge` tool, TUI/palette commands |
 | `unhinged` | `false` | append a task-list reminder to every user message |
 | `verboseLogging` | `false` | JSONL nudge telemetry (`~/.opencode-progress-nudges.log`) |
 | `autoHideDone` | `false` | hide completed tasks after the success hold |

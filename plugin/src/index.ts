@@ -70,6 +70,7 @@ import {
   upsertNudgeRule,
   upsertSessionNudgeRule,
   buildNudgeRule,
+  customNudgesEnabled,
   type CustomNudgeRule,
   type NudgeEntry,
   type NudgeRuntime,
@@ -206,6 +207,7 @@ export default Plugin.define({
     // Custom nudge rules live in dedicated files (global/project/session),
     // never in opencode.json. The scheduler reads them on demand: the files
     // are tiny, and this keeps the TUI and server in sync without IPC.
+    const customNudgesOn = customNudgesEnabled(ctx.options);
     const nudgePaths = resolveNudgePaths({ directory: ctx.location?.directory ?? process.cwd() });
     const nudgeRuntimes = new Map<string, NudgeRuntime>();
     const knownSessions = new Set<string>();
@@ -236,6 +238,7 @@ export default Plugin.define({
     };
     /** True while a replace rule is live; built-in reminders stay quiet. */
     const hasActiveReplace = (sessionID: string): boolean => {
+      if (!customNudgesOn) return false;
       const now = Date.now();
       return effectiveNudgeRules(sessionID).rules.some((rule) =>
         ruleSuppressesBuiltins(rule, nudgeRuntimeFor(rule, sessionID, now), now)
@@ -297,6 +300,7 @@ export default Plugin.define({
       sessionID: string,
       options: { idle?: boolean; timer?: boolean } = {}
     ): void {
+      if (!customNudgesOn) return;
       try {
         knownSessions.add(sessionID);
         const now = Date.now();
@@ -449,7 +453,8 @@ export default Plugin.define({
     // tool is unavailable (issue #1, related UX).
     const progressTool = { available: false, warned: false };
     const hasProgressTool = (tools: Record<string, unknown> | undefined): boolean =>
-      Boolean(tools) && Object.keys(tools ?? {}).some((name) => /progress/i.test(name));
+      Boolean(tools) &&
+      Object.keys(tools ?? {}).some((name) => /(^|[_-])progress(_touch)?$/i.test(name));
 
     const stateSignature = (state: ReturnType<typeof readProgressState>) =>
       JSON.stringify([state.entries ?? {}, state.notes ?? {}]);
@@ -599,6 +604,9 @@ export default Plugin.define({
         return { ok: true, mode };
       },
       nudgeList: async ({ sessionID }) => {
+        if (!customNudgesOn) {
+          return { rules: [], errors: ["custom nudges are disabled (set customNudges: true)"] };
+        }
         const global = readNudgeRuleFile(nudgePaths.globalFile, "global");
         const project = readNudgeRuleFile(nudgePaths.projectFile, "project");
         const session = readSessionNudgeRules(nudgePaths.sessionFile, sessionID);
@@ -641,6 +649,9 @@ export default Plugin.define({
         };
       },
       nudgeSet: async ({ sessionID, preset, rule }) => {
+        if (!customNudgesOn) {
+          return { ok: false, error: "custom nudges are disabled (set customNudges: true)", rule: {} };
+        }
         const rawRule = (rule ?? {}) as Record<string, unknown>;
         const result = buildNudgeRule(
           { ...rawRule, source: rawRule.source ?? "user" },
@@ -678,6 +689,9 @@ export default Plugin.define({
         };
       },
       nudgeSetEnabled: async ({ sessionID, scope, id, enabled }) => {
+        if (!customNudgesOn) {
+          return { ok: false, error: "custom nudges are disabled (set customNudges: true)" };
+        }
         const result =
           scope === "session"
             ? setSessionNudgeRuleEnabled(nudgePaths.sessionFile, sessionID, id, enabled)
@@ -693,6 +707,9 @@ export default Plugin.define({
           : { ok: true };
       },
       nudgeClear: async ({ sessionID, scope, id }) => {
+        if (!customNudgesOn) {
+          return { ok: false, error: "custom nudges are disabled (set customNudges: true)" };
+        }
         const result =
           scope === "session"
             ? clearSessionNudgeRule(nudgePaths.sessionFile, sessionID, id)
@@ -1240,6 +1257,7 @@ export default Plugin.define({
     // session with pending entries and, after wallClockMs (default 10m) with
     // no progress write, writes a standing instruction — removed again as
     // soon as progress resumes.
+    if (customNudgesOn) {
     // Agent-facing custom nudge control. Registered as a plugin tool (not
     // MCP) so it shares the server's runtime state. Session scope only:
     // broader scopes change every session, and this host exposes no
@@ -1473,6 +1491,7 @@ export default Plugin.define({
     } catch (error) {
       console.warn(`[opencode-progress] custom nudge tool registration failed: ${String(error)}`);
     }
+    }
 
     const wallClockMs = normalizeWallClockMs(ctx.options);
     const wallTrackers = new Map<string, WallClockState>();
@@ -1530,7 +1549,10 @@ export default Plugin.define({
 
     // Custom nudges: evaluate event/step rules after each tool completes,
     // when in-flight suppression has already been decremented.
-    const customNudgeToolHook = await ctx.tool.hook('execute.after', (event) => {
+    let customNudgeToolHook: Awaited<ReturnType<typeof ctx.tool.hook>> | undefined;
+    let customNudgeTimer: ReturnType<typeof setInterval> | undefined;
+    if (customNudgesOn) {
+    customNudgeToolHook = await ctx.tool.hook('execute.after', (event) => {
       knownSessions.add(event.sessionID);
       evaluateCustomNudges(event.sessionID);
       // A child session's rule may watch the parent tree (`sessions: self`);
@@ -1544,11 +1566,12 @@ export default Plugin.define({
 
     // Clock-triggered rules need their own tick; 5s keeps 5s intervals usable
     // without a per-rule timer.
-    const customNudgeTimer = setInterval(() => {
+    customNudgeTimer = setInterval(() => {
       for (const sessionID of knownSessions) {
         evaluateCustomNudges(sessionID, { timer: true });
       }
     }, 5_000);
+    }
 
     // Pre-flight relay hint: see a long-running command BEFORE it runs and
     // suggest wrapping it in the relay. Detection only — commands are never
@@ -1648,7 +1671,7 @@ export default Plugin.define({
       void activityHook?.dispose();
       void activeToolHook?.dispose();
       void customNudgeToolHook?.dispose();
-      clearInterval(customNudgeTimer);
+      if (customNudgeTimer) clearInterval(customNudgeTimer);
       void promptResetHook?.dispose();
       void relayHintHook?.dispose();
       void sayNudgeBeforeHook?.dispose();

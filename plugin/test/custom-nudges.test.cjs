@@ -345,3 +345,12 @@ test('session entry scoping includes descendants', () => {
   );
   assert.equal(n.entriesForSessions(entries, 'all', 'root', links).length, 4);
 });
+
+
+test('custom nudges are opt-in only', () => {
+  assert.equal(n.customNudgesEnabled(undefined), false);
+  assert.equal(n.customNudgesEnabled({}), false);
+  assert.equal(n.customNudgesEnabled({ customNudges: false }), false);
+  assert.equal(n.customNudgesEnabled({ customNudges: "true" }), false, 'strict boolean');
+  assert.equal(n.customNudgesEnabled({ customNudges: true }), true);
+});

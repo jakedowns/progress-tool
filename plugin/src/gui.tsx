@@ -2187,25 +2187,27 @@ export default Plugin.define({
       run: () => swapLayout(),
     }));
 
-    ctx.add(Command, () => ({
-      id: "progress.custom-nudge",
-      title: "Progress: custom nudge…",
-      description: "Create a configurable reminder rule for this or every session",
-      group: "Progress",
-      section: "session" as const,
-      keywords: "progress nudge custom reminder rule interval",
-      run: () => void openNudgeWizard(),
-    }));
+    if (ctx.options?.customNudges === true) {
+      ctx.add(Command, () => ({
+        id: "progress.custom-nudge",
+        title: "Progress: custom nudge…",
+        description: "Create a configurable reminder rule for this or every session",
+        group: "Progress",
+        section: "session" as const,
+        keywords: "progress nudge custom reminder rule interval",
+        run: () => void openNudgeWizard(),
+      }));
 
-    ctx.add(Command, () => ({
-      id: "progress.custom-nudge-status",
-      title: "Progress: custom nudge status",
-      description: "List custom nudge rules; enable, disable, or clear one",
-      group: "Progress",
-      section: "session" as const,
-      keywords: "progress nudge custom list status disable clear",
-      run: () => void openNudgeStatus(),
-    }));
+      ctx.add(Command, () => ({
+        id: "progress.custom-nudge-status",
+        title: "Progress: custom nudge status",
+        description: "List custom nudge rules; enable, disable, or clear one",
+        group: "Progress",
+        section: "session" as const,
+        keywords: "progress nudge custom list status disable clear",
+        run: () => void openNudgeStatus(),
+      }));
+    }
 
     ctx.add(Command, () => ({
       id: "progress.switch-tree-theme",

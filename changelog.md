@@ -226,6 +226,9 @@ Shipped since `mcp-server@2.10.2`:
 ## 2.23.0 — custom nudges (unreleased)
 
 User- and agent-configurable reminders, built on the 2.22.0 reminder engine.
+**Opt-in:** the whole feature is gated behind `{ customNudges: true }`
+(default `false`) — no rule files are read, and no tool or TUI/palette command
+is registered until it is enabled.
 
 ### Added
 

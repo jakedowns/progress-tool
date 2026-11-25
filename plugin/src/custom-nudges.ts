@@ -12,6 +12,12 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { formatAge, isHealthyWaiting, pickTarget } from "./reminders.js";
 
+/** Custom nudges are opt-in: `{ customNudges: true }` on the plugin entry. */
+export function customNudgesEnabled(options: unknown): boolean {
+  const value = (options ?? {}) as Record<string, unknown>;
+  return value.customNudges === true;
+}
+
 export type NudgeScope = "global" | "project" | "session";
 export type NudgeSeverity = "info" | "warn" | "block";
 export type NudgeDelivery = "context-replace" | "context-alongside" | "synthetic";
