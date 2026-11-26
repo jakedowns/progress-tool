@@ -2213,6 +2213,9 @@ function ProgressRow(props) {
     return full.length > 120 ? `${full.slice(0, 120)}\u2026` : full;
   };
   const label = () => {
+    if (props.row.node.progress == null) {
+      return `${glyph(props.row.node.status)} ${title()}${suffix()}`;
+    }
     if (themeState.value === "ultra-compact") {
       return `${glyph(props.row.node.status)} ${title()}`;
     }

@@ -262,6 +262,9 @@ function ProgressRow(props: { row: TuiRow; sessionID: string }) {
   };
 
   const label = () => {
+    if (props.row.node.progress == null) {
+      return `${glyph(props.row.node.status)} ${title()}${suffix()}`;
+    }
     if (themeState.value === "ultra-compact") {
       return `${glyph(props.row.node.status)} ${title()}`;
     }

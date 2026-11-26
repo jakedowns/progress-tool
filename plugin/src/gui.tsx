@@ -475,11 +475,13 @@ function MenuRow(props: {
                   opacity: "0.58",
                 }}
               >
-                <span style={{ "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace" }}>
-                  {parts().bar}
-                </span>
-                <Show when={pct()}>
-                  <span>{pct()}</span>
+                <Show when={props.node.progress != null}>
+                  <span style={{ "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace" }}>
+                    {parts().bar}
+                  </span>
+                  <Show when={pct()}>
+                    <span>{pct()}</span>
+                  </Show>
                 </Show>
                 <Show when={props.collapsed && props.node.children.length > 0}>
                   <span>&amp; {countDescendants(props.node)} more...</span>

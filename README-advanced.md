@@ -2,7 +2,7 @@
 
 Back to the [main README](./README.md).
 
-**Versions:** MCP server `2.12.0` · OpenCode plugin `2.26.0`
+**Versions:** MCP server `2.12.0` · OpenCode plugin `2.27.0`
 
 This document is the reference half of the project: the portable contract, the
 relay's behaviour, state-store guarantees, architecture, testing, every plugin
@@ -192,7 +192,7 @@ A subagent runs in its own child session, so its tool calls carry the child sess
 2. **Prompt stamping (fallback):** the plugin's `execute.before` hook appends `progress sessionId: <parent>` to the `subagent`/`task` prompt. That covers a child whose very first progress call beats the map write, and older engines without the event.
 3. **Instruction fallback:** injected rules name the session id and explain that a prompt-supplied id wins.
 
-The map is merge-written under a lock, pruned after 30 days, bounded to 8 hops (cycle-safe), and unknown sessions resolve to themselves. The agent type and session title from `session.created` are persisted as `subagent` / `subagentAgent` / `subagentName`, so roots render as `[subagent <session name>]: Title` (name truncated to 20 chars; `[subagent]: Title` when unknown). The agent type is shown in the GUI row tooltip on hover. The parent still mirrors the workstream as its own child task, per the delegation guidance.
+The map is merge-written under a lock, pruned after 30 days, bounded to 8 hops (cycle-safe), and unknown sessions resolve to themselves. The agent type and session title from `session.created` are persisted as `subagent` / `subagentAgent` / `subagentName`, so roots render as `[subagent <session name>]: Title` (name truncated to 20 chars; `[subagent]: Title` when unknown). The agent type is shown in the GUI row tooltip on hover. A **running node is created automatically** for each child session (keyed by the child id), and closed when the session ends, so rollup no longer depends on the agent remembering to file one. The parent still mirrors the workstream as its own child task, per the delegation guidance.
 
 ### Options
 
@@ -433,7 +433,7 @@ Both the TUI and GUI parts read these options.
 - `taskListView`: `"ui"` (default) hides dismissed/cleared entries and rolls child status up so the Markdown matches the UI; `"raw"` keeps every entry and the stored status. The TUI/GUI palette command **Progress: task-list mirror view** toggles this when the mirror is active; the change applies to the next render, not to existing entries.
 - `taskListDetail`: `"code"` (default) renders detail in a fenced code block; `"escaped"` renders inline Markdown-escaped text; `"raw"` is an explicit opt-in for trusted content.
 - `taskListOrder`: `"newest-first"` (default; newest `createdAt` at the top) or `"oldest-first"` (append at the bottom).
-- `strictMode`: `"nudge"` (default), `"force"`, or `"off"`. Watches **model steps** (not raw tool calls, so parallel tools in one step count once): without any task entry, or with pending tasks whose progress has not changed, it writes one compact standing `progress-reminder` entry (`[info]`/`[warn]`/`[block]` prefix) that names the oldest stale entry and one action. Tune with `strictThreshold` (default `3` steps), `staleAfterMs` (default `5` min), `cooldownMs` (default `2` min), and `staleEscalateAfter` (default `3`). The first `staleEscalateAfter` stale reminders ride the context entry; the next one escalates **once** to a synthetic `[block]` message so it is a real turn input. Set `staleEscalateAfter: 0` to disable escalation. A `waiting` entry with a non-empty detail touched within `staleAfterMs` is considered healthy blocked work and does not trigger strict/idle/wall nudges; stale or detail-less waiting still counts. Unchanged reminder text is deduped inside `cooldownMs`, counters reset on a new prompt and on any progress write, `warn`-level reminders are suppressed while a tool is in flight, and a parent blocked on active child sessions is exempt from stale-progress nudges.
+- `strictMode`: `"nudge"` (default), `"force"`, or `"off"`. Watches **model steps** (not raw tool calls, so parallel tools in one step count once): without any task entry, or with pending tasks whose progress has not changed, it writes one compact standing `progress-reminder` entry (`[info]`/`[warn]`/`[block]` prefix) that names the oldest stale entry and one action. Tune with `strictThreshold` (default `3` steps), `staleAfterMs` (default `5` min), `cooldownMs` (default `2` min), and `staleEscalateAfter` (default `3`). The first `staleEscalateAfter` stale reminders ride the context entry; the next one escalates **once** to a synthetic `[block]` message so it is a real turn input. Set `staleEscalateAfter: 0` to disable escalation. A `waiting` entry with a non-empty detail touched within `staleAfterMs` is considered healthy blocked work and does not trigger strict/idle/wall nudges; stale or detail-less waiting still counts. Unchanged reminder text is deduped inside `cooldownMs`; counters reset on a new prompt and on any progress write; silent-run nudges also require `staleAfterMs` of elapsed time, so a short burst of steps is not a silent run. `warn`-level reminders are suppressed while a tool is in flight, a parent blocked on active child sessions is exempt from stale-progress nudges, and strict/say reminders share a **2-per-session cap** plus `nudgeGraceMs` after any real write.
 - `idleReminder`: set to `false` to disable the turn-end nudge. By default, when a session is about to go idle, the plugin admits **one `[block]` synthetic message** only for **owned** entries that are stale for `idleStaleMs` (default 10 min) or failed within the last hour. Subagent-owned entries, parents with open child entries, healthy fresh-detail `waiting`, and recently touched work are excluded; the message reports their counts separately. Debounced by entry signature, a 2-minute cooldown, and a per-run cap.
 - `idleStaleMs`: how long an owned entry may go untouched before the turn-end nudge counts it as stale (default `600000`, minimum 60s).
 - `unhinged`: set to `true` to append `[did the user's message just change your workload? update your task list!]` to every user message. **Default `false`** — it edits user input text, so it is strictly opt-in.
@@ -445,6 +445,7 @@ Both the TUI and GUI parts read these options.
 - `customNudges`: set to `true` to enable custom nudge rules and the TUI/palette editors. **Default `false`**. The `progress_nudge` agent tool is always registered so agents can `mute`/`unmute`/`status`, but with the flag off it refuses rule editing and no rule files are read.
 - `notifyOnLoad`: set to `true` for a toast when the plugin loads.
 - `nudgeGapMs`: global quiet period between non-block reminders from any source (default `60000`, `0` disables). Block-level reminders bypass it.
+- `nudgeGraceMs`: quiet window after any real progress write before strict/say reminders may fire again (default `600000`, `0` disables).
 - `verboseLogging`: record every nudge the plugin injects as JSONL in `~/.opencode-progress-nudges.log` (override with `PROGRESS_NUDGE_LOG`). Events: `config`, `strict` (including `action: "stale-escalate"` and `priorNudged`/`staleNudges`), `compliance` (a standing nudge cleared by a real progress write, with `afterMs`), `wall-clock`, `idle-reminder`, `child-list-error`, `transition`, `relay-hint` (now includes `pattern`/`count`), `reminder` (with `suppressed: muted|gap|custom-replace`), `custom-nudge`, `subagent`, `unhinged`. **Default `false`**. Wall-clock tuning: `wallClockMs` (default 10 min), only fires for sessions with a tool call in the last 10 minutes, is measured from `max(lastProgressAt, promptAt)` so resumed sessions do not print absurd ages, pauses while a tool is in flight, skips a parent while child sessions are active, and caps at 3 reminders per non-progress stretch.
 - `autoRegisterMcp`: set to `false` to keep the plugin from registering the MCP server itself (you manage `mcp.servers` manually).
 - `mcpRuntime`: absolute path to the `node`/`bun` used to spawn the MCP server (auto-detected). Set it if detection picks the wrong runtime.
@@ -459,17 +460,14 @@ Because it is a tool call, the turn cannot end on a note.
 
 - `say`: register the tool and inject its rules. **Default `false`**.
 - `sayMinChars` / `sayMaxChars`: preferred range (default `180`–`260`). Notes outside it are accepted **in full**; the success result carries a reminder (`aim for <min>–<max> next time`). Length never skips, rejects, or rewrites a note. Both clamp to `20..600`, with `sayMaxChars` raised to `sayMinChars` when inverted.
-- `sayBudgetPerTurn`: accepted notes per user turn (default `3`).
-- `sayCooldownMs`: minimum gap between accepted notes (default `15000`).
+- `sayBudgetPerTurn`: **legacy/ignored.** Accepted for config compatibility; notes are no longer count-limited.
+- `sayCooldownMs`: **legacy/ignored.** Notes are no longer time-gated. Consecutive identical text is still skipped.
 - `sayChatNotes`: set to `false` for the instant progress line only, without the durable synthetic note.
 - `sayFinalGuard`: if the agent posts a note and then stops without a conclusion, resume the turn once (default `true`).
-- `sayModes`: where note surfaces appear. **Default `["tree"]`**. Accepts a string or an array of `"pill"`, `"toast"`, `"tree"`; `sayMode` is a scalar alias. Unknown values are dropped, duplicates collapse, and an explicit `[]` records notes with no surface. This is view config only: the tool, its budget, and `sayChatNotes` stay independent.
+- `sayModes`: where note surfaces appear. **Default `["tree"]`**. Accepts a string or an array of `"pill"`, `"toast"`, `"tree"`; `sayMode` is a scalar alias. Unknown values are dropped, duplicates collapse, and an explicit `[]` records notes with no surface. This is view config only: the tool and `sayChatNotes` stay independent.
 - `sayAutoHideTimeoutMs`: hide notes older than this from every notes surface (default `60000`, clamp `0..86400000`; `0` disables auto-hide and keeps notes until manually dismissed). A note is visible only while `now - note.at < timeout`; hidden notes remain in the shared ring buffer, so this is view-only and never changes the tool, store, or purge rules.
 - `sayToastScope`: which rolled-up notes may raise a toast when `toast` is in `sayModes`: `"own"` (default; notes authored by the viewed session), `"warnings"` (own plus child `blocked`/`question`), or `"all"`. Child notes still roll up in the line, pill, and history regardless. `blocked`/`question` toasts last `12000`ms; other notes `5000`ms, in both clients.
 - `sayNudge`: opt-in reminder, **only active when `say: true`**. `"long-tool"` (or `true`) leaves one **context-only** nudge after a tool runs longer than `sayNudgeAfterMs` with no accepted say this turn. `"silent-run"` is the forgot-to-narrate nudge: it fires after `sayNudgeMinCalls` non-`say`/progress tool calls in a row with no note. `"both"` fires on either condition. **Default `off`.** A nudge cannot reach the model while the tool is still running, so it is deliberately retrospective: it asks for a say before the *next* step. It never sends a synthetic message, never fires for `say`/progress calls, is suppressed while any standing reminder entry exists, and clears when a note is accepted. `sayNudgeMinCalls` defaults to `3` (clamp `1..50`); `sayNudgeCooldownMs` (default `120000`) and `sayNudgeMaxPerTurn` (default `1`, max `3`) bound repeats; per-turn counts reset on the next prompt while the cooldown timestamp persists.
-
-Budget and cooldown skips return a result that points the agent at the `progress`
-tool for any further backchannel updates in that turn.
 
 **Mode matrix.** `pill` is a desktop/web composer capsule; the TUI has no pills,
 so it maps `pill` to the tree line and dedupes when `tree` is also enabled. The
@@ -506,8 +504,7 @@ transcript and of `sayChatNotes`:
   popover. Pills float above the timeline, so they stay visible in both
   composer and sidebar layouts; `toast` works independently of layout.
 - **Subagents:** child-session notes roll up to the parent view (prefixed
-  `[Subagent (Explore)]`), including toasts, and each child keeps its own note
-  budget.
+  `[Subagent (Explore)]`), including toasts.
 - **Dismissal:** dismissing removes the note from the shared ring buffer, so
   every open client updates on its next poll/event. **Dismiss all notes** is
   root-scoped: it clears the same rolled-up tree the viewer is reading.
@@ -797,6 +794,13 @@ flowchart LR
 ```
 
 Custom rules survive prompts; their counters and TTL do not reset.
+
+### Native progress tool
+
+When the plugin server loads, it also registers a direct `progress`/`progress_write`
+tool that writes the shared store without the Code-Mode MCP wrapper. It accepts
+the same single-entry fields and `entries[]`, and `progress` is optional.
+The MCP `progress` tool remains the fallback and the relay contract is unchanged.
 
 ## Dev builds and version display
 

@@ -51,7 +51,7 @@ export interface SaySessionState extends SayTurnState {
   guarded: boolean;
 }
 
-export type SaySkipReason = "empty" | "budget" | "cooldown" | "duplicate";
+export type SaySkipReason = "empty" | "duplicate";
 
 export interface SayDecision {
   accept: boolean;
@@ -281,7 +281,10 @@ export function emptySayState(): SaySessionState {
  * Decide whether a note is accepted. Pure: returns the next state plus the
  * decision, so the caller owns the per-session map.
  *
- * Order: empty -> budget -> cooldown -> duplicate -> accept.
+ * Order: empty -> duplicate -> accept. There is no per-turn count cap and no
+ * cooldown: notes are only skipped when empty or identical to the previous
+ * accepted text. `sayBudgetPerTurn`/`sayCooldownMs` remain accepted for config
+ * compatibility but are no longer enforced.
  * Length is advisory only: an out-of-range note is accepted unchanged and the
  * result carries a warning about the preferred range for the next call.
  */
@@ -292,12 +295,6 @@ export function decideSay(
   const text = normalizeSayText(input.text);
   if (!text) {
     return { state, decision: { accept: false, reason: "empty", text: "" } };
-  }
-  if (state.count >= input.options.budgetPerTurn) {
-    return { state, decision: { accept: false, reason: "budget", text } };
-  }
-  if (state.lastAt > 0 && input.now - state.lastAt < input.options.cooldownMs) {
-    return { state, decision: { accept: false, reason: "cooldown", text } };
   }
   if (text === state.lastText) {
     return { state, decision: { accept: false, reason: "duplicate", text } };
@@ -342,9 +339,6 @@ export function sayResultMessage(decision: SayDecision): string {
     return `Noted.${warning} Continue working; this is not the final answer.`;
   }
   switch (decision.reason) {
-    case "budget":
-    case "cooldown":
-      return "Skipped (budget/cooldown). Continue working; use the progress tool for any further backchannel updates this turn.";
     case "duplicate":
       return "Skipped (duplicate note). Continue working.";
     default:
@@ -353,13 +347,12 @@ export function sayResultMessage(decision: SayDecision): string {
 }
 
 export function sayToolDescription(options: SayOptions): string {
-  const seconds = Math.round(options.cooldownMs / 1000);
   return (
     `Post a short user-visible note without ending the turn. Use before a multi-step task ` +
     `or a tool likely to run longer than ~30s: give a ${options.minChars}–${options.maxChars} ` +
     `character summary of what you're about to do and a rough ETA, so the user isn't left ` +
     `wondering or forced to open your thought trace. Not the final answer. ` +
-    `Budget: ${options.budgetPerTurn} notes per turn, ${seconds}s apart.`
+    `No per-turn note cap; consecutive identical text is skipped.`
   );
 }
 

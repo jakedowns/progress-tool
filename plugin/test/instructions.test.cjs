@@ -81,8 +81,7 @@ test('sayRules asks for a short intent + ETA without ending the turn', () => {
   assert.match(text, /180–260/);
   assert.match(text, /ETA/);
   assert.match(text, /does \*\*not\*\* end the turn/);
-  assert.match(text, /3 notes per turn/);
-  assert.match(text, /15s apart/);
+  assert.match(text, /no per-turn note cap/i);
   assert.ok(text.includes('`progress` is task state'));
   assert.ok(text.includes('parallel tool calls'));
   assert.doesNotMatch(text, /undefined/);

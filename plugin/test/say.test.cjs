@@ -236,31 +236,19 @@ test('over-max notes are accepted unchanged and warned', () => {
   );
 });
 
-test('budget caps accepted notes per turn', () => {
-  const options = enabled({ sayBudgetPerTurn: 1, sayCooldownMs: 0 });
-  const first = decideSay(emptySayState(), { text: 'first note', now: 1_000, options });
-  assert.equal(first.decision.accept, true);
-
-  const second = decideSay(first.state, { text: 'second note', now: 2_000, options });
-  assert.equal(second.decision.accept, false);
-  assert.equal(second.decision.reason, 'budget');
+test('budget and cooldown no longer reject notes', () => {
+  const options = enabled({ sayBudgetPerTurn: 1, sayCooldownMs: 15_000 });
+  let state = emptySayState();
+  for (const [index, text] of ['first note', 'second note', 'third note'].entries()) {
+    const result = decideSay(state, { text, now: 1_000 + index * 100, options });
+    assert.equal(result.decision.accept, true, result.decision.reason);
+    state = result.state;
+  }
+  assert.equal(state.count, 3);
 });
 
-test('cooldown rejects notes that arrive too soon', () => {
-  const options = enabled({ sayCooldownMs: 15_000 });
-  const first = decideSay(emptySayState(), { text: 'first note', now: 1_000, options });
-  assert.equal(first.decision.accept, true);
-
-  const tooSoon = decideSay(first.state, { text: 'second note', now: 5_000, options });
-  assert.equal(tooSoon.decision.accept, false);
-  assert.equal(tooSoon.decision.reason, 'cooldown');
-
-  const later = decideSay(first.state, { text: 'second note', now: 20_000, options });
-  assert.equal(later.decision.accept, true);
-});
-
-test('repeating the same note inside the cooldown is skipped as duplicate', () => {
-  const options = enabled({ sayCooldownMs: 0 });
+test('repeating the same note consecutively is skipped as duplicate', () => {
+  const options = enabled();
   const first = decideSay(emptySayState(), { text: 'same note', now: 1_000, options });
   const second = decideSay(first.state, { text: 'same note', now: 2_000, options });
   assert.equal(second.decision.accept, false);
@@ -281,22 +269,6 @@ test('accepted result tells the model to keep working and not conclude', () => {
   const message = sayResultMessage({ accept: true, text: 'note' });
   assert.match(message, /Continue working/);
   assert.match(message, /not the final answer/);
-});
-
-test('budget and cooldown results point at the progress tool', () => {
-  for (const reason of ['budget', 'cooldown']) {
-    const message = sayResultMessage({ accept: false, reason, text: 'note' });
-    assert.match(message, /progress tool/);
-    assert.match(message, /backchannel updates this turn/);
-  }
-});
-
-test('tool description carries the length range and budget', () => {
-  const description = sayToolDescription(enabled());
-  assert.match(description, /180–260/);
-  assert.match(description, /3 notes per turn/);
-  assert.match(description, /ETA/);
-  assert.match(description, /Not the final answer/);
 });
 
 test('tool schema has no text.maxLength so the host cannot reject long notes', () => {
@@ -426,10 +398,10 @@ test('accepted notes persist through recordNote with kind and eta', async () => 
   assert.equal(typeof recorded[0].at, 'number');
 });
 
-test('recordNote still runs when chat notes are disabled, and skips on budget', async () => {
+test('recordNote runs for every accepted note when chat notes are disabled', async () => {
   const recorded = [];
   const controller = createSayController(
-    enabled({ sayChatNotes: false, sayBudgetPerTurn: 1, sayCooldownMs: 0 }),
+    enabled({ sayChatNotes: false }),
     { recordNote: (note) => recorded.push(note) }
   );
 
@@ -442,7 +414,7 @@ test('recordNote still runs when chat notes are disabled, and skips on budget', 
     { sessionID: 'ses_say_notes2', progress: async () => {} }
   );
 
-  assert.equal(recorded.length, 1, 'only accepted notes are persisted');
+  assert.equal(recorded.length, 2, 'both notes are persisted');
 });
 
 test('controller skips synthetic when chat notes are disabled', async () => {
@@ -470,20 +442,20 @@ test('controller survives a synthetic failure (progress line already landed)', a
   assert.match(result.content, /Noted/);
 });
 
-test('reset starts a new turn budget; markGuarded is sticky', async () => {
+test('reset clears per-turn state; notes are not capped', async () => {
   const controller = createSayController(
-    enabled({ sayBudgetPerTurn: 1, sayCooldownMs: 0 }),
+    enabled(),
     { synthetic: async () => {} }
   );
   await controller.tool.execute(
     { text: 'first turn note' },
     { sessionID: 'ses_say_4', progress: async () => {} }
   );
-  const blocked = await controller.tool.execute(
+  const second = await controller.tool.execute(
     { text: 'second note same turn' },
     { sessionID: 'ses_say_4', progress: async () => {} }
   );
-  assert.match(blocked.content, /budget\/cooldown/);
+  assert.match(second.content, /Noted/);
 
   controller.markGuarded('ses_say_4');
   assert.equal(controller.get('ses_say_4').guarded, true);

@@ -48,8 +48,6 @@ export interface SayNudgeInput {
   /** Non-say/progress tool calls this turn since the last accepted note. */
   callsSinceSay: number;
   saidThisTurn: boolean;
-  sayCount: number;
-  sayBudget: number;
   progressNudgeActive: boolean;
   now: number;
 }
@@ -57,7 +55,6 @@ export interface SayNudgeInput {
 export type SayNudgeReason =
   | "off"
   | "said"
-  | "budget"
   | "short"
   | "few-calls"
   | "cooldown"
@@ -201,7 +198,7 @@ function acceptMessage(input: SayNudgeInput, options: SayNudgeOptions): string {
  * Decide whether to nudge after a tool call finished. Pure: the caller owns the
  * per-session state and persists it with `recordSayNudge` on accept.
  *
- * Order: off -> said -> budget -> trigger -> cooldown -> cap -> progress-nudge -> accept.
+ * Order: off -> said -> trigger -> cooldown -> cap -> progress-nudge -> accept.
  */
 export function decideSayNudge(
   state: SayNudgeState,
@@ -210,7 +207,6 @@ export function decideSayNudge(
 ): SayNudgeDecision {
   if (options.mode === "off") return { nudge: false, reason: "off" };
   if (input.saidThisTurn) return { nudge: false, reason: "said" };
-  if (input.sayCount >= input.sayBudget) return { nudge: false, reason: "budget" };
 
   const longEnough = input.durationMs >= options.afterMs;
   const enoughCalls = input.callsSinceSay >= options.minCalls;

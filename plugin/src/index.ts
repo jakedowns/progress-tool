@@ -27,6 +27,10 @@ import {
   writeDismissal,
 } from "./state.js";
 import { readTaskListStatus, toggleTaskListMode } from "./tasklist-prefs.js";
+import {
+  upsertNativeProgress,
+  type NativeProgressInput,
+} from "./native-progress.js";
 import { normalizeRefreshMs } from "./tree.js";
 import { writeThemeToConfig } from "./tree-theme.js";
 import {
@@ -214,6 +218,16 @@ export default Plugin.define({
         : 60_000;
     })();
     const lastReminderAt = new Map<string, number>();
+    /** Last real progress write, for the post-write grace window. */
+    const lastProgressWriteAt = new Map<string, number>();
+    /** Strict/say reminder fires in this session (merged, cap 2). */
+    const nudgeFireCount = new Map<string, number>();
+    const nudgeGraceMs = (() => {
+      const raw = ctx.options?.nudgeGraceMs;
+      return typeof raw === "number" && Number.isFinite(raw) && raw >= 0
+        ? Math.min(60 * 60_000, Math.floor(raw))
+        : 10 * 60_000;
+    })();
     /** Agent-set snooze; non-block reminders only, so safety blocks still land. */
     const nudgeMutedUntil = new Map<string, number>();
     const reminderMuted = (sessionID: string): boolean =>
@@ -315,6 +329,17 @@ export default Plugin.define({
         if (verbose) logNudge({ event: 'reminder', sessionID, severity, source, suppressed: 'custom-replace' });
         return false;
       }
+      if (source === "strict" || source === "say") {
+        const lastWrite = lastProgressWriteAt.get(sessionID) ?? 0;
+        if (severity !== "block" && lastWrite > 0 && now - lastWrite < nudgeGraceMs) {
+          if (verbose) logNudge({ event: 'reminder', sessionID, severity, source, suppressed: 'grace' });
+          return false;
+        }
+        if ((nudgeFireCount.get(sessionID) ?? 0) >= 2) {
+          if (verbose) logNudge({ event: 'reminder', sessionID, severity, source, suppressed: 'cap' });
+          return false;
+        }
+      }
       if (!reminderGapAllows(lastReminderAt.get(sessionID) ?? 0, now, reminderGapMs, severity)) {
         if (verbose) logNudge({ event: 'reminder', sessionID, severity, source, suppressed: 'gap' });
         return false;
@@ -335,6 +360,9 @@ export default Plugin.define({
       }
       standingReminders.set(sessionID, next);
       lastReminderAt.set(sessionID, now);
+      if (source === "strict" || source === "say") {
+        nudgeFireCount.set(sessionID, (nudgeFireCount.get(sessionID) ?? 0) + 1);
+      }
       void ctx.session.instructions.entry
         .put({ sessionID, key: REMINDER_KEY, value: text })
         .catch(() => {});
@@ -498,7 +526,7 @@ export default Plugin.define({
         });
         console.log(
           `[opencode-progress] v${pluginVersion} experimental say tool registered as ${sayToolName} ` +
-            `(${sayOptions.minChars}–${sayOptions.maxChars} chars, ${sayOptions.budgetPerTurn}/turn)`
+            `(${sayOptions.minChars}–${sayOptions.maxChars} chars)`
         );
       } catch (error) {
         console.warn(
@@ -998,6 +1026,8 @@ export default Plugin.define({
           if (lastProgressAt > previousSeen) lastSeenProgress.set(event.sessionID, lastProgressAt);
           if (isProgressCall || progressAdvanced) {
             stepsSinceProgress.set(event.sessionID, 0);
+            lastProgressWriteAt.set(event.sessionID, now);
+            nudgeFireCount.delete(event.sessionID);
             clearReminder(event.sessionID);
           }
           const target = pickTarget(entries, now);
@@ -1028,7 +1058,8 @@ export default Plugin.define({
             {
               isProgressCall,
               hasActive,
-              lastProgressAt: lastProgressAt || undefined,
+              lastProgressAt:
+                Math.max(lastProgressAt, promptAt.get(event.sessionID) ?? 0) || undefined,
               progressAdvanced,
               now,
               stepsSinceProgress: stepsSinceProgress.get(event.sessionID) ?? 0,
@@ -1137,9 +1168,31 @@ export default Plugin.define({
             if (!child || !parent) continue;
             if (recordChildSession(child, parent, agent, name)) {
               adoptChildEntries(child, parent, agent, name);
+              ensureSubagentNode(child, parent, agent, name);
             }
           } else if (event.type === 'session.deleted') {
             const deletedID = event.data.sessionID;
+            const link = readSessionMap()[deletedID];
+            if (link?.parentId) {
+              try {
+                upsertNativeProgress([
+                  {
+                    id: subagentNodeId(deletedID),
+                    status: "done",
+                    title: subagentNodeTitle(link.name, link.agent),
+                    detail: "Subagent session ended",
+                    progress: 1,
+                    parentId: null,
+                    sessionId: link.parentId,
+                    subagent: true,
+                    subagentAgent: link.agent ?? null,
+                    subagentName: link.name ?? null,
+                  },
+                ]);
+              } catch {
+                // Best-effort close.
+              }
+            }
             knownSessions.delete(deletedID);
             for (const key of nudgeRuntimes.keys()) {
               if (key.startsWith(`${deletedID}:`)) nudgeRuntimes.delete(key);
@@ -1301,8 +1354,6 @@ export default Plugin.define({
               durationMs,
               callsSinceSay,
               saidThisTurn: controller?.accepted === true,
-              sayCount: controller?.count ?? 0,
-              sayBudget: sayOptions.budgetPerTurn,
               progressNudgeActive: Boolean(standingReminders.get(event.sessionID)),
               now,
             },
@@ -1339,6 +1390,160 @@ export default Plugin.define({
         `[opencode-progress] v${pluginVersion} say nudge: ${sayNudgeOptions.mode} ` +
           `(after ${sayNudgeOptions.afterMs}ms or ${sayNudgeOptions.minCalls} calls)`
       );
+    }
+
+    // Native progress tool: writes the shared store without a Code-Mode MCP
+    // indirection. The MCP server remains the fallback and the relay's data
+    // plane is unchanged.
+    const subagentNodeId = (child: string): string =>
+      `subagent-${child.replace(/[^a-zA-Z0-9_-]/g, "").slice(-10)}`;
+    const subagentNodeTitle = (name?: string, agent?: string): string =>
+      String(name || `${agent || "subagent"} task`).replace(/\s+/g, " ").trim().slice(0, 80);
+
+    const ensureSubagentNode = (
+      child: string,
+      parent: string,
+      agent?: string,
+      name?: string
+    ): void => {
+      try {
+        upsertNativeProgress([
+          {
+            id: subagentNodeId(child),
+            status: "running",
+            title: subagentNodeTitle(name, agent),
+            detail: `Subagent session ${child}`,
+            parentId: null,
+            sessionId: parent,
+            subagent: true,
+            subagentAgent: agent ?? null,
+            subagentName: name ?? null,
+          },
+        ]);
+      } catch (error) {
+        console.warn(`[opencode-progress] subagent node failed: ${String(error)}`);
+      }
+    };
+
+    try {
+      const taken = new Set((await ctx.tool.list()).map((tool) => tool.id));
+      const nativeProgressName =
+        taken.has("progress") || [...taken].some((id) => id.endsWith("_progress"))
+          ? "progress_write"
+          : "progress";
+      await ctx.tool.transform((editor) => {
+        editor.add({
+          name: nativeProgressName,
+          description:
+            "Record/update a task in the live progress tree. Same state store as the MCP progress tool, without a Code Mode wrapper. Prefer one call per step; pass entries[] to write a parent+children tree atomically. progress is optional: omit it for authoring/research work.",
+          input: {
+            type: "object",
+            properties: {
+              id: { type: "string" },
+              status: {
+                type: "string",
+                enum: ["pending", "running", "waiting", "done", "error"],
+              },
+              title: { type: "string" },
+              detail: { type: "string" },
+              progress: { type: "number", minimum: 0, maximum: 1 },
+              parentId: { type: "string" },
+              entries: {
+                type: "array",
+                maxItems: 50,
+                items: {
+                  type: "object",
+                  properties: {
+                    id: { type: "string" },
+                    status: {
+                      type: "string",
+                      enum: ["pending", "running", "waiting", "done", "error"],
+                    },
+                    title: { type: "string" },
+                    detail: { type: "string" },
+                    progress: { type: "number", minimum: 0, maximum: 1 },
+                    parentId: { type: "string" },
+                  },
+                  required: ["id", "status", "title"],
+                  additionalProperties: false,
+                },
+              },
+            },
+            additionalProperties: false,
+          },
+          options: { codemode: true },
+          execute: async (
+            input: Record<string, unknown>,
+            context: { sessionID: string }
+          ) => {
+            const list = Array.isArray(input?.entries)
+              ? (input.entries as Array<Record<string, unknown>>)
+              : [
+                  {
+                    id: input?.id,
+                    status: input?.status,
+                    title: input?.title,
+                    detail: input?.detail,
+                    progress: input?.progress,
+                    parentId: input?.parentId,
+                  },
+                ];
+            if (list.length === 0) return { content: "Nothing to write: entries[] is empty." };
+            const problems: string[] = [];
+            const writes = list.map((entry, index) => {
+              const label = `entry ${index + 1}${entry?.id ? ` (${entry.id})` : ""}`;
+              if (!entry?.id || typeof entry.id !== "string") problems.push(`${label}: id is required`);
+              if (
+                !entry?.status ||
+                !["pending", "running", "waiting", "done", "error"].includes(String(entry.status))
+              ) {
+                problems.push(`${label}: invalid status`);
+              }
+              if (!entry?.title || typeof entry.title !== "string") {
+                problems.push(`${label}: title is required`);
+              }
+              if (
+                entry?.progress !== undefined &&
+                entry?.progress !== null &&
+                (typeof entry.progress !== "number" ||
+                  entry.progress < 0 ||
+                  entry.progress > 1)
+              ) {
+                problems.push(`${label}: progress must be 0..1`);
+              }
+              return {
+                id: entry?.id,
+                status: entry?.status,
+                title: entry?.title,
+                detail: entry?.detail,
+                progress: entry?.progress,
+                parentId: entry?.parentId,
+                sessionId: context.sessionID,
+              };
+            });
+            if (problems.length > 0) {
+              return { content: `Not written:\n${problems.join("\n")}` };
+            }
+            try {
+              upsertNativeProgress(writes as NativeProgressInput[]);
+              const roots = list.filter((entry) => entry.status === "running" && !entry.parentId);
+              const hint = roots[0]?.id
+                ? ` Relay: progress-relay --id ${String(roots[0].id)} -- <cmd>`
+                : "";
+              return {
+                content: `Recorded ${writes.length} progress ${writes.length === 1 ? "entry" : "entries"}.${hint}`,
+              };
+            } catch (error) {
+              return { content: `Progress write failed: ${String(error)}` };
+            }
+          },
+        } as Parameters<typeof editor.add>[0]);
+      });
+      console.log(
+        `[opencode-progress] v${pluginVersion} native progress tool registered as ${nativeProgressName}`
+      );
+    } catch (error) {
+      console.warn(`[opencode-progress] native progress tool registration failed: ${String(error)}`);
     }
 
     // "Unhinged" mode (opt-in): append a progress reminder to every user
@@ -1657,6 +1862,8 @@ export default Plugin.define({
       idleTrackers.delete(sessionID);
       lastSeenProgress.delete(sessionID);
       stepsSinceProgress.set(sessionID, 0);
+      lastProgressWriteAt.set(sessionID, now);
+      nudgeFireCount.delete(sessionID);
       promptAt.set(sessionID, now);
       lastToolCallAt.set(sessionID, now);
       activeToolCounts.delete(sessionID);

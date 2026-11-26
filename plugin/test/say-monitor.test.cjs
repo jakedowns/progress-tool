@@ -41,8 +41,6 @@ const input = (overrides = {}) => ({
   durationMs: 30_000,
   callsSinceSay: 0,
   saidThisTurn: false,
-  sayCount: 0,
-  sayBudget: 3,
   progressNudgeActive: false,
   now: NOW,
   ...overrides,
@@ -127,7 +125,7 @@ test('numeric options clamp to their ceilings and floor fractions', () => {
 test('off wins over every other condition', () => {
   const decision = decideSayNudge(
     emptySayNudgeState(),
-    input({ saidThisTurn: true, sayCount: 99, durationMs: 0, progressNudgeActive: true }),
+    input({ saidThisTurn: true, durationMs: 0, progressNudgeActive: true }),
     normalizeSayNudgeOptions({})
   );
   assert.equal(decision.nudge, false);
@@ -138,21 +136,16 @@ test('off wins over every other condition', () => {
 test('said wins when a say was accepted this turn', () => {
   const decision = decideSayNudge(
     emptySayNudgeState(),
-    input({ saidThisTurn: true, sayCount: 99, durationMs: 0, progressNudgeActive: true }),
+    input({ saidThisTurn: true, durationMs: 0, progressNudgeActive: true }),
     opts()
   );
   assert.deepEqual(decision, { nudge: false, reason: 'said' });
 });
 
-test('budget skips at sayCount === sayBudget, not below it', () => {
-  const atBudget = decideSayNudge(emptySayNudgeState(), input({ sayCount: 3, sayBudget: 3 }), opts());
-  assert.deepEqual(atBudget, { nudge: false, reason: 'budget' });
-
-  const overBudget = decideSayNudge(emptySayNudgeState(), input({ sayCount: 5, sayBudget: 3 }), opts());
-  assert.equal(overBudget.reason, 'budget');
-
-  const underBudget = decideSayNudge(emptySayNudgeState(), input({ sayCount: 2, sayBudget: 3 }), opts());
-  assert.equal(underBudget.reason, 'accept');
+test('note counts never suppress the nudge', () => {
+  const decision = decideSayNudge(emptySayNudgeState(), input(), opts());
+  assert.equal(decision.nudge, true);
+  assert.equal(decision.reason, 'accept');
 });
 
 test('short skips below afterMs; exactly afterMs accepts', () => {
@@ -208,7 +201,7 @@ test('silent-run respects a custom sayNudgeMinCalls', () => {
   );
 });
 
-test('silent-run never nudges once a note was accepted or the budget is spent', () => {
+test('silent-run never nudges once a note was accepted', () => {
   const options = normalizeSayNudgeOptions({ sayNudge: 'silent-run' });
   const said = decideSayNudge(
     emptySayNudgeState(),
@@ -216,13 +209,6 @@ test('silent-run never nudges once a note was accepted or the budget is spent', 
     options
   );
   assert.deepEqual(said, { nudge: false, reason: 'said' });
-
-  const budget = decideSayNudge(
-    emptySayNudgeState(),
-    input({ durationMs: 0, callsSinceSay: 9, sayCount: 3, sayBudget: 3 }),
-    options
-  );
-  assert.deepEqual(budget, { nudge: false, reason: 'budget' });
 });
 
 test('silent-run still honors cooldown, per-turn cap, and a standing progress nudge', () => {
@@ -330,9 +316,8 @@ test('silent-run reasons are evaluated in the documented order', () => {
   const options = normalizeSayNudgeOptions({ sayNudge: 'silent-run', sayNudgeMaxPerTurn: 3 });
   const quiet = input({ durationMs: 0, callsSinceSay: 3 });
   const order = [
-    ['off', normalizeSayNudgeOptions({}), emptySayNudgeState(), { ...quiet, saidThisTurn: true, sayCount: 99, progressNudgeActive: true }],
-    ['said', options, emptySayNudgeState(), { ...quiet, saidThisTurn: true, sayCount: 99, progressNudgeActive: true }],
-    ['budget', options, emptySayNudgeState(), { ...quiet, sayCount: 3, sayBudget: 3 }],
+    ['off', normalizeSayNudgeOptions({}), emptySayNudgeState(), { ...quiet, saidThisTurn: true, progressNudgeActive: true }],
+    ['said', options, emptySayNudgeState(), { ...quiet, saidThisTurn: true, progressNudgeActive: true }],
     ['few-calls', options, emptySayNudgeState(), { ...quiet, callsSinceSay: 2 }],
     ['cooldown', options, { lastNudgeAt: NOW - 1, nudgesThisTurn: 3 }, quiet],
     ['cap', options, { lastNudgeAt: NOW - 200_000, nudgesThisTurn: 3 }, quiet],
@@ -352,18 +337,16 @@ test('reasons are evaluated in the documented order', () => {
   const capReached = { lastNudgeAt: NOW - 200_000, nudgesThisTurn: 3 };
   const blocked = input({
     saidThisTurn: true,
-    sayCount: 99,
     durationMs: 0,
     progressNudgeActive: true,
   });
   const order = [
     ['off', normalizeSayNudgeOptions({}), cooling, blocked],
     ['said', options, cooling, blocked],
-    ['budget', options, cooling, { ...blocked, saidThisTurn: false }],
-    ['short', options, cooling, { ...blocked, saidThisTurn: false, sayCount: 0 }],
-    ['cooldown', options, cooling, { ...blocked, saidThisTurn: false, sayCount: 0, durationMs: 30_000 }],
-    ['cap', options, capReached, { ...blocked, saidThisTurn: false, sayCount: 0, durationMs: 30_000, progressNudgeActive: false }],
-    ['progress-nudge', options, emptySayNudgeState(), { ...blocked, saidThisTurn: false, sayCount: 0, durationMs: 30_000 }],
+    ['short', options, cooling, { ...blocked, saidThisTurn: false }],
+    ['cooldown', options, cooling, { ...blocked, saidThisTurn: false, durationMs: 30_000 }],
+    ['cap', options, capReached, { ...blocked, saidThisTurn: false, durationMs: 30_000, progressNudgeActive: false }],
+    ['progress-nudge', options, emptySayNudgeState(), { ...blocked, saidThisTurn: false, durationMs: 30_000 }],
     ['accept', options, emptySayNudgeState(), input()],
   ];
 

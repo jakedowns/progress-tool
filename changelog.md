@@ -223,6 +223,28 @@ Shipped since `mcp-server@2.10.2`:
 - **Store and mirror support** for cleared/dismissed entries plus expanded MCP
   smoke and task-list suites (**57 tests**).
 
+## 2.27.0 — nudge redesign (unreleased)
+
+Feedback round from a long authoring + subagent session.
+
+- **`say` tool caps removed.** No per-turn note budget and no cooldown;
+  consecutive identical text is still skipped, and length stays advisory.
+  `sayBudgetPerTurn`/`sayCooldownMs` remain accepted but are ignored.
+- **Native progress tool.** The plugin registers a direct
+  `progress`/`progress_write` writer (same store, same `entries[]`), so updates
+  no longer require the Code-Mode MCP wrapper. MCP remains the fallback.
+- **Automatic subagent nodes.** `session.created` creates a running node per
+  child session under the parent, tagged with the agent type/name, and closes
+  it on `session.deleted`. Rollup no longer depends on agent memory.
+- **Time-aware silent-run trigger.** Silent-run nudges require `staleAfterMs`
+  elapsed, not just three steps in a quick burst.
+- **Merged reminder budget.** Strict/say reminders share one channel, cap at
+  **2 per session**, and respect `nudgeGraceMs` (10m) after any real progress
+  write.
+- **Fractions optional.** Injected guidance and both trees treat a missing
+  fraction as normal for authoring/research; no empty bar or `0%` is implied.
+- **Docs:** native tool, grace window, and auto-node behavior documented.
+
 ## 2.26.0 — ultra-compact tree theme (unreleased)
 
 - **Ultra-compact is the default.** `treeTheme` falls back to `"ultra-compact"`

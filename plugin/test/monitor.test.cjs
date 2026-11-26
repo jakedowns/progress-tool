@@ -74,18 +74,20 @@ test('off disables everything', () => {
 test('silent-run: nudges at the threshold, once, then clears on a progress call', () => {
   const monitor = idle();
   const opts = { strictMode: 'nudge', threshold: 3 };
-  let step = observeToolCall(monitor, { isProgressCall: false, hasActive: false }, opts);
+  const now = 1_000_000_000;
+  const elapsed = { isProgressCall: false, hasActive: false, lastProgressAt: now - 6 * 60_000, now };
+  let step = observeToolCall(monitor, elapsed, opts);
   assert.equal(step.action, 'none');
   monitor.count = step.count;
-  step = observeToolCall(monitor, { isProgressCall: false, hasActive: false }, opts);
+  step = observeToolCall(monitor, elapsed, opts);
   assert.equal(step.action, 'none');
   monitor.count = step.count;
-  step = observeToolCall(monitor, { isProgressCall: false, hasActive: false }, opts);
+  step = observeToolCall(monitor, elapsed, opts);
   assert.equal(step.action, 'nudge');
   monitor.count = step.count;
   monitor.nudged = true;
 
-  step = observeToolCall(monitor, { isProgressCall: false, hasActive: false }, opts);
+  step = observeToolCall(monitor, elapsed, opts);
   assert.equal(step.action, 'none', 'does not re-nudge while standing');
 
   step = observeToolCall(monitor, { isProgressCall: true, hasActive: true }, opts);
@@ -95,9 +97,11 @@ test('silent-run: nudges at the threshold, once, then clears on a progress call'
 test('force fires once, then softens to nudge', () => {
   const monitor = idle();
   const opts = { strictMode: 'force', threshold: 2 };
-  let step = observeToolCall(monitor, { isProgressCall: false, hasActive: false }, opts);
+  const now = 1_000_000_000;
+  const elapsed = { isProgressCall: false, hasActive: false, lastProgressAt: now - 6 * 60_000, now };
+  let step = observeToolCall(monitor, elapsed, opts);
   monitor.count = step.count;
-  step = observeToolCall(monitor, { isProgressCall: false, hasActive: false }, opts);
+  step = observeToolCall(monitor, elapsed, opts);
   assert.equal(step.action, 'force');
   monitor.count = step.count;
   monitor.nudged = true;
@@ -110,9 +114,9 @@ test('force fires once, then softens to nudge', () => {
   monitor.count = 0;
 
   // …but force does not repeat in the same monitor lifetime:
-  step = observeToolCall(monitor, { isProgressCall: false, hasActive: false }, opts);
+  step = observeToolCall(monitor, elapsed, opts);
   monitor.count = step.count;
-  step = observeToolCall(monitor, { isProgressCall: false, hasActive: false }, opts);
+  step = observeToolCall(monitor, elapsed, opts);
   assert.equal(step.action, 'nudge', 'forced already used → soft nudge');
 });
 

@@ -144,8 +144,8 @@ removed with the session or a hard clear.
 | `say` | `false` | register the `say` tool and inject its narration rules |
 | `sayMinChars` | `180` | soft target; shorter notes are accepted with a warning |
 | `sayMaxChars` | `260` | preferred max; longer notes are accepted in full with a reminder |
-| `sayBudgetPerTurn` | `3` | accepted notes per user turn |
-| `sayCooldownMs` | `15000` | minimum gap between accepted notes |
+| `sayBudgetPerTurn` | `3` | legacy/ignored; no per-turn note cap |
+| `sayCooldownMs` | `15000` | legacy/ignored; no note cooldown |
 | `sayChatNotes` | `true` | `false` = progress line only, no synthetic note |
 | `sayFinalGuard` | `true` | if the agent posts a note and stops without concluding, resume once |
 | `sayModes` | `["tree"]` | surfaces: string/array of `"pill"`, `"toast"`, `"tree"`; `sayMode` alias; `[]` records only |

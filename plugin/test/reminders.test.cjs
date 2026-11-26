@@ -137,11 +137,12 @@ test('target selection prefers the oldest open entry and skips dismissed/termina
 });
 
 test('model steps: parallel tool calls in one step count once', () => {
+  const now = 1_000_000_000;
   // Step 1 after the last progress write, three tools in that step.
   for (let call = 0; call < 3; call += 1) {
     const result = observeToolCall(
       monitor(),
-      { isProgressCall: false, hasActive: false, lastProgressAt: 0, stepsSinceProgress: 1 },
+      { isProgressCall: false, hasActive: false, lastProgressAt: now - 6 * 60_000, now, stepsSinceProgress: 1 },
       { threshold: 3 }
     );
     assert.equal(result.action, 'none', `call ${call} stays below threshold`);
@@ -149,7 +150,7 @@ test('model steps: parallel tool calls in one step count once', () => {
 
   const thirdStep = observeToolCall(
     monitor(),
-    { isProgressCall: false, hasActive: false, stepsSinceProgress: 3 },
+    { isProgressCall: false, hasActive: false, lastProgressAt: now - 6 * 60_000, now, stepsSinceProgress: 3 },
     { threshold: 3 }
   );
   assert.equal(thirdStep.action, 'nudge', 'three logical steps trigger the nudge');

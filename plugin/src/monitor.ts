@@ -250,6 +250,11 @@ export function observeToolCall(
   }
 
   const count = stepCount != null ? Math.max(0, Math.floor(stepCount)) : monitor.count + 1;
+  // Silent-run nudges also need elapsed time: a short burst of steps inside a
+  // few seconds is one atomic action, not a silent run.
+  if (now - lastProgressAt < staleAfterMs) {
+    return { ...untouched, action: 'none', count, callsSinceProgress };
+  }
   if (count >= threshold && !monitor.nudged) {
     if (strictMode === 'force' && !monitor.forced) {
       return {
