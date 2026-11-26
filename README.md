@@ -191,8 +191,10 @@ files, presets, and semantics.
   to Progress. It opens a live tab with the active engine (legacy/shadow/shared),
   the standing reminder text, mute state with a 30-minute mute/unmute action for
   the shared engine, and the newest nudge events for the routed session — fires,
-  gate rejections, clears, touches, and legacy suppressions. The tab polls every
-  5 seconds and stays available in either layout mode.
+  gate rejections, clears, touches, and legacy suppressions. Each row is tagged
+  `[in]` (an agent wrote progress or used the nudge tool) or `[out]` (a reminder
+  aimed at the agent). The tab polls every 5 seconds and stays available in
+  either layout mode.
 - **TUI:** compact tree above the composer, roots collapsed, capped at
   `tuiMaxRoots` (default 3) and scrollable inside `tuiMaxRows` (default 8) so
   long lists never push the prompt away. A `--- scroll to see N more ---` hint

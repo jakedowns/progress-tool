@@ -2777,6 +2777,35 @@ export default Plugin.define({
       return `${Math.round(seconds / 3600)}h`;
     };
 
+    /** Agent → plugin signals vs reminders injected toward the agent. */
+    const NUDGE_INBOUND = new Set([
+      "transition",
+      "compliance",
+      "nudge-touch",
+      "nudge-clear",
+      "nudge-reset",
+      "nudge-mute",
+      "nudge-unmute",
+    ]);
+    const NUDGE_OUTBOUND = new Set([
+      "nudge",
+      "nudge-shadow",
+      "reminder",
+      "strict",
+      "wall-clock",
+      "idle-reminder",
+      "relay-hint",
+      "say-nudge",
+      "unhinged",
+      "custom-nudge",
+    ]);
+    const nudgeDirection = (event: Record<string, unknown>) => {
+      const name = String(event.event ?? "");
+      if (NUDGE_INBOUND.has(name)) return "in";
+      if (NUDGE_OUTBOUND.has(name)) return "out";
+      return "";
+    };
+
     const nudgeEventSummary = (event: Record<string, unknown>) => {
       const parts: string[] = [];
       const producer =
@@ -3038,9 +3067,27 @@ export default Plugin.define({
                     }}
                   >
                     <div style={{ display: "flex", gap: "6px", "font-size": "11px" }}>
+                      <Show when={nudgeDirection(event)}>
+                        <span
+                          title={
+                            nudgeDirection(event) === "in"
+                              ? "Inbound: an agent wrote progress or used the nudge tool"
+                              : "Outbound: a reminder or gate decision aimed at the agent"
+                          }
+                          style={{
+                            color: nudgeDirection(event) === "in" ? "#60a5fa" : "#fbbf24",
+                            "font-weight": "700",
+                          }}
+                        >
+                          [{nudgeDirection(event)}]
+                        </span>
+                      </Show>
                       <span
                         style={{
-                          color: nudgeSeverityColor(event.severity),
+                          color:
+                            typeof event.severity === "string" && event.severity
+                              ? nudgeSeverityColor(event.severity)
+                              : "inherit",
                           "font-weight": "600",
                         }}
                       >
