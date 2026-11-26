@@ -1205,7 +1205,11 @@ export default Plugin.define({
     ) => {
       if (!verbose) return;
       const prev = statusSnapshots.get(sessionID) ?? {};
-      const { transitions, next } = diffStatuses(prev, entries);
+      // The first observation of a session is a baseline, not a burst of
+      // starts: existing entries (including old or dismissed ones) must not
+      // be reported as null → done transitions when the plugin loads.
+      const baseline = !statusSnapshots.has(sessionID);
+      const { transitions, next } = diffStatuses(prev, entries, { baseline });
       statusSnapshots.set(sessionID, next);
       for (const transition of transitions) {
         logNudge({

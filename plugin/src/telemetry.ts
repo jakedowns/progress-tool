@@ -68,13 +68,15 @@ export interface StatusTransition {
 
 export function diffStatuses(
   prev: StatusSnapshot,
-  entries: ReadonlyArray<{ id: string; status: string }>
+  entries: ReadonlyArray<{ id: string; status: string }>,
+  options: { baseline?: boolean } = {}
 ): { transitions: StatusTransition[]; next: StatusSnapshot } {
   const next: StatusSnapshot = {};
   const transitions: StatusTransition[] = [];
   for (const entry of entries) {
     if (!entry || typeof entry.id !== "string") continue;
     next[entry.id] = entry.status;
+    if (options.baseline) continue;
     const from = prev[entry.id] ?? null;
     if (from !== entry.status) transitions.push({ id: entry.id, from, to: entry.status });
   }

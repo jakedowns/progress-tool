@@ -75,6 +75,28 @@ test('diffStatuses reports lifecycle transitions and a fresh snapshot', () => {
   assert.deepEqual(next, { a: 'done', b: 'waiting', c: 'running' });
 });
 
+test('diffStatuses baseline seeds the snapshot without reporting starts', () => {
+  const { transitions, next } = diffStatuses(
+    {},
+    [
+      { id: 'old-done', status: 'done' },
+      { id: 'old-error', status: 'error' },
+    ],
+    { baseline: true }
+  );
+  assert.deepEqual(transitions, []);
+  assert.deepEqual(next, { 'old-done': 'done', 'old-error': 'error' });
+
+  const after = diffStatuses(next, [
+    { id: 'old-done', status: 'running' },
+    { id: 'new', status: 'running' },
+  ]);
+  assert.deepEqual(after.transitions, [
+    { id: 'old-done', from: 'done', to: 'running' },
+    { id: 'new', from: null, to: 'running' },
+  ]);
+});
+
 test('unwritable path never throws', () => {
   process.env.PROGRESS_NUDGE_LOG = '/nonexistent-dir/nope/nudges.log';
   try {
