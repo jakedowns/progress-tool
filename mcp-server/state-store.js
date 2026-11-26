@@ -172,7 +172,7 @@ function resolveSessionScope(explicit) {
  * catch-up migration cannot race a concurrent writer. Collisions keep the
  * newer entry and preserve a dismissal the newer copy does not carry.
  */
-function adoptChildEntries(state, childId, parentId, now, agent) {
+function adoptChildEntries(state, childId, parentId, now, agent, name) {
   if (!childId || !parentId || childId === parentId) return 0;
   let moved = 0;
   for (const [key, entry] of Object.entries(state.entries)) {
@@ -182,6 +182,7 @@ function adoptChildEntries(state, childId, parentId, now, agent) {
     // Work written before the link existed is still subagent-authored.
     if (entry.subagent === undefined) entry.subagent = true;
     if (agent && !entry.subagentAgent) entry.subagentAgent = agent;
+    if (name && !entry.subagentName) entry.subagentName = name;
     const targetKey = storageKey(entry.id, parentId);
     const existing = state.entries[targetKey];
     if (existing && existing !== entry) {
@@ -515,7 +516,14 @@ function applyUpsert(state, input, now) {
   if (sessionId && rawSessionId && sessionId !== rawSessionId) {
     // A subagent reported before the plugin's child→parent map caught up:
     // adopt whatever it already wrote, then continue under the parent.
-    adoptChildEntries(state, rawSessionId, sessionId, now, callerLink && callerLink.agent);
+    adoptChildEntries(
+      state,
+      rawSessionId,
+      sessionId,
+      now,
+      callerLink && callerLink.agent,
+      callerLink && callerLink.name
+    );
   }
   const key = storageKey(input.id, sessionId);
   // Transport marker, never persisted: relay telemetry ticks must not clear
@@ -607,6 +615,9 @@ function applyUpsert(state, input, now) {
   if (!prev && fromSubagent) {
     entry.subagent = true;
     if (callerLink && callerLink.agent) entry.subagentAgent = callerLink.agent;
+    if (callerLink && callerLink.name) entry.subagentName = callerLink.name;
+  } else if (fromSubagent && callerLink && callerLink.name && !entry.subagentName) {
+    entry.subagentName = callerLink.name;
   }
 
   state.entries[key] = entry;

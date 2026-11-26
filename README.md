@@ -233,7 +233,8 @@ files, presets, and semantics.
 - **Subagents:** child sessions are mapped to their parent automatically
   (`session.created` → `~/.opencode-progress-sessions.json`), and the parent id
   is stamped into subagent prompts as a fallback. Roots created by a child
-  render as `[Subagent (Explore)]: Title`.
+  render as `[subagent <session name>]: Title` (name truncated to 20 chars);
+  hover the row to see the subagent type.
 - Entries are retained by default so the store doubles as a report. Opt into
   pruning with `PROGRESS_AUTO_PRUNE_S` (and `PROGRESS_STALE_MS` for orphans).
 

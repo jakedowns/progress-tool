@@ -1107,9 +1107,13 @@ export default Plugin.define({
             const child = event.data.sessionID;
             const parent = event.data.parentID;
             const agent = event.data.agent;
+            const name =
+              typeof event.data.title === "string" && event.data.title.trim()
+                ? event.data.title.trim()
+                : undefined;
             if (!child || !parent) continue;
-            if (recordChildSession(child, parent, agent)) {
-              adoptChildEntries(child, parent, agent);
+            if (recordChildSession(child, parent, agent, name)) {
+              adoptChildEntries(child, parent, agent, name);
             }
           } else if (event.type === 'session.deleted') {
             const deletedID = event.data.sessionID;

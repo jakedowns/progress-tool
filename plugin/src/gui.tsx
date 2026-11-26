@@ -52,6 +52,7 @@ import {
   progressLabel,
   scopeEntries,
   subagentPrefix,
+  subagentTypeLabel,
   visibleEntries,
   INDICATOR_STYLE_CHOICES,
   THEME_PRESET_CHOICES,
@@ -229,6 +230,10 @@ function MenuRow(props: {
     );
   const titleText = () =>
     `${props.depth === 0 ? subagentPrefix(props.node) : ""}${props.node.title}`;
+  const subagentTip = () => {
+    const type = subagentTypeLabel(props.node);
+    return type ? `Subagent type: ${type}` : "";
+  };
   const startedAt = () => props.node.startedAt ?? props.node.createdAt;
   const updatedAt = () => props.node.updatedAt ?? props.node.reportedAt;
   const elapsedMs = () => {
@@ -357,11 +362,14 @@ function MenuRow(props: {
               ? [
                   `${props.node.status}: ${oneLineText(titleText())}`,
                   props.node.detail ? normalizeProgressText(props.node.detail) : "",
+                  subagentTip(),
                   timeTitle(),
                 ]
                   .filter(Boolean)
                   .join("\n\n")
-              : `${props.node.status}: ${oneLineText(titleText())}`
+              : `${props.node.status}: ${oneLineText(titleText())}${
+                  subagentTip() ? ` — ${subagentTip()}` : ""
+                }`
           }
         >
           <Show when={ultra() && timePrefix()}>
@@ -2740,27 +2748,29 @@ export default Plugin.define({
     // Launcher for the desktop sidebar's New tab page and + menu, alongside
     // Review / Browser / Terminal / Open file. `opened` follows this tab's own
     // state so the launcher stays listed while some other side tab is open.
-    ctx.add(MenuItem, () => {
-      return {
-        menu: "session.panel" as const,
-        id: "progress",
-        title: "Progress",
-        icon: "checklist" as const,
-        order: 20,
-        description: "Task tree and notes",
-        run: () => {
-          const current = ctx.sessions.current();
-          if (!current) return;
-          if (layoutMode() !== "sidebar") {
-            swapLayout();
-            return;
-          }
-          ctx.layout.open(sidebarPanelKey, current, {
-            tab: "select",
-            background: true,
-          });
-        },
-      };
+    ctx.add(MenuItem, {
+      menu: "session.panel",
+      // Keep this id distinct from the Panel id. The launcher is a separate
+      // registry entry, and an explicit `opened: false` keeps it in the New
+      // tab page even while the Progress tab itself is open.
+      id: "progress-launcher",
+      title: "Progress",
+      icon: "checklist",
+      order: 20,
+      description: "Task tree and notes",
+      opened: false,
+      run: () => {
+        const current = ctx.sessions.current();
+        if (!current) return;
+        if (layoutMode() !== "sidebar") {
+          swapLayout();
+          return;
+        }
+        ctx.layout.open(sidebarPanelKey, current, {
+          tab: "select",
+          background: true,
+        });
+      },
     });
 
     return () => {

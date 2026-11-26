@@ -45,6 +45,8 @@ export interface ProgressEntry {
   subagent?: boolean;
   /** Subagent type when known (`explore`, `general`, …). */
   subagentAgent?: string | null;
+  /** Subagent session title, captured from `session.created`. */
+  subagentName?: string | null;
 }
 
 export type SayNoteKind = "intent" | "update" | "blocked" | "question";

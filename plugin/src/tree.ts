@@ -535,17 +535,30 @@ export function normalizeVisibilityOptions(raw: unknown): VisibilityOptions {
   };
 }
 
+/** Truncate a subagent session title to 20 visible characters. */
+export function truncatedSubagentName(name: string | null | undefined): string {
+  const clean = String(name ?? "").replace(/\s+/g, " ").trim();
+  if (!clean) return "";
+  return clean.length > 20 ? `${clean.slice(0, 19).trimEnd()}…` : clean;
+}
+
 /**
- * Root-row prefix for subagent-authored work: `[Subagent (Explore)]: `.
- * The type comes from `session.created.data.agent` via the child→parent map;
- * when it is unknown the prefix falls back to `[Subagent]: `.
+ * Root-row prefix for subagent-authored work: `[subagent <name>]: `.
+ * The name comes from the child session title; when it is unknown the prefix
+ * falls back to `[subagent]: `. The agent type is exposed separately for the
+ * hover tooltip.
  */
 export function subagentPrefix(entry: ProgressEntry): string {
   if (!entry.subagent) return "";
+  const name = truncatedSubagentName(entry.subagentName);
+  return name ? `[subagent ${name}]: ` : "[subagent]: ";
+}
+
+/** Human label for the subagent type, for the row hover tooltip. */
+export function subagentTypeLabel(entry: ProgressEntry): string {
   const raw = typeof entry.subagentAgent === "string" ? entry.subagentAgent.trim() : "";
-  if (!raw) return "[Subagent]: ";
-  const label = raw.charAt(0).toUpperCase() + raw.slice(1);
-  return `[Subagent (${label})]: `;
+  if (!raw) return "";
+  return raw.charAt(0).toUpperCase() + raw.slice(1);
 }
 
 /**

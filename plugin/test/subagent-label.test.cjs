@@ -26,25 +26,41 @@ execFileSync(
   { stdio: 'pipe' }
 );
 
-const { subagentPrefix } = require(path.join(OUT, 'tree.cjs'));
+const { subagentPrefix, subagentTypeLabel, truncatedSubagentName } = require(path.join(OUT, 'tree.cjs'));
 
 test('plain entries get no prefix', () => {
   assert.equal(subagentPrefix({ title: 'Build', status: 'running' }), '');
   assert.equal(subagentPrefix({ title: 'Build', status: 'running', subagent: false }), '');
 });
 
-test('subagent entries are flagged, with the agent type when known', () => {
-  assert.equal(subagentPrefix({ title: 'x', status: 'running', subagent: true }), '[Subagent]: ');
+test('subagent entries use the session name, not the type', () => {
+  assert.equal(subagentPrefix({ title: 'x', status: 'running', subagent: true }), '[subagent]: ');
   assert.equal(
     subagentPrefix({ title: 'x', status: 'running', subagent: true, subagentAgent: 'explore' }),
-    '[Subagent (Explore)]: '
+    '[subagent]: ',
+    'type stays out of the prefix'
   );
   assert.equal(
-    subagentPrefix({ title: 'x', status: 'running', subagent: true, subagentAgent: 'general' }),
-    '[Subagent (General)]: '
+    subagentPrefix({
+      title: 'x',
+      status: 'running',
+      subagent: true,
+      subagentAgent: 'explore',
+      subagentName: 'Review docs',
+    }),
+    '[subagent Review docs]: '
   );
   assert.equal(
-    subagentPrefix({ title: 'x', status: 'running', subagent: true, subagentAgent: '  ' }),
-    '[Subagent]: '
+    subagentPrefix({
+      title: 'x',
+      status: 'running',
+      subagent: true,
+      subagentName: '  1234567890123456789012345  ',
+    }),
+    '[subagent 1234567890123456789…]: ',
+    'name truncated to 20 characters'
   );
+  assert.equal(subagentTypeLabel({ title: 'x', status: 'running', subagent: true, subagentAgent: 'explore' }), 'Explore');
+  assert.equal(subagentTypeLabel({ title: 'x', status: 'running' }), '');
+  assert.equal(truncatedSubagentName('  spaced   name '), 'spaced name');
 });

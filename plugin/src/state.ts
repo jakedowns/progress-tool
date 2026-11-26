@@ -88,6 +88,8 @@ export interface SessionLink {
   at: number;
   /** Subagent type from session.created (`explore`, `general`, …). */
   agent?: string;
+  /** Session title from session.created; used as the row prefix. */
+  name?: string;
 }
 
 /** Drop links older than this; session IDs are never reused, so stale rows are just noise. */
@@ -117,11 +119,17 @@ export function readSessionMap(): Record<string, SessionLink> {
         typeof value === "object" &&
         typeof (value as { parentId?: unknown }).parentId === "string"
       ) {
-        const link = value as { parentId: string; at?: unknown; agent?: unknown };
+        const link = value as {
+          parentId: string;
+          at?: unknown;
+          agent?: unknown;
+          name?: unknown;
+        };
         map[child] = {
           parentId: link.parentId,
           at: Number(link.at) || 0,
           agent: typeof link.agent === "string" && link.agent ? link.agent : undefined,
+          name: typeof link.name === "string" && link.name ? link.name : undefined,
         };
       }
     }
@@ -138,7 +146,8 @@ export function readSessionMap(): Record<string, SessionLink> {
 export function recordChildSession(
   childID: string,
   parentID: string,
-  agent?: string
+  agent?: string,
+  name?: string
 ): boolean {
   if (!childID || !parentID || childID === parentID) return false;
   const file = sessionMapFilePath();
@@ -166,13 +175,18 @@ export function recordChildSession(
 
   try {
     const map = readSessionMap();
-    if (map[childID]?.parentId === parentID && (!agent || map[childID]?.agent === agent)) {
+    if (
+      map[childID]?.parentId === parentID &&
+      (!agent || map[childID]?.agent === agent) &&
+      (!name || map[childID]?.name === name)
+    ) {
       return true;
     }
     map[childID] = {
       parentId: parentID,
       at: Date.now(),
       agent: agent || map[childID]?.agent,
+      name: name || map[childID]?.name,
     };
     const cutoff = Date.now() - SESSION_LINK_TTL_MS;
     for (const [child, link] of Object.entries(map)) {
@@ -205,7 +219,8 @@ export function recordChildSession(
 export function adoptChildEntries(
   childID: string,
   parentID: string,
-  agent?: string
+  agent?: string,
+  name?: string
 ): number {
   if (!childID || !parentID || childID === parentID) return 0;
   const file = stateFilePath();
@@ -241,6 +256,7 @@ export function adoptChildEntries(
       if (entry.updatedAt === undefined) entry.updatedAt = now;
       if (entry.subagent === undefined) entry.subagent = true;
       if (agent && !entry.subagentAgent) entry.subagentAgent = agent;
+      if (name && !entry.subagentName) entry.subagentName = name;
       const targetKey = `${parentID}:${entry.id}`;
       const existing = state.entries[targetKey];
       if (existing && existing !== entry) {

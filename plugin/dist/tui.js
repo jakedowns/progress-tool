@@ -76,7 +76,8 @@ function readSessionMap() {
         map[child] = {
           parentId: link.parentId,
           at: Number(link.at) || 0,
-          agent: typeof link.agent === "string" && link.agent ? link.agent : void 0
+          agent: typeof link.agent === "string" && link.agent ? link.agent : void 0,
+          name: typeof link.name === "string" && link.name ? link.name : void 0
         };
       }
     }
@@ -662,12 +663,15 @@ function normalizeVisibilityOptions(raw) {
     scope: options.scope === "all" ? "all" : "session"
   };
 }
+function truncatedSubagentName(name) {
+  const clean = String(name ?? "").replace(/\s+/g, " ").trim();
+  if (!clean) return "";
+  return clean.length > 20 ? `${clean.slice(0, 19).trimEnd()}\u2026` : clean;
+}
 function subagentPrefix(entry) {
   if (!entry.subagent) return "";
-  const raw = typeof entry.subagentAgent === "string" ? entry.subagentAgent.trim() : "";
-  if (!raw) return "[Subagent]: ";
-  const label = raw.charAt(0).toUpperCase() + raw.slice(1);
-  return `[Subagent (${label})]: `;
+  const name = truncatedSubagentName(entry.subagentName);
+  return name ? `[subagent ${name}]: ` : "[subagent]: ";
 }
 function scopeEntries(entries, sessionID, options = {}) {
   if (options.scope === "all") return entries;

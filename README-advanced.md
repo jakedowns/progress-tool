@@ -192,7 +192,7 @@ A subagent runs in its own child session, so its tool calls carry the child sess
 2. **Prompt stamping (fallback):** the plugin's `execute.before` hook appends `progress sessionId: <parent>` to the `subagent`/`task` prompt. That covers a child whose very first progress call beats the map write, and older engines without the event.
 3. **Instruction fallback:** injected rules name the session id and explain that a prompt-supplied id wins.
 
-The map is merge-written under a lock, pruned after 30 days, bounded to 8 hops (cycle-safe), and unknown sessions resolve to themselves. The agent type from `session.created` is persisted as `subagent` / `subagentAgent`, so roots render as `[Subagent (Explore)]: Title` (or `[Subagent]: Title` when unknown). The parent still mirrors the workstream as its own child task, per the delegation guidance.
+The map is merge-written under a lock, pruned after 30 days, bounded to 8 hops (cycle-safe), and unknown sessions resolve to themselves. The agent type and session title from `session.created` are persisted as `subagent` / `subagentAgent` / `subagentName`, so roots render as `[subagent <session name>]: Title` (name truncated to 20 chars; `[subagent]: Title` when unknown). The agent type is shown in the GUI row tooltip on hover. The parent still mirrors the workstream as its own child task, per the delegation guidance.
 
 ### Options
 

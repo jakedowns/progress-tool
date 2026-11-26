@@ -69,7 +69,7 @@ Prefer manual configuration? Add to `opencode.json`:
   `session.created` (map in `~/.opencode-progress-sessions.json`, override
   `PROGRESS_SESSION_MAP_PATH`) and the parent id is stamped into each subagent
   prompt at launch, so child work rolls up in the parent's pill instead of an
-  orphaned child scope. Child rows are labeled `[Subagent (Explore)]` (or
+  orphaned child scope. Child rows are labeled `[subagent <session name>]` (name truncated to 20 chars; the type shows in the GUI hover tooltip), or
   `[Subagent]`) so delegated work is obvious at a glance.
 
 ## Options

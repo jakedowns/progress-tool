@@ -64,7 +64,7 @@ test('map lives next to the state file and merges child links', () => {
     );
     assert.equal(path.dirname(sessionMapFilePath()), path.dirname(stateFilePath()));
 
-    assert.equal(recordChildSession('child-a', 'parent', 'explore'), true);
+    assert.equal(recordChildSession('child-a', 'parent', 'explore', 'Review docs'), true);
     assert.equal(recordChildSession('child-b', 'parent'), true);
     // Re-recording the same relation is a no-op success, not a duplicate.
     assert.equal(recordChildSession('child-a', 'parent'), true);
@@ -75,6 +75,7 @@ test('map lives next to the state file and merges child links', () => {
     assert.deepEqual(Object.keys(map).sort(), ['child-a', 'child-b']);
     assert.equal(map['child-a'].parentId, 'parent');
     assert.equal(map['child-a'].agent, 'explore');
+    assert.equal(map['child-a'].name, 'Review docs');
     assert.equal(map['child-b'].parentId, 'parent');
     assert.equal(map['child-b'].agent, undefined);
     assert.ok(map['child-a'].at > 0, 'timestamp recorded for TTL pruning');
@@ -120,12 +121,13 @@ test('adoptChildEntries re-keys entries a child wrote before the link existed', 
       })
     );
 
-    assert.equal(adoptChildEntries('child', 'parent', 'general'), 1);
+    assert.equal(adoptChildEntries('child', 'parent', 'general', 'Early review'), 1);
     const state = JSON.parse(fs.readFileSync(stateFilePath(), 'utf8'));
     assert.deepEqual(Object.keys(state.entries), ['parent:early']);
     assert.equal(state.entries['parent:early'].sessionId, 'parent');
     assert.equal(state.entries['parent:early'].subagent, true);
     assert.equal(state.entries['parent:early'].subagentAgent, 'general');
+    assert.equal(state.entries['parent:early'].subagentName, 'Early review');
     // Nothing left to adopt on a repeat call.
     assert.equal(adoptChildEntries('child', 'parent'), 0);
     assert.equal(adoptChildEntries('child', 'child'), 0);
