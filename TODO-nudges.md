@@ -73,7 +73,8 @@
 - [x] One standing key **`nudge`**; migrate/remove `progress-reminder` once per session.
 - [ ] One timer for scheduled rules; prompt reset; idle flush.
 - [x] Delivery: context entry; synthetic only for `block`.
-- [ ] One `nudge` agent tool: `status|mute|unmute|rules|...` (next).
+- [x] One generic `nudge` tool definition: `status|mute|unmute|clear`.
+- [ ] Register it from the host adapter (first loader wins).
 - [ ] Registration race: if `nudge` is taken, later adapter copies skip the tool but still share state.
 - [x] Basic telemetry: fired/deduped/muted/gap/grace/cap with producer + rule id.
 - [x] Single-process conformance test: one gate, one key, priority/gap/grace/cap.
@@ -81,9 +82,10 @@
 
 ## 4. Config + migration
 
-- [ ] `~/.config/opencode/nudge.json`, `<project>/.opencode/nudge.json`
+- [x] `~/.config/opencode/nudge.json`, `<project>/.opencode/nudge.json`
 - [ ] Session rules in the existing session store.
-- [ ] Read legacy `progress-nudge.json` once and write forward to `nudge.json`.
+- [x] Read legacy `progress-nudge.json` as fallback when `nudge.json` is absent.
+- [ ] Write migrated legacy rules forward to `nudge.json` (optional).
 - [ ] Map `strictMode`, `sayNudge*`, `nudgeGapMs`, `nudgeGraceMs`,
       `customNudges` into producer config; do not import them into core.
 - [ ] Document schema + examples.
