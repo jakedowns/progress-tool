@@ -230,8 +230,10 @@ Shipped since `mcp-server@2.10.2`:
 - **GUI ultra-compact rows.** New `treeTheme: "ultra-compact"` for the desktop
   pill popover and sidebar: one title line only, with a status-light emoji and
   the dismiss button. Detail text, percentage, and the `& N more` suffix are
-  hidden until the pointer hovers the row, which reveals one description line;
-  hovering the title shows the full untruncated description in a tooltip.
+  hidden until the pointer hovers the row, which reveals one description line
+  with a 0.3s height/fade animation; hovering the title shows the full
+  untruncated description in a tooltip. The age column is fixed-width so titles
+  align left.
 - **Timestamp prefix.** Ultra rows prepend a small monospace `5m ago`
   last-updated age. Hovering it shows a tip with the absolute start→end clock
   times and total duration; the row tooltip carries the full local date/time.

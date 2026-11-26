@@ -372,7 +372,7 @@ function MenuRow(props: {
                 }`
           }
         >
-          <Show when={ultra() && timePrefix()}>
+          <Show when={ultra()}>
             <span
               title={timeTitle()}
               style={{
@@ -381,8 +381,12 @@ function MenuRow(props: {
                 "font-weight": "400",
                 "line-height": "16px",
                 opacity: "0.5",
+                width: "48px",
+                display: "inline-block",
+                "text-align": "left",
                 "margin-right": "6px",
                 "white-space": "nowrap",
+                "overflow": "hidden",
                 cursor: "default",
               }}
             >
@@ -393,12 +397,51 @@ function MenuRow(props: {
             {oneLineText(titleText())}
           </Show>
         </div>
-        <Show when={props.node.detail && effectiveDetailLines() !== 0}>
+        <Show when={ultra()}>
+          <Show when={props.node.detail}>
+            <div
+              style={{
+                display: "grid",
+                "grid-template-rows": rowHovered() ? "1fr" : "0fr",
+                opacity: rowHovered() ? "1" : "0",
+                transition:
+                  "grid-template-rows 0.3s ease-in-out, opacity 0.3s ease-in-out",
+                overflow: "hidden",
+              }}
+            >
+              <div style={{ "min-height": "0", overflow: "hidden" }}>
+                <div
+                  style={{
+                    "margin-top": "1px",
+                    "font-size": "10px",
+                    opacity: "0.58",
+                    "white-space": "normal",
+                    "overflow-wrap": "anywhere",
+                    "word-break": "break-word",
+                    display: "-webkit-box",
+                    "-webkit-box-orient": "vertical",
+                    "-webkit-line-clamp": "1",
+                    "text-overflow": "ellipsis",
+                    overflow: "hidden",
+                  }}
+                  title={
+                    props.node.detail
+                      ? `${props.node.status}: ${oneLineText(props.node.detail)}`
+                      : ""
+                  }
+                >
+                  <Multiline text={props.node.detail ?? ""} />
+                </div>
+              </div>
+            </div>
+          </Show>
+        </Show>
+        <Show when={!ultra() && props.node.detail && effectiveDetailLines() !== 0}>
           <div
             style={{
-              "margin-top": ultra() ? "1px" : "2px",
-              "font-size": ultra() ? "10px" : "12px",
-              opacity: ultra() ? "0.58" : "0.72",
+              "margin-top": "2px",
+              "font-size": "12px",
+              opacity: "0.72",
               "white-space": "normal",
               "overflow-wrap": "anywhere",
               "word-break": "break-word",
