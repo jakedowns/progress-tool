@@ -214,6 +214,46 @@ Before flipping a default:
 - [ ] Update changelog, README-advanced, plugin README, voice docs.
 - [ ] Tag/publish only after a clean release-bundle `-dev` check.
 
+## 10. Notes to test later
+
+### 10.1 Nudge the agent to `list` first, then trim done trees
+
+**Idea.** Instead of only saying "update the tree", nudge the agent to **call the
+`list` tool first**, inspect the current tree, and then act. Make the default
+`list` response drop or aggressively summarize **done trees**, so the agent
+focuses on stalled / queued / running work.
+
+**Hypothesis.** A list-first workflow reduces blind writes and stale parents:
+the agent sees the real shape before deciding what to update or close. Hiding
+completed trees reduces response size and attention dilution.
+
+**Tradeoff to watch.** If done trees disappear from `list`, agents may stop
+reusing or reviving roots that should be reopened. A completed root is also
+useful evidence that a workstream already exists.
+
+**Experiment options**
+
+- `list.includeTerminal` default `false` (currently `true`), with a trailing
+  `N done hidden — pass includeTerminal:true` line.
+- Or keep done roots but collapse them to one summary row per tree:
+  `done: prior-art (12 children)`.
+- Nudge copy: "Run list first; then update stalled/queued entries. Done trees
+  are hidden unless you ask."
+- Variant: only include **recent** done trees (e.g. last 30m) and summarize
+  older ones.
+
+**Signals to measure**
+
+- list calls followed by a progress write within 1 turn;
+- reduction in stale `running` parents;
+- reduction in duplicate roots;
+- revival of done roots (should not go to zero);
+- response tokens/latency for `list`;
+- agent follow-up requests for `includeTerminal:true`.
+
+**Do not implement yet.** Record the tradeoff and test after the shared nudge
+adapter exists, so delivery and wording can be measured independently.
+
 ## Acceptance
 
 - [ ] A new tool adds a nudge with only a signal + config mapping.
