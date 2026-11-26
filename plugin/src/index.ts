@@ -211,12 +211,22 @@ export default Plugin.define({
     /** One standing reminder entry per session. */
     const standingReminders = new Map<string, ReminderState>();
     const REMINDER_KEY = 'progress-reminder';
-    const nudgeMode =
+    const customNudgesOn = customNudgesEnabled(ctx.options);
+    const requestedNudgeMode =
       ctx.options?.nudgeEngine === "shared"
         ? "shared"
         : ctx.options?.nudgeEngine === "shadow"
           ? "shadow"
           : "legacy";
+    // Custom rules still use the legacy replace/alongside engine. Do not
+    // half-enable shared mode and silently disable them.
+    const nudgeMode =
+      requestedNudgeMode === "shared" && customNudgesOn ? "legacy" : requestedNudgeMode;
+    if (requestedNudgeMode === "shared" && customNudgesOn) {
+      console.warn(
+        "[opencode-progress] nudgeEngine=shared is disabled while customNudges is on; using legacy"
+      );
+    }
     let sharedNudge: AttachedNudge | undefined;
     /** Non-block reminders stay quiet for this long after any other reminder. */
     const reminderGapMs = (() => {
@@ -281,7 +291,6 @@ export default Plugin.define({
     // Custom nudge rules live in dedicated files (global/project/session),
     // never in opencode.json. The scheduler reads them on demand: the files
     // are tiny, and this keeps the TUI and server in sync without IPC.
-    const customNudgesOn = customNudgesEnabled(ctx.options);
     const nudgePaths = resolveNudgePaths({ directory: ctx.location?.directory ?? process.cwd() });
     const nudgeRuntimes = new Map<string, NudgeRuntime>();
     const knownSessions = new Set<string>();

@@ -234,7 +234,7 @@ Shipped since `mcp-server@2.10.2`:
   block-only synthetic delivery, and the generic `nudge` agent tool.
 - **Lazy adapter import.** Legacy mode never imports the new package, so a
   missing install cannot break plugin startup.
-- **Custom rules** remain on the legacy engine for the first shared release.
+- **Custom rules** remain on the legacy engine; `shared` + `customNudges` falls back to legacy with a warning.
 - Tests: 234 plugin, 93 shared packages.
 
 ## 2.27.0 — nudge redesign (released, `plugin@2.27.0`)
