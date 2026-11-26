@@ -2786,6 +2786,11 @@ export default Plugin.define({
             ? event.source
             : "";
       if (producer) parts.push(producer);
+      if (typeof event.to === "string" && event.to) {
+        const from = typeof event.from === "string" && event.from ? event.from : "new";
+        parts.push(`${from} → ${event.to}`);
+      }
+      if (typeof event.action === "string" && event.action) parts.push(event.action);
       if (typeof event.severity === "string" && event.severity) parts.push(event.severity);
       if (typeof event.delivery === "string" && event.delivery) parts.push(event.delivery);
       if (typeof event.reason === "string" && event.reason) parts.push(event.reason);
@@ -2806,22 +2811,35 @@ export default Plugin.define({
     }) => {
       const [telemetry, setTelemetry] = createSignal<NudgeTelemetry>();
       const [error, setError] = createSignal("");
+      const [delayed, setDelayed] = createSignal(false);
       const [busy, setBusy] = createSignal(false);
       let currentSession = "";
+      let refreshing = false;
 
       const refresh = async () => {
+        if (refreshing) return;
+        refreshing = true;
+        const requested = props.sessionID();
         try {
           const next = await withTimeout(
             rpcFor(props.session()).nudgeTelemetry({
-              sessionID: props.sessionID(),
+              sessionID: requested,
               limit: 60,
             }),
-            4000
+            8000
           );
+          if (requested !== currentSession) return;
           setTelemetry(next);
           setError("");
+          setDelayed(false);
         } catch (failure) {
-          setError(String(failure));
+          if (requested !== currentSession) return;
+          // A slow RPC is a transient stall, not a broken panel: keep the last
+          // snapshot and retry on the next tick instead of painting red.
+          if (/timeout/i.test(String(failure))) setDelayed(true);
+          else setError(String(failure));
+        } finally {
+          refreshing = false;
         }
       };
 
@@ -2858,7 +2876,7 @@ export default Plugin.define({
               sessionID: props.sessionID(),
               minutes: mutedMs() > 0 ? 0 : 30,
             }),
-            4000
+            8000
           );
           if (!result.ok) {
             ctx.toast.show({
@@ -2918,7 +2936,7 @@ export default Plugin.define({
               }}
             >
               {telemetry()
-                ? `${telemetry()!.fires} fires · ${counts().nudge ?? 0} logged`
+                ? `${telemetry()!.fires} fires · ${counts().nudge ?? 0} logged${delayed() ? " · delayed" : ""}`
                 : "reading telemetry"}
             </span>
             <button
