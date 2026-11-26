@@ -28,6 +28,10 @@ import {
 } from "./state.js";
 import { readTaskListStatus, toggleTaskListMode } from "./tasklist-prefs.js";
 import {
+  attachNudge,
+  type AttachedNudge,
+} from "@jakedowns/opencode-nudge";
+import {
   upsertNativeProgress,
   type NativeProgressInput,
 } from "./native-progress.js";
@@ -210,6 +214,13 @@ export default Plugin.define({
     /** One standing reminder entry per session. */
     const standingReminders = new Map<string, ReminderState>();
     const REMINDER_KEY = 'progress-reminder';
+    const nudgeMode =
+      ctx.options?.nudgeEngine === "shared"
+        ? "shared"
+        : ctx.options?.nudgeEngine === "shadow"
+          ? "shadow"
+          : "legacy";
+    let sharedNudge: AttachedNudge | undefined;
     /** Non-block reminders stay quiet for this long after any other reminder. */
     const reminderGapMs = (() => {
       const raw = ctx.options?.nudgeGapMs;
@@ -321,6 +332,35 @@ export default Plugin.define({
       // twice; helpers that return only a body get the prefix here.
       const isCustom = source.startsWith("custom:");
       const now = Date.now();
+      if (sharedNudge && nudgeMode === "shadow") {
+        const shadowText = /^\[(info|warn|block)\]\s/.test(body)
+          ? body.trim()
+          : formatReminder(severity, body);
+        const producer =
+          source === "strict"
+            ? "progress.tree"
+            : source === "wall"
+              ? "progress.wall"
+              : source === "idle"
+                ? "progress.idle"
+                : source === "relay"
+                  ? "progress.relay"
+                  : source === "say"
+                    ? "say"
+                    : `custom.${source}`;
+        void Promise.resolve(
+          sharedNudge.adapter.submit({
+            sessionId: sessionID,
+            producer,
+            ruleId: source,
+            severity,
+            text: shadowText,
+            channel: severity === "block" ? "synthetic" : "context",
+            at: now,
+            metadata: { shadow: true },
+          })
+        ).catch((error) => console.warn("[opencode-progress] shadow nudge failed", String(error)));
+      }
       if (severity !== "block" && reminderMuted(sessionID)) {
         if (verbose) logNudge({ event: 'reminder', sessionID, severity, source, suppressed: 'muted' });
         return false;
@@ -1848,6 +1888,19 @@ export default Plugin.define({
       console.warn(`[opencode-progress] custom nudge tool registration failed: ${String(error)}`);
     }
 
+    if (nudgeMode !== "legacy") {
+      try {
+        sharedNudge = await attachNudge(ctx as never, {
+          shadow: nudgeMode === "shadow",
+          registerTool: nudgeMode === "shared",
+          log: (event) =>
+            console.log(`[opencode-progress] shared nudge ${JSON.stringify(event)}`),
+        });
+      } catch (error) {
+        console.warn(`[opencode-progress] shared nudge attach failed: ${String(error)}`);
+      }
+    }
+
     const wallClockMs = normalizeWallClockMs(ctx.options);
     const wallTrackers = new Map<string, WallClockState>();
     const lastToolCallAt = new Map<string, number>();
@@ -2069,6 +2122,7 @@ export default Plugin.define({
       void sayRegistration?.dispose();
       void sayPromptHook?.dispose();
       void sayIdleHook?.dispose();
+      void sharedNudge?.dispose();
     };
   },
 });

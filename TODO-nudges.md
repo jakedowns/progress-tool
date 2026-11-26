@@ -7,7 +7,8 @@
 
 > **PUBLISHING HOLD (2026-11-26):** do not `git push`, tag, or `npm publish`
 > anything for this migration. The maintainer will confirm when to publish.
-> Local files only until then.
+> The plugin now depends on `@jakedowns/opencode-nudge@0.1.0`, which is not
+> published; do not tag a progress release until the shared packages are live.
 
 ## Phase 0 status (2026-11-26)
 
@@ -93,8 +94,10 @@
 
 ## 5. Progress/say refactor
 
+- [x] Add a shadow adapter path behind `nudgeEngine: "shadow"`; submit legacy
+      reminders without changing delivery.
 - [ ] Replace `putReminder`, `lastReminderAt`, mute/gap/grace/cap, delivery and
-      `progress_nudge` plumbing with adapter calls.
+      `progress_nudge` plumbing with adapter calls in `"shared"` mode.
 - [ ] Keep progress signal detection and message builders.
 - [ ] Submit candidates:
       `progress.tree` (strict/wall), `progress.idle`, `progress.relay`,
