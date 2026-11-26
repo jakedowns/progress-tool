@@ -1983,8 +1983,9 @@ export default Plugin.define({
             typeof ctx.options?.nudgeGraceMs === "number"
               ? ctx.options.nudgeGraceMs
               : undefined,
-          log: (event) =>
-            console.log(`[opencode-progress] shared nudge ${JSON.stringify(event)}`),
+          log: (event) => {
+            if (verbose) logNudge({ engine: nudgeMode, ...event });
+          },
         });
       } catch (error) {
         console.warn(`[opencode-progress] shared nudge attach failed: ${String(error)}`);
