@@ -2786,6 +2786,7 @@ export default Plugin.define({
       "nudge-reset",
       "nudge-mute",
       "nudge-unmute",
+      "subagent",
     ]);
     const NUDGE_OUTBOUND = new Set([
       "nudge",
@@ -2804,6 +2805,14 @@ export default Plugin.define({
       if (NUDGE_INBOUND.has(name)) return "in";
       if (NUDGE_OUTBOUND.has(name)) return "out";
       return "";
+    };
+
+    /** A subagent name when the event came from a child session or entry. */
+    const nudgeSubagent = (event: Record<string, unknown>) => {
+      if (typeof event.subagent === "string" && event.subagent) return event.subagent;
+      const id = typeof event.id === "string" ? event.id : "";
+      const stripped = id.includes(":") ? id.slice(id.lastIndexOf(":") + 1) : id;
+      return stripped.startsWith("subagent-") ? "subagent" : "";
     };
 
     const nudgeEventSummary = (event: Record<string, unknown>) => {
@@ -2833,6 +2842,15 @@ export default Plugin.define({
       if (typeof event.suppressed === "string") parts.push(`suppressed: ${event.suppressed}`);
       if (event.deduped === true) parts.push("deduped");
       if (typeof event.minutes === "number") parts.push(`${event.minutes}m`);
+      if (typeof event.agent === "string" && event.agent) parts.push(event.agent);
+      if (typeof event.tool === "string" && event.tool) parts.push(event.tool);
+      if (typeof event.description === "string" && event.description) {
+        parts.push(
+          event.description.length > 80
+            ? `${event.description.slice(0, 80)}…`
+            : event.description
+        );
+      }
       return parts.join(" · ");
     };
 
@@ -3067,6 +3085,20 @@ export default Plugin.define({
                     }}
                   >
                     <div style={{ display: "flex", gap: "6px", "font-size": "11px" }}>
+                      <Show when={nudgeSubagent(event)}>
+                        <span
+                          title={`Subagent: ${nudgeSubagent(event)}`}
+                          style={{ color: "#c084fc", "font-weight": "700" }}
+                        >
+                          {nudgeSubagent(event) === "subagent"
+                            ? "[sub]"
+                            : `[sub ${
+                                nudgeSubagent(event).length > 14
+                                  ? `${nudgeSubagent(event).slice(0, 13)}…`
+                                  : nudgeSubagent(event)
+                              }]`}
+                        </span>
+                      </Show>
                       <Show when={nudgeDirection(event)}>
                         <span
                           title={

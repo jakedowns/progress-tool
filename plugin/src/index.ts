@@ -644,6 +644,16 @@ export default Plugin.define({
     /** Tail the JSONL log without loading 180MB into memory. */
     const readNudgeTail = (sessionID: string, limit: number) => {
       const file = nudgeLogPath();
+      // Child sessions share the parent's nudge view; tag their rows so the
+      // panel can tell subagent activity from the root agent's own traffic.
+      const links = readSessionMap();
+      const children = new Map<string, string>();
+      for (const child of Object.keys(links)) {
+        if (child === sessionID) continue;
+        if (rootSessionFor(child, links) !== sessionID) continue;
+        const link = links[child];
+        children.set(child, link?.name || link?.agent || child.slice(-6));
+      }
       let fd: number | undefined;
       try {
         fd = openSync(file, "r");
@@ -661,10 +671,12 @@ export default Plugin.define({
           } catch {
             continue;
           }
-          if (parsed.sessionID !== sessionID) continue;
+          const eventSession = String(parsed.sessionID ?? "");
+          const subagent = children.get(eventSession);
+          if (eventSession !== sessionID && !subagent) continue;
           const eventName = String(parsed.event ?? "unknown");
           counts[eventName] = (counts[eventName] ?? 0) + 1;
-          events.push(parsed);
+          events.push(subagent ? { ...parsed, subagent } : parsed);
         }
         return { events: events.slice(-limit).reverse(), counts };
       } catch {

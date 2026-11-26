@@ -193,7 +193,8 @@ files, presets, and semantics.
   the shared engine, and the newest nudge events for the routed session — fires,
   gate rejections, clears, touches, and legacy suppressions. Each row is tagged
   `[in]` (an agent wrote progress or used the nudge tool) or `[out]` (a reminder
-  aimed at the agent). The tab polls every 5 seconds and stays available in
+  aimed at the agent); child-session traffic also carries a `[sub]` tag with
+  the subagent's name. The tab polls every 5 seconds and stays available in
   either layout mode.
 - **TUI:** compact tree above the composer, roots collapsed, capped at
   `tuiMaxRoots` (default 3) and scrollable inside `tuiMaxRows` (default 8) so
