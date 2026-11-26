@@ -225,6 +225,8 @@ Shipped since `mcp-server@2.10.2`:
 
 ## 2.26.0 — ultra-compact tree theme (unreleased)
 
+- **Ultra-compact is the default.** `treeTheme` falls back to `"ultra-compact"`
+  when unset; set `"default"` to restore bars and detail lines.
 - **GUI ultra-compact rows.** New `treeTheme: "ultra-compact"` for the desktop
   pill popover and sidebar: one title line only, with a status-light emoji and
   the dismiss button. Detail text, percentage, and the `& N more` suffix are

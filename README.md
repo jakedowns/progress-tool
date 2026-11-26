@@ -250,7 +250,7 @@ files, presets, and semantics.
 | `guiLayout` | Desktop/web placement: `"composer"` pill (default) or pinned `"sidebar"` panel |
 | `guiSidebarWidth` | Desktop sidebar initial width in CSS pixels (default 360, clamp 240-800) |
 | `guiDetailLines` | Detail line cap in pill menu and sidebar: `-1` full, `0` hidden, `n` lines (default 1) |
-| `treeTheme` | Tree row theme: `"default"`, `"compact"` (no bars/started line, one detail line), or `"ultra-compact"` (title + status-light emoji + time prefix + dismiss only). The **Progress: switch tree theme** preset picker writes this and `barStyle` back to the config |
+| `treeTheme` | Tree row theme: `"ultra-compact"` (default; title + status-light emoji + age + dismiss), `"compact"` (no bars/started line, one detail line), or `"default"` (bars). The **Progress: switch tree theme** preset picker writes this and `barStyle` back to the config |
 | `indicatorStyle` | Status indicator: `"dot"` (default), `"circles"`, or `"checkbox"`; also **Progress: indicator style** |
 | `customNudges` | Enable custom nudge rules, the `progress_nudge` tool, and their TUI/palette commands (default `false`) |
 | `taskListFile` | Mirror tasks to a local Markdown checklist (default off) |

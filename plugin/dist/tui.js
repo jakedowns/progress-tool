@@ -576,8 +576,8 @@ function dismissedMap(entries) {
   return map;
 }
 function normalizeTreeTheme(value) {
-  if (value === "compact" || value === "ultra-compact") return value;
-  return "default";
+  if (value === "default" || value === "compact") return value;
+  return "ultra-compact";
 }
 function normalizeIndicatorStyle(value, fallback = "dot") {
   if (value === "circles" || value === "checkbox" || value === "dot") return value;

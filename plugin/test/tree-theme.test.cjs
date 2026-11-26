@@ -338,7 +338,7 @@ test('writeTreeThemeToConfig reports when no plugin entry exists and normalizes 
 
   const result = writeTreeThemeToConfig('nonsense', { directory: project, env: envFor(home) });
   assert.equal(result.ok, false);
-  assert.equal(result.theme, 'default');
+  assert.equal(result.theme, 'ultra-compact');
   assert.match(result.error, /no OpenCode config entry/);
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(project, 'opencode.json'), 'utf8')), {
     theme: 'dark',

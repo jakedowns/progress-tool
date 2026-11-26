@@ -118,10 +118,10 @@ test('treeTheme normalizes to default unless exactly compact', () => {
   assert.equal(normalizeTreeTheme('compact'), 'compact');
   assert.equal(normalizeTreeTheme('ultra-compact'), 'ultra-compact');
   assert.equal(normalizeTreeTheme('default'), 'default');
-  assert.equal(normalizeTreeTheme('COMPACT'), 'default');
-  assert.equal(normalizeTreeTheme('nope'), 'default');
-  assert.equal(normalizeTreeTheme(undefined), 'default');
-  assert.equal(normalizeTreeTheme(true), 'default');
+  assert.equal(normalizeTreeTheme('COMPACT'), 'ultra-compact');
+  assert.equal(normalizeTreeTheme('nope'), 'ultra-compact');
+  assert.equal(normalizeTreeTheme(undefined), 'ultra-compact');
+  assert.equal(normalizeTreeTheme(true), 'ultra-compact');
 });
 
 test('compact tree suffix renders pct, hidden count, both, or nothing', () => {

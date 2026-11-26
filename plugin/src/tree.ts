@@ -318,12 +318,13 @@ export function dismissalsFor(
 export type TreeTheme = "default" | "compact" | "ultra-compact";
 
 /**
- * Normalize the configured tree theme. Anything but `compact` keeps the
- * default rendering (bars, started line, multi-line detail).
+ * Normalize the configured tree theme. Ultra-compact is the default; anything
+ * unrecognized falls back to it. Set `treeTheme: "default"` for bars and
+ * multi-line detail.
  */
 export function normalizeTreeTheme(value: unknown): TreeTheme {
-  if (value === "compact" || value === "ultra-compact") return value;
-  return "default";
+  if (value === "default" || value === "compact") return value;
+  return "ultra-compact";
 }
 
 export const TREE_THEMES: readonly TreeTheme[] = ["default", "compact", "ultra-compact"];
