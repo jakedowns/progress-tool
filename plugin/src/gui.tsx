@@ -2757,7 +2757,9 @@ export default Plugin.define({
     const progressTab = {
       id: GUI_PROGRESS_PANEL_ID,
       title: "Progress",
-      pinned: true,
+      // Not pinned: pinned tabs cannot be dragged. `closable: false` keeps the
+      // sidebar-slot behavior (no close button) while allowing reordering.
+      closable: false as const,
       fallback: true,
     };
 
@@ -3273,10 +3275,10 @@ export default Plugin.define({
       );
     };
 
-    // A pinned side-region tab: it is listed without being opened, sits before
-    // other tabs and cannot be closed or dragged, so sidebar mode behaves like
-    // the TUI's sidebar slot. The Nudges tab is always listed so the launcher
-    // can open it from the New tab page in either layout mode.
+    // The side-region tabs: Progress is listed first in sidebar mode and has
+    // no close button, but is draggable so it can be reordered. The Nudges tab
+    // is always listed so the launcher can open it from the New tab page in
+    // either layout mode.
     ctx.add(Panel, {
       id: GUI_PROGRESS_PANEL_ID,
       region: "side",
