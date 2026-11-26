@@ -124,6 +124,39 @@ function formatRelative(ms: number | undefined): string {
   return `${days} day${days === 1 ? "" : "s"} ago`;
 }
 
+/** "9:12 AM" clock time for the ultra-compact prefix. */
+function formatClock(ms: number | undefined): string {
+  if (!ms) return "—";
+  try {
+    return new Date(ms).toLocaleTimeString(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return new Date(ms).toISOString().slice(11, 16);
+  }
+}
+
+/** Compact duration: "<1m", "42m", "1h 04m", "2d 3h". */
+function formatElapsedShort(ms: number | undefined): string {
+  if (ms == null || !Number.isFinite(ms) || ms < 0) return "—";
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 1) return "<1m";
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ${String(minutes % 60).padStart(2, "0")}m`;
+  return `${Math.floor(hours / 24)}d ${hours % 24}h`;
+}
+
+/** Emoji status light used by ultra-compact rows. */
+function statusLight(status: string | undefined): string {
+  if (status === "done") return "🟢";
+  if (status === "error") return "🔴";
+  if (status === "waiting") return "🟡";
+  if (status === "pending") return "⚪";
+  return "🔵";
+}
+
 /** Render normalized text with real <br> elements, never innerHTML. */
 function Multiline(props: { text: string }) {
   return (
@@ -165,7 +198,8 @@ function MenuRow(props: {
   const compact = () => props.theme === "compact";
   /** Compact rows ignore `guiDetailLines` above 1 but still honor 0 = hidden. */
   const effectiveDetailLines = () =>
-    compact() ? (props.detailLines === 0 ? 0 : 1) : props.detailLines;
+    ultra() ? 0 : compact() ? (props.detailLines === 0 ? 0 : 1) : props.detailLines;
+  const ultra = () => props.theme === "ultra-compact";
   const compactMeta = () =>
     compactTreeSuffix(
       props.node.progress,
@@ -173,6 +207,25 @@ function MenuRow(props: {
         ? countDescendants(props.node)
         : 0
     );
+  const titleText = () =>
+    `${props.depth === 0 ? subagentPrefix(props.node) : ""}${props.node.title}`;
+  const startedAt = () => props.node.startedAt ?? props.node.createdAt;
+  const updatedAt = () => props.node.updatedAt ?? props.node.reportedAt;
+  const elapsedMs = () => {
+    const start = startedAt();
+    if (!start) return undefined;
+    const terminal = props.node.status === "done" || props.node.status === "error";
+    return Math.max(0, (terminal ? updatedAt() ?? Date.now() : Date.now()) - start);
+  };
+  const timePrefix = () => {
+    const start = startedAt();
+    if (!start) return "";
+    return `${formatClock(start)}→${formatClock(updatedAt())} · ${formatElapsedShort(elapsedMs())}`;
+  };
+  const timeTitle = () =>
+    `Started ${formatDateTime(startedAt()) || "unknown"} · Updated ${
+      formatDateTime(updatedAt()) || "unknown"
+    } · Elapsed ${formatElapsedShort(elapsedMs())}`;
 
   return (
     <div
@@ -186,11 +239,11 @@ function MenuRow(props: {
       }}
       style={{
         display: "flex",
-        "align-items": "flex-start",
-        gap: "8px",
+        "align-items": ultra() ? "center" : "flex-start",
+        gap: ultra() ? "6px" : "8px",
         "padding-left": `${props.depth * 14}px`,
-        "padding-top": compact() ? "2px" : "5px",
-        "padding-bottom": compact() ? "2px" : "5px",
+        "padding-top": ultra() ? "1px" : compact() ? "2px" : "5px",
+        "padding-bottom": ultra() ? "1px" : compact() ? "2px" : "5px",
         cursor: props.hasChildren && !props.leaving ? "pointer" : "default",
         transform: props.leaving ? "translateX(120%)" : "translateX(0)",
         opacity: props.leaving ? "0" : "1",
@@ -206,7 +259,7 @@ function MenuRow(props: {
             opacity: "0.6",
             "font-size": "11px",
             width: "14px",
-            "margin-top": "4px",
+            "margin-top": ultra() ? "0" : "4px",
             "user-select": "none",
             "line-height": "1",
             display: "inline-block",
@@ -225,7 +278,7 @@ function MenuRow(props: {
             "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
             "font-size": "11px",
             "line-height": "1",
-            "margin-top": "5px",
+            "margin-top": ultra() ? "0" : "5px",
             opacity: "0.55",
             "user-select": "none",
             "white-space": "pre",
@@ -234,31 +287,61 @@ function MenuRow(props: {
           └─
         </span>
       </Show>
-      <div
-        style={{
-          width: "8px",
-          height: "8px",
-          "border-radius": "50%",
-          "margin-top": "6px",
-          flex: "0 0 auto",
-          background: dotColor(props.node.status),
-        }}
-      />
+      <Show
+        when={ultra()}
+        fallback={
+          <div
+            style={{
+              width: "8px",
+              height: "8px",
+              "border-radius": "50%",
+              "margin-top": "6px",
+              flex: "0 0 auto",
+              background: dotColor(props.node.status),
+            }}
+          />
+        }
+      >
+        <span
+          aria-label={props.node.status}
+          title={props.node.status}
+          style={{ flex: "0 0 auto", "font-size": "11px", "line-height": "1", "user-select": "none" }}
+        >
+          {statusLight(props.node.status)}
+        </span>
+      </Show>
       <div style={{ flex: "1 1 auto", "min-width": "0" }}>
         <div
           style={{
             "font-weight": props.depth === 0 ? "650" : "500",
-            "white-space": "normal",
-            "overflow-wrap": "anywhere",
-            "word-break": "break-word",
+            "white-space": ultra() ? "nowrap" : "normal",
+            "overflow-wrap": ultra() ? "normal" : "anywhere",
+            "word-break": ultra() ? "normal" : "break-word",
+            ...(ultra() ? { overflow: "hidden", "text-overflow": "ellipsis" } : {}),
           }}
-          title={`${props.node.status}: ${oneLineText(
-            `${props.depth === 0 ? subagentPrefix(props.node) : ""}${props.node.title}`
-          )}`}
+          title={
+            ultra()
+              ? `${props.node.status}: ${timeTitle()} — ${oneLineText(titleText())}`
+              : `${props.node.status}: ${oneLineText(titleText())}`
+          }
         >
-          <Multiline
-            text={`${props.depth === 0 ? subagentPrefix(props.node) : ""}${props.node.title}`}
-          />
+          <Show when={ultra() && timePrefix()}>
+            <span
+              style={{
+                "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+                "font-size": "9px",
+                "font-weight": "400",
+                opacity: "0.5",
+                "margin-right": "6px",
+                "white-space": "nowrap",
+              }}
+            >
+              {timePrefix()}
+            </span>
+          </Show>
+          <Show when={ultra()} fallback={<Multiline text={titleText()} />}>
+            {oneLineText(titleText())}
+          </Show>
         </div>
         <Show when={props.node.detail && effectiveDetailLines() !== 0}>
           <div
@@ -381,19 +464,21 @@ function rowFor(
   const indent = depth > 0 ? "\u00A0\u00A0".repeat(depth) + "└─ " : "";
   const compactSuffix = compactTreeSuffix(node.progress, 0);
   const suffix =
-    theme === "compact"
-      ? compactSuffix
-        ? ` · ${compactSuffix}`
-        : ""
-      : parts.style === "emoji"
-        ? `: ${parts.bar}${parts.fraction}`
-        : progressLabel(node.progress)
-          ? ` · ${progressLabel(node.progress)}`
-          : "";
+    theme === "ultra-compact"
+      ? ""
+      : theme === "compact"
+        ? compactSuffix
+          ? ` · ${compactSuffix}`
+          : ""
+        : parts.style === "emoji"
+          ? `: ${parts.bar}${parts.fraction}`
+          : progressLabel(node.progress)
+            ? ` · ${progressLabel(node.progress)}`
+            : "";
   return {
     id: node.key,
     label: `${indent}${oneLineText(node.title)}${suffix}`,
-    detail: node.detail ? oneLineText(node.detail) : undefined,
+    detail: theme === "ultra-compact" ? undefined : node.detail ? oneLineText(node.detail) : undefined,
     tone: toneFor(node.status),
   };
 }

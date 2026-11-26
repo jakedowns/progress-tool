@@ -60,18 +60,20 @@ function envFor(home) {
 test('theme helpers expose both themes and flip between them', () => {
   assert.deepEqual(
     TREE_THEME_CHOICES.map((choice) => choice.value),
-    ['default', 'compact']
+    ['default', 'compact', 'ultra-compact']
   );
   assert.equal(nextTreeTheme('default'), 'compact');
-  assert.equal(nextTreeTheme('compact'), 'default');
+  assert.equal(nextTreeTheme('compact'), 'ultra-compact');
+  assert.equal(nextTreeTheme('ultra-compact'), 'default');
   assert.equal(treeThemeLabel('compact'), 'Compact');
+  assert.equal(treeThemeLabel('ultra-compact'), 'Ultra-compact');
   assert.equal(treeThemeLabel('default'), 'Default');
 });
 
 test('theme presets pair each bar style with the right tree theme and preview', () => {
   assert.deepEqual(
     THEME_PRESET_CHOICES.map((choice) => choice.value),
-    ['ascii', 'emoji', 'compact']
+    ['ascii', 'emoji', 'compact', 'ultra-compact']
   );
   assert.deepEqual(
     THEME_PRESET_CHOICES.map((choice) => [choice.treeTheme, choice.barStyle]),
@@ -79,9 +81,10 @@ test('theme presets pair each bar style with the right tree theme and preview', 
       ['default', 'blocks'],
       ['default', 'emoji'],
       ['compact', 'blocks'],
+      ['ultra-compact', 'blocks'],
     ]
   );
-  const [ascii, emoji, compact] = THEME_PRESET_CHOICES;
+  const [ascii, emoji, compact, ultra] = THEME_PRESET_CHOICES;
   assert.match(ascii.title, /ASCII/);
   assert.match(ascii.title, /█|░/);
   assert.match(emoji.title, /Emoji/);
@@ -89,13 +92,17 @@ test('theme presets pair each bar style with the right tree theme and preview', 
   assert.match(emoji.title, /⬛/);
   assert.match(compact.title, /Compact/);
   assert.match(compact.title, /60% · & 2 more/);
+  assert.match(ultra.title, /Ultra/);
+  assert.match(ultra.title, /09:12→09:41/);
 
   assert.equal(themePresetFrom('default', 'blocks'), 'ascii');
   assert.equal(themePresetFrom('default', 'emoji'), 'emoji');
   assert.equal(themePresetFrom('compact', 'emoji'), 'compact');
+  assert.equal(themePresetFrom('ultra-compact', 'blocks'), 'ultra-compact');
   assert.equal(themePresetLabel('ascii'), 'ASCII bars');
   assert.equal(themePresetLabel('emoji'), 'Emoji bars');
   assert.equal(themePresetLabel('compact'), 'Compact rows');
+  assert.equal(themePresetLabel('ultra-compact'), 'Ultra-compact rows');
 });
 
 test('an existing treeTheme is replaced without touching comments or other keys', () => {

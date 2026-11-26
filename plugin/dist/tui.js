@@ -575,7 +575,8 @@ function dismissedMap(entries) {
   return map;
 }
 function normalizeTreeTheme(value) {
-  return value === "compact" ? "compact" : "default";
+  if (value === "compact" || value === "ultra-compact") return value;
+  return "default";
 }
 function compactTreeSuffix(progress, hiddenChildren = 0) {
   const parts = [];
@@ -709,9 +710,17 @@ var THEME_PRESET_CHOICES = [
     description: "No bars \xB7 one detail line",
     treeTheme: "compact",
     barStyle: "blocks"
+  },
+  {
+    value: "ultra-compact",
+    title: "Ultra  Task  [09:12\u219209:41 \xB7 29m]",
+    description: "One title line \xB7 status light, times, dismiss",
+    treeTheme: "ultra-compact",
+    barStyle: "blocks"
   }
 ];
 function themePresetFrom(theme, style) {
+  if (theme === "ultra-compact") return "ultra-compact";
   if (theme === "compact") return "compact";
   return style === "emoji" ? "emoji" : "ascii";
 }
@@ -719,6 +728,7 @@ function themePresetChoice(value) {
   return THEME_PRESET_CHOICES.find((choice) => choice.value === value);
 }
 function themePresetLabel(value) {
+  if (value === "ultra-compact") return "Ultra-compact rows";
   if (value === "compact") return "Compact rows";
   return value === "emoji" ? "Emoji bars" : "ASCII bars";
 }
@@ -2146,6 +2156,9 @@ function ProgressRow(props) {
     return full.length > 120 ? `${full.slice(0, 120)}\u2026` : full;
   };
   const label = () => {
+    if (themeState.value === "ultra-compact") {
+      return `${glyph(props.row.node.status)} ${title()}`;
+    }
     if (themeState.value === "compact") {
       const meta = compactTreeSuffix(props.row.node.progress, props.row.hiddenChildren);
       return `${glyph(props.row.node.status)} ${title()}${meta ? ` ${meta}` : ""}`;
@@ -2192,7 +2205,7 @@ function ProgressRow(props) {
     _$setProp(_el$6, "onMouseUp", onDismiss);
     _$insert(_el$, _$createComponent(Show, {
       get when() {
-        return props.row.node.detail;
+        return _$memo(() => !!props.row.node.detail)() && themeState.value !== "ultra-compact";
       },
       get children() {
         var _el$8 = _$createElement("text");

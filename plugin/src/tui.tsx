@@ -256,6 +256,9 @@ function ProgressRow(props: { row: TuiRow; sessionID: string }) {
   };
 
   const label = () => {
+    if (themeState.value === "ultra-compact") {
+      return `${glyph(props.row.node.status)} ${title()}`;
+    }
     if (themeState.value === "compact") {
       const meta = compactTreeSuffix(props.row.node.progress, props.row.hiddenChildren);
       return `${glyph(props.row.node.status)} ${title()}${meta ? ` ${meta}` : ""}`;
@@ -299,7 +302,7 @@ function ProgressRow(props: { row: TuiRow; sessionID: string }) {
           {"  ✕"}
         </text>
       </box>
-      <Show when={props.row.node.detail}>
+      <Show when={props.row.node.detail && themeState.value !== "ultra-compact"}>
         <text
           selectable={false}
           fg={ctx.theme.text.muted}

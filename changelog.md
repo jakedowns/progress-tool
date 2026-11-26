@@ -223,6 +223,21 @@ Shipped since `mcp-server@2.10.2`:
 - **Store and mirror support** for cleared/dismissed entries plus expanded MCP
   smoke and task-list suites (**57 tests**).
 
+## 2.26.0 — ultra-compact tree theme (unreleased)
+
+- **GUI ultra-compact rows.** New `treeTheme: "ultra-compact"` for the desktop
+  pill popover and sidebar: one title line only, with a status-light emoji and
+  the dismiss button. Detail text, percentage, and the `& N more` suffix are
+  hidden.
+- **Timestamp prefix.** Ultra rows prepend a small monospace
+  `09:12→09:41 · 29m` prefix: started clock time, last-updated clock time, and
+  elapsed duration. The row tooltip carries the full local date/time.
+- **Preset picker.** The **Progress: switch tree theme** command now offers
+  **Ultra** alongside ASCII/Emoji/Compact and persists
+  `treeTheme: "ultra-compact"`. The TUI renders the theme as a title-only line
+  without detail.
+- Settings shows the active theme value automatically.
+
 ## 2.25.0 — quieter multi-agent nudges (unreleased)
 
 Second feedback round from a five-subagent, multi-hour session.

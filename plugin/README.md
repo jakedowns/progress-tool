@@ -110,7 +110,7 @@ Pass under the plugin entry's `options` in `opencode.json`:
 | `guiLayout` | `"composer"` | Desktop/web placement: `"composer"` pill or a pinned `"sidebar"` panel; the "Progress: swap layout" command toggles it |
 | `guiSidebarWidth` | `360` | Desktop sidebar initial width in CSS pixels (clamp 240-800); dragging still wins |
 | `guiDetailLines` | `1` | Detail line cap in the pill menu and sidebar rows: `-1` full text, `0` titles only, `n` lines with `…` (max 100) |
-| `treeTheme` | `"default"` | Tree row theme: `"default"` or `"compact"` (no bars/started line, one detail line, `40% · & N more`). The **Progress: switch tree theme** command offers ASCII/Emoji/Compact presets with previews and saves both `treeTheme` and `barStyle` |
+| `treeTheme` | `"default"` | Tree row theme: `"default"`, `"compact"` (no bars/started line, one detail line, `40% · & N more`), or `"ultra-compact"` (title + status-light emoji + started/updated/elapsed prefix + dismiss). The command offers ASCII/Emoji/Compact/Ultra presets and saves both options |
 
 ### Experimental: `say` (opt-in)
 

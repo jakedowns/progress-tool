@@ -315,17 +315,18 @@ export function dismissalsFor(
   return next;
 }
 
-export type TreeTheme = "default" | "compact";
+export type TreeTheme = "default" | "compact" | "ultra-compact";
 
 /**
  * Normalize the configured tree theme. Anything but `compact` keeps the
  * default rendering (bars, started line, multi-line detail).
  */
 export function normalizeTreeTheme(value: unknown): TreeTheme {
-  return value === "compact" ? "compact" : "default";
+  if (value === "compact" || value === "ultra-compact") return value;
+  return "default";
 }
 
-export const TREE_THEMES: readonly TreeTheme[] = ["default", "compact"];
+export const TREE_THEMES: readonly TreeTheme[] = ["default", "compact", "ultra-compact"];
 
 export interface TreeThemeChoice {
   value: TreeTheme;
@@ -345,16 +346,24 @@ export const TREE_THEME_CHOICES: readonly TreeThemeChoice[] = [
     title: "Compact",
     description: "No bars, one detail line, percentage and hidden-child count",
   },
+  {
+    value: "ultra-compact",
+    title: "Ultra-compact",
+    description: "One title line only: status light, timestamps, dismiss",
+  },
 ];
 
 /** Human label used in toasts and command descriptions. */
 export function treeThemeLabel(theme: TreeTheme): string {
+  if (theme === "ultra-compact") return "Ultra-compact";
   return theme === "compact" ? "Compact" : "Default";
 }
 
 /** Flip to the other theme; used when no picker is available. */
 export function nextTreeTheme(current: TreeTheme): TreeTheme {
-  return current === "compact" ? "default" : "compact";
+  if (current === "default") return "compact";
+  if (current === "compact") return "ultra-compact";
+  return "default";
 }
 
 /**
@@ -597,7 +606,7 @@ export function progressLabel(progress: number | null | undefined): string | nul
  * `emoji`) plus the barless `compact` tree theme, so the palette switcher
  * exposes them as three comparable presets instead of two orthogonal options.
  */
-export type ThemePreset = "ascii" | "emoji" | "compact";
+export type ThemePreset = "ascii" | "emoji" | "compact" | "ultra-compact";
 
 export interface ThemePresetChoice {
   value: ThemePreset;
@@ -635,10 +644,18 @@ export const THEME_PRESET_CHOICES: readonly ThemePresetChoice[] = [
     treeTheme: "compact",
     barStyle: "blocks",
   },
+  {
+    value: "ultra-compact",
+    title: "Ultra  Task  [09:12→09:41 · 29m]",
+    description: "One title line · status light, times, dismiss",
+    treeTheme: "ultra-compact",
+    barStyle: "blocks",
+  },
 ];
 
 /** Preset that matches the configured tree theme and bar style. */
 export function themePresetFrom(theme: TreeTheme, style: BarStyle): ThemePreset {
+  if (theme === "ultra-compact") return "ultra-compact";
   if (theme === "compact") return "compact";
   return style === "emoji" ? "emoji" : "ascii";
 }
@@ -649,6 +666,7 @@ export function themePresetChoice(value: ThemePreset): ThemePresetChoice {
 
 /** Human label used in toasts and command descriptions. */
 export function themePresetLabel(value: ThemePreset): string {
+  if (value === "ultra-compact") return "Ultra-compact rows";
   if (value === "compact") return "Compact rows";
   return value === "emoji" ? "Emoji bars" : "ASCII bars";
 }

@@ -116,6 +116,7 @@ test('a node that failed itself keeps its own progress when children all succeed
 
 test('treeTheme normalizes to default unless exactly compact', () => {
   assert.equal(normalizeTreeTheme('compact'), 'compact');
+  assert.equal(normalizeTreeTheme('ultra-compact'), 'ultra-compact');
   assert.equal(normalizeTreeTheme('default'), 'default');
   assert.equal(normalizeTreeTheme('COMPACT'), 'default');
   assert.equal(normalizeTreeTheme('nope'), 'default');

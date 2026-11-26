@@ -31,7 +31,7 @@ Implements the [Agent Progress Tool proposal](https://gist.github.com/jakedowns/
 for OpenCode 2, and is written as a portable reference implementation any
 harness can copy or adapt.
 
-**Versions:** MCP server `2.12.0` · OpenCode plugin `2.25.0`
+**Versions:** MCP server `2.12.0` · OpenCode plugin `2.26.0`
 
 > **Advanced docs:** [schema, relay internals, state store, architecture, all
 > options, file map →](./README-advanced.md)
@@ -175,10 +175,13 @@ files, presets, and semantics.
   (default `1` line with `…`; `0` hides details; `-1` shows full text).
   `treeTheme: "compact"` renders tree rows (pill popover and sidebar) without
   progress-bar glyphs or the started line, with a single clamped detail line
-  and a `40% · & N more` meta suffix. The composer pill capsule itself keeps
-  its `barStyle` rendering. Use the **Progress: switch tree theme** palette
-  command to pick **ASCII**, **Emoji**, or **Compact**; each option shows a
-  live preview of its bars. The choice applies immediately and is saved as
+  and a `40% · & N more` meta suffix. `treeTheme: "ultra-compact"` goes further:
+  one title line only, with a status-light emoji, a small
+  `[09:12→09:41 · 29m]` started/updated/elapsed prefix, and the dismiss button;
+  detail, percentage, and `& N more` are hidden. The composer pill capsule
+  itself keeps its `barStyle` rendering. Use the **Progress: switch tree theme**
+  palette command to pick **ASCII**, **Emoji**, **Compact**, or **Ultra**;
+  each option shows a live preview. The choice applies immediately and is saved as
   `treeTheme` plus `barStyle` in the OpenCode config that declares the plugin.
   Expanded child rows use the same `└─` branch prefix as the TUI, placed before
   the status dot.
@@ -244,7 +247,7 @@ files, presets, and semantics.
 | `guiLayout` | Desktop/web placement: `"composer"` pill (default) or pinned `"sidebar"` panel |
 | `guiSidebarWidth` | Desktop sidebar initial width in CSS pixels (default 360, clamp 240-800) |
 | `guiDetailLines` | Detail line cap in pill menu and sidebar: `-1` full, `0` hidden, `n` lines (default 1) |
-| `treeTheme` | Tree row theme: `"default"` or `"compact"` (no bars/started line, one detail line; pill capsule unaffected). The **Progress: switch tree theme** preset picker writes this and `barStyle` back to the config |
+| `treeTheme` | Tree row theme: `"default"`, `"compact"` (no bars/started line, one detail line), or `"ultra-compact"` (title + status-light emoji + time prefix + dismiss only). The **Progress: switch tree theme** preset picker writes this and `barStyle` back to the config |
 | `customNudges` | Enable custom nudge rules, the `progress_nudge` tool, and their TUI/palette commands (default `false`) |
 | `taskListFile` | Mirror tasks to a local Markdown checklist (default off) |
 | `taskListLocation` | `1` = project root (default), `0` = `.progress/`, `2` = `~/.opencode-progress/` |
