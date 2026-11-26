@@ -353,6 +353,70 @@ export const TREE_THEME_CHOICES: readonly TreeThemeChoice[] = [
   },
 ];
 
+/** Status indicator family: CSS dot, emoji circles, or checkbox emoji. */
+export type IndicatorStyle = "dot" | "circles" | "checkbox";
+
+export function normalizeIndicatorStyle(
+  value: unknown,
+  fallback: IndicatorStyle = "dot"
+): IndicatorStyle {
+  if (value === "circles" || value === "checkbox" || value === "dot") return value;
+  return fallback;
+}
+
+export interface IndicatorStyleChoice {
+  value: IndicatorStyle;
+  title: string;
+  description: string;
+}
+
+export const INDICATOR_STYLE_CHOICES: readonly IndicatorStyleChoice[] = [
+  {
+    value: "dot",
+    title: "Flat dots",
+    description: "Solid CSS status dots (default)",
+  },
+  {
+    value: "circles",
+    title: "Emoji circles",
+    description: "🟢 🔴 🟡 ⚪ 🔵 status lights",
+  },
+  {
+    value: "checkbox",
+    title: "Checkbox emoji",
+    description: "✅ ❌ ⏳ ⬜ 🔄 checklist marks",
+  },
+];
+
+export function indicatorStyleLabel(style: IndicatorStyle): string {
+  if (style === "circles") return "Emoji circles";
+  if (style === "checkbox") return "Checkbox emoji";
+  return "Flat dots";
+}
+
+/** Text/emoji indicator. The GUI draws a CSS dot for `dot`. */
+export function indicatorGlyph(style: IndicatorStyle, status: string | undefined): string {
+  if (style === "circles") {
+    if (status === "done") return "🟢";
+    if (status === "error") return "🔴";
+    if (status === "waiting") return "🟡";
+    if (status === "pending") return "⚪";
+    return "🔵";
+  }
+  if (style === "checkbox") {
+    if (status === "done") return "✅";
+    if (status === "error") return "❌";
+    if (status === "waiting") return "⏳";
+    if (status === "pending") return "⬜";
+    return "🔄";
+  }
+  if (status === "done") return "✓";
+  if (status === "error") return "✗";
+  if (status === "waiting") return "◐";
+  if (status === "pending") return "○";
+  return "●";
+}
+
 /** Human label used in toasts and command descriptions. */
 export function treeThemeLabel(theme: TreeTheme): string {
   if (theme === "ultra-compact") return "Ultra-compact";

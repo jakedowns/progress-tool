@@ -29,9 +29,13 @@ for (const name of ['tree', 'tree-theme']) {
   );
 }
 const {
+  INDICATOR_STYLE_CHOICES,
   THEME_PRESET_CHOICES,
   TREE_THEME_CHOICES,
+  indicatorGlyph,
+  indicatorStyleLabel,
   nextTreeTheme,
+  normalizeIndicatorStyle,
   themePresetFrom,
   themePresetLabel,
   treeThemeLabel,
@@ -339,4 +343,28 @@ test('writeTreeThemeToConfig reports when no plugin entry exists and normalizes 
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(project, 'opencode.json'), 'utf8')), {
     theme: 'dark',
   });
+});
+
+test('indicator styles: normalize, label, choices, and glyphs', () => {
+  assert.equal(normalizeIndicatorStyle(undefined), 'dot');
+  assert.equal(normalizeIndicatorStyle('circles'), 'circles');
+  assert.equal(normalizeIndicatorStyle('checkbox'), 'checkbox');
+  assert.equal(normalizeIndicatorStyle('nope'), 'dot');
+  assert.equal(normalizeIndicatorStyle('nope', 'circles'), 'circles');
+  assert.equal(indicatorStyleLabel('dot'), 'Flat dots');
+  assert.equal(indicatorStyleLabel('circles'), 'Emoji circles');
+  assert.equal(indicatorStyleLabel('checkbox'), 'Checkbox emoji');
+  assert.deepEqual(
+    INDICATOR_STYLE_CHOICES.map((choice) => choice.value),
+    ['dot', 'circles', 'checkbox']
+  );
+
+  assert.equal(indicatorGlyph('dot', 'running'), '●');
+  assert.equal(indicatorGlyph('dot', 'done'), '✓');
+  assert.equal(indicatorGlyph('circles', 'running'), '🔵');
+  assert.equal(indicatorGlyph('circles', 'error'), '🔴');
+  assert.equal(indicatorGlyph('checkbox', 'running'), '🔄');
+  assert.equal(indicatorGlyph('checkbox', 'done'), '✅');
+  assert.equal(indicatorGlyph('checkbox', 'waiting'), '⏳');
+  assert.equal(indicatorGlyph('checkbox', 'pending'), '⬜');
 });

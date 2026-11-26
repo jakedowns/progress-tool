@@ -93,6 +93,7 @@ Pass under the plugin entry's `options` in `opencode.json`:
 | `staleEscalateAfter` | `3` | entry-based stale reminders before one synthetic escalation (`0` disables) |
 | `wallClockMs` | `120000` | wall-clock nudge threshold (`0` disables) |
 | `idleReminder` | `true` | turn-end nudge when open tasks remain |
+| `indicatorStyle` | `"dot"` | `"dot"`, `"circles"`, or `"checkbox"`; also the **Progress: indicator style** command |
 | `customNudges` | `false` | opt-in custom rule editor and TUI/palette commands; agent mute stays available |
 | `idleStaleMs` | `600000` | owned-entry staleness before the turn-end nudge |
 | `nudgeGapMs` | `60000` | quiet period between non-block reminders |

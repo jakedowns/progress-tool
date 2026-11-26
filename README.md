@@ -176,11 +176,11 @@ files, presets, and semantics.
   `treeTheme: "compact"` renders tree rows (pill popover and sidebar) without
   progress-bar glyphs or the started line, with a single clamped detail line
   and a `40% · & N more` meta suffix. `treeTheme: "ultra-compact"` goes further:
-  one title line only, with a status-light emoji, a small `5m ago · 29m`
-  last-updated/elapsed prefix (hover it to see `09:12→09:41`), and the dismiss
-  button.
+  one title line only, with a status-light emoji, a small `5m ago` prefix
+  (hover it for start→end and total duration), and the dismiss button. The
+  title is regular weight at 12px.
   There is **no progress bar, percentage, `started` row, detail, or `& N more`**;
-  rows use 3px total spacing. The composer pill capsule
+  rows use 3px total spacing and the tree has a 5px outer margin. The composer pill capsule
   itself keeps its `barStyle` rendering. Use the **Progress: switch tree theme**
   palette command to pick **ASCII**, **Emoji**, **Compact**, or **Ultra**;
   each option shows a live preview. The choice applies immediately and is saved as
@@ -250,6 +250,7 @@ files, presets, and semantics.
 | `guiSidebarWidth` | Desktop sidebar initial width in CSS pixels (default 360, clamp 240-800) |
 | `guiDetailLines` | Detail line cap in pill menu and sidebar: `-1` full, `0` hidden, `n` lines (default 1) |
 | `treeTheme` | Tree row theme: `"default"`, `"compact"` (no bars/started line, one detail line), or `"ultra-compact"` (title + status-light emoji + time prefix + dismiss only). The **Progress: switch tree theme** preset picker writes this and `barStyle` back to the config |
+| `indicatorStyle` | Status indicator: `"dot"` (default), `"circles"`, or `"checkbox"`; also **Progress: indicator style** |
 | `customNudges` | Enable custom nudge rules, the `progress_nudge` tool, and their TUI/palette commands (default `false`) |
 | `taskListFile` | Mirror tasks to a local Markdown checklist (default off) |
 | `taskListLocation` | `1` = project root (default), `0` = `.progress/`, `2` = `~/.opencode-progress/` |

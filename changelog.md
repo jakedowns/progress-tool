@@ -228,18 +228,23 @@ Shipped since `mcp-server@2.10.2`:
 - **GUI ultra-compact rows.** New `treeTheme: "ultra-compact"` for the desktop
   pill popover and sidebar: one title line only, with a status-light emoji and
   the dismiss button. Detail text, percentage, and the `& N more` suffix are
-  hidden.
-- **Timestamp prefix.** Ultra rows prepend a small monospace
-  `5m ago · 29m` prefix: last-updated age and elapsed duration. Hovering the
-  prefix swaps in the absolute `09:12→09:41` started/updated times; the row
-  tooltip carries the full local date/time.
+  hidden until the pointer hovers the row, which reveals one description line.
+- **Timestamp prefix.** Ultra rows prepend a small monospace `5m ago`
+  last-updated age. Hovering it shows a tip with the absolute start→end clock
+  times and total duration; the row tooltip carries the full local date/time.
+  Ultra titles are 12px regular weight, rows use 3px total spacing, and the
+  tree gets a 5px outer margin.
 - **Preset picker.** The **Progress: switch tree theme** command now offers
   **Ultra** alongside ASCII/Emoji/Compact and persists
   `treeTheme: "ultra-compact"`. The TUI renders the theme as a title-only line
   without detail.
 - **Strict one-line rows.** Ultra hides the progress bar, percentage,
   `started` row, detail, and `& N more` count; only the status light, time
-  prefix, title, and dismiss remain. Row spacing is 3px total.
+  prefix, title, and dismiss remain. Row spacing is 3px total and the tree has
+  a 5px margin. Hovering a row reveals its one-line description.
+- **Indicator style command.** **Progress: indicator style** (GUI and TUI)
+  swaps every tree theme between flat CSS dots, emoji circles, and checkbox
+  emoji. `indicatorStyle: "dot" | "circles" | "checkbox"` seeds it from config.
 - **`-dev` version suffix.** GUI builds from an untagged commit show
   `2.26.0-dev` in the footer, Settings, and feedback title. Release builds
   detect the `plugin@<version>` tag automatically; `PROGRESS_DEV=1|0` overrides

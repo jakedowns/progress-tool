@@ -53,11 +53,16 @@ import {
   scopeEntries,
   subagentPrefix,
   visibleEntries,
+  INDICATOR_STYLE_CHOICES,
   THEME_PRESET_CHOICES,
+  indicatorGlyph,
+  indicatorStyleLabel,
+  normalizeIndicatorStyle,
   themePresetChoice,
   themePresetFrom,
   themePresetLabel,
   type BarOptions,
+  type IndicatorStyle,
   type ThemePreset,
   type TreeTheme,
 } from "./tree.js";
@@ -162,15 +167,6 @@ function formatAgoShort(ms: number | undefined): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-/** Emoji status light used by ultra-compact rows. */
-function statusLight(status: string | undefined): string {
-  if (status === "done") return "🟢";
-  if (status === "error") return "🔴";
-  if (status === "waiting") return "🟡";
-  if (status === "pending") return "⚪";
-  return "🔵";
-}
-
 /** Render normalized text with real <br> elements, never innerHTML. */
 function Multiline(props: { text: string }) {
   return (
@@ -206,15 +202,24 @@ function MenuRow(props: {
   detailLines?: number;
   /** `compact` drops the bar and started line and keeps one detail line. */
   theme?: TreeTheme;
+  /** Status indicator family; ultra previously forced emoji circles. */
+  indicatorStyle?: IndicatorStyle;
 }) {
   const pct = () => progressLabel(props.node.progress);
   const parts = () => barParts(props.node.progress, props.options);
   const compact = () => props.theme === "compact";
   /** Compact rows ignore `guiDetailLines` above 1 but still honor 0 = hidden. */
   const effectiveDetailLines = () =>
-    ultra() ? 0 : compact() ? (props.detailLines === 0 ? 0 : 1) : props.detailLines;
+    ultra()
+      ? rowHovered()
+        ? 1
+        : 0
+      : compact()
+        ? (props.detailLines === 0 ? 0 : 1)
+        : props.detailLines;
   const ultra = () => props.theme === "ultra-compact";
-  const [hoverTime, setHoverTime] = createSignal(false);
+  const indicatorMode = () => props.indicatorStyle ?? "dot";
+  const [rowHovered, setRowHovered] = createSignal(false);
   const compactMeta = () =>
     compactTreeSuffix(
       props.node.progress,
@@ -233,16 +238,10 @@ function MenuRow(props: {
     return Math.max(0, (terminal ? updatedAt() ?? Date.now() : Date.now()) - start);
   };
   const timePrefix = () => {
-    const start = startedAt();
-    if (!start) return "";
-    const elapsed = formatElapsedShort(elapsedMs());
-    // Default: last update age, then total elapsed. Hover swaps the age for
-    // the absolute started→updated clock times.
-    if (!hoverTime()) {
-      const ago = formatAgoShort(updatedAt());
-      return ago ? `${ago} · ${elapsed}` : elapsed;
-    }
-    return `${formatClock(start)}→${formatClock(updatedAt())} · ${elapsed}`;
+    if (!startedAt()) return "";
+    // The row keeps only the last-updated age. Hovering it opens a native tip
+    // with the absolute start→end clock and total duration.
+    return formatAgoShort(updatedAt());
   };
   const timeTitle = () =>
     `Started ${formatDateTime(startedAt()) || "unknown"} · Updated ${
@@ -251,6 +250,8 @@ function MenuRow(props: {
 
   return (
     <div
+      onMouseEnter={() => setRowHovered(true)}
+      onMouseLeave={() => setRowHovered(false)}
       onClick={(event: MouseEvent) => {
         if (!props.hasChildren || props.leaving) return;
         // Do not hijack text selection drags.
@@ -310,32 +311,39 @@ function MenuRow(props: {
         </span>
       </Show>
       <Show
-        when={ultra()}
+        when={indicatorMode() === "dot"}
         fallback={
-          <div
+          <span
+            aria-label={props.node.status}
+            title={props.node.status}
             style={{
-              width: "8px",
-              height: "8px",
-              "border-radius": "50%",
-              "margin-top": "6px",
               flex: "0 0 auto",
-              background: dotColor(props.node.status),
+              "font-size": "11px",
+              "line-height": "1",
+              "user-select": "none",
             }}
-          />
+          >
+            {indicatorGlyph(indicatorMode(), props.node.status)}
+          </span>
         }
       >
-        <span
-          aria-label={props.node.status}
-          title={props.node.status}
-          style={{ flex: "0 0 auto", "font-size": "11px", "line-height": "1", "user-select": "none" }}
-        >
-          {statusLight(props.node.status)}
-        </span>
+        <div
+          style={{
+            width: "8px",
+            height: "8px",
+            "border-radius": "50%",
+            "margin-top": ultra() ? "0" : "6px",
+            flex: "0 0 auto",
+            background: dotColor(props.node.status),
+          }}
+        />
       </Show>
       <div style={{ flex: "1 1 auto", "min-width": "0" }}>
         <div
           style={{
-            "font-weight": props.depth === 0 ? "650" : "500",
+            ...(ultra()
+              ? { "font-size": "12px", "font-weight": "400" }
+              : { "font-weight": props.depth === 0 ? "650" : "500" }),
             "white-space": ultra() ? "nowrap" : "normal",
             "overflow-wrap": ultra() ? "normal" : "anywhere",
             "word-break": ultra() ? "normal" : "break-word",
@@ -349,8 +357,6 @@ function MenuRow(props: {
         >
           <Show when={ultra() && timePrefix()}>
             <span
-              onMouseEnter={() => setHoverTime(true)}
-              onMouseLeave={() => setHoverTime(false)}
               title={timeTitle()}
               style={{
                 "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
@@ -550,6 +556,37 @@ export default Plugin.define({
       },
     });
     const treeTheme = (): TreeTheme => themeStore.treeTheme;
+    const [indicatorStore, updateIndicator] = ctx.storage.memory("guiIndicatorStyle", {
+      initial: {
+        value: normalizeIndicatorStyle(
+          ctx.options?.indicatorStyle,
+          themeStore.treeTheme === "ultra-compact" ? "circles" : "dot"
+        ),
+      },
+    });
+    const indicatorStyle = (): IndicatorStyle => indicatorStore.value;
+    const chooseIndicatorStyle = async () => {
+      const choice = await ctx.dialogs.select<IndicatorStyle>({
+        title: "Progress indicator style",
+        current: indicatorStyle(),
+        options: INDICATOR_STYLE_CHOICES.map((option) => ({
+          title: option.title,
+          value: option.value,
+          description:
+            option.value === indicatorStyle()
+              ? `${option.description} · current`
+              : option.description,
+        })),
+      });
+      if (!choice) return;
+      updateIndicator((draft) => {
+        draft.value = choice;
+      });
+      ctx.toast.show({
+        title: `Indicator style: ${indicatorStyleLabel(choice)}`,
+        variant: "success",
+      });
+    };
     const currentPreset = (): ThemePreset =>
       themePresetFrom(themeStore.treeTheme, themeStore.barStyle);
     const setThemePreset = (value: ThemePreset) => {
@@ -1147,6 +1184,7 @@ export default Plugin.define({
           rows: [
             ["Placement", layoutMode()],
             ["Tree theme", treeTheme()],
+            ["Indicator", indicatorStyleLabel(indicatorStyle())],
             ["Bar style", themeStore.barStyle],
             ["Detail lines", String(detailLines)],
             ["Refresh", `${refreshMs}ms`],
@@ -1450,6 +1488,7 @@ export default Plugin.define({
               display: "flex",
               "flex-direction": "column",
               gap: treeTheme() === "ultra-compact" ? "1px" : "2px",
+              margin: treeTheme() === "ultra-compact" ? "5px" : "0",
               "flex": "0 1 auto",
               "min-height": "0",
               "max-height": "min(60vh, 520px)",
@@ -1489,7 +1528,7 @@ export default Plugin.define({
                             depth={0}
                             options={options()}
                             detailLines={detailLines}
-                            theme={treeTheme()}
+                            theme={treeTheme()} indicatorStyle={indicatorStyle()}
                             hasChildren={node().children.length > 0}
                             collapsed={isCollapsed()}
                             onToggle={() =>
@@ -1523,7 +1562,7 @@ export default Plugin.define({
                                     depth={depth}
                                     options={options()}
                                     detailLines={detailLines}
-                                    theme={treeTheme()}
+                                    theme={treeTheme()} indicatorStyle={indicatorStyle()}
                                     onDismiss={() =>
                                       dismissKey(props.session, child.key, child.status ?? "")
                                     }
@@ -1809,6 +1848,7 @@ export default Plugin.define({
                 display: "flex",
                 "flex-direction": "column",
                 gap: treeTheme() === "ultra-compact" ? "1px" : "2px",
+                margin: treeTheme() === "ultra-compact" ? "5px" : "0",
                 flex: "1 1 auto",
                 "min-height": "0",
                 "overflow-y": "auto",
@@ -1829,7 +1869,7 @@ export default Plugin.define({
                             depth={0}
                             options={options()}
                             detailLines={detailLines}
-                            theme={treeTheme()}
+                            theme={treeTheme()} indicatorStyle={indicatorStyle()}
                             hasChildren={node().children.length > 0}
                             collapsed={isCollapsed()}
                             onToggle={() =>
@@ -1857,7 +1897,7 @@ export default Plugin.define({
                                     depth={depth}
                                     options={options()}
                                     detailLines={detailLines}
-                                    theme={treeTheme()}
+                                    theme={treeTheme()} indicatorStyle={indicatorStyle()}
                                     onDismiss={() =>
                                       dismissKey(props.session(), child.key, child.status ?? "")
                                     }
@@ -2614,6 +2654,16 @@ export default Plugin.define({
         run: () => void openNudgeStatus(),
       }));
     }
+
+    ctx.add(Command, () => ({
+      id: "progress.indicator-style",
+      title: "Progress: indicator style",
+      description: "Swap status indicators: flat dots, emoji circles, or checkbox emoji",
+      group: "Progress",
+      section: "general" as const,
+      keywords: "progress indicator status dots emoji circles checkbox",
+      run: () => void chooseIndicatorStyle(),
+    }));
 
     ctx.add(Command, () => ({
       id: "progress.switch-tree-theme",

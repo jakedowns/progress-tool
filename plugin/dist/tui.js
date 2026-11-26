@@ -578,6 +578,53 @@ function normalizeTreeTheme(value) {
   if (value === "compact" || value === "ultra-compact") return value;
   return "default";
 }
+function normalizeIndicatorStyle(value, fallback = "dot") {
+  if (value === "circles" || value === "checkbox" || value === "dot") return value;
+  return fallback;
+}
+var INDICATOR_STYLE_CHOICES = [
+  {
+    value: "dot",
+    title: "Flat dots",
+    description: "Solid CSS status dots (default)"
+  },
+  {
+    value: "circles",
+    title: "Emoji circles",
+    description: "\u{1F7E2} \u{1F534} \u{1F7E1} \u26AA \u{1F535} status lights"
+  },
+  {
+    value: "checkbox",
+    title: "Checkbox emoji",
+    description: "\u2705 \u274C \u23F3 \u2B1C \u{1F504} checklist marks"
+  }
+];
+function indicatorStyleLabel(style) {
+  if (style === "circles") return "Emoji circles";
+  if (style === "checkbox") return "Checkbox emoji";
+  return "Flat dots";
+}
+function indicatorGlyph(style, status) {
+  if (style === "circles") {
+    if (status === "done") return "\u{1F7E2}";
+    if (status === "error") return "\u{1F534}";
+    if (status === "waiting") return "\u{1F7E1}";
+    if (status === "pending") return "\u26AA";
+    return "\u{1F535}";
+  }
+  if (style === "checkbox") {
+    if (status === "done") return "\u2705";
+    if (status === "error") return "\u274C";
+    if (status === "waiting") return "\u23F3";
+    if (status === "pending") return "\u2B1C";
+    return "\u{1F504}";
+  }
+  if (status === "done") return "\u2713";
+  if (status === "error") return "\u2717";
+  if (status === "waiting") return "\u25D0";
+  if (status === "pending") return "\u25CB";
+  return "\u25CF";
+}
 function compactTreeSuffix(progress, hiddenChildren = 0) {
   const parts = [];
   const pct = progressLabel(progress);
@@ -2033,6 +2080,10 @@ var themeState = {
   value: "ascii"
 };
 var setTreeThemeState;
+var indicatorState = {
+  value: "dot"
+};
+var setIndicatorState;
 function presetBarOptions() {
   return {
     ...barOptions,
@@ -2083,11 +2134,7 @@ function startPolling(refreshMs) {
   };
 }
 function glyph(status) {
-  if (status === "done") return "\u2713";
-  if (status === "error") return "\u2717";
-  if (status === "waiting") return "\u25D0";
-  if (status === "pending") return "\u25CB";
-  return "\u25CF";
+  return indicatorGlyph(indicatorState.value, status);
 }
 function expandedFor(sessionID) {
   return expandedBySession()[sessionID] ?? /* @__PURE__ */ new Set();
@@ -2942,6 +2989,13 @@ var tui_default = Plugin.define({
     });
     themeState = themeStore;
     setTreeThemeState = updateTheme;
+    const [indicatorStore, updateIndicator] = context.storage.memory("tuiIndicatorStyle", {
+      initial: {
+        value: normalizeIndicatorStyle(context.options?.indicatorStyle, normalizeTreeTheme(context.options?.treeTheme) === "ultra-compact" ? "circles" : "dot")
+      }
+    });
+    indicatorState = indicatorStore;
+    setIndicatorState = updateIndicator;
     const stopPolling = startPolling(normalizeRefreshMs(context.options));
     if (context.options?.notifyOnLoad === true) {
       context.ui.toast.show({
@@ -2995,6 +3049,31 @@ var tui_default = Plugin.define({
         group: "progress",
         palette: true,
         run: () => switchTreeTheme(context)
+      }, {
+        id: "progress.indicator-style",
+        title: "Progress: indicator style",
+        description: "Swap status indicators: flat dots, emoji circles, or checkbox emoji",
+        group: "progress",
+        palette: true,
+        run: async () => {
+          const choice = await context.ui.dialog.select({
+            title: "Progress indicator style",
+            current: indicatorState.value,
+            options: INDICATOR_STYLE_CHOICES.map((option) => ({
+              title: option.title,
+              value: option.value,
+              description: option.value === indicatorState.value ? `${option.description} \xB7 current` : option.description
+            }))
+          });
+          if (!choice) return;
+          setIndicatorState?.((draft) => {
+            draft.value = choice;
+          });
+          context.ui.toast.show({
+            message: `Indicator style: ${indicatorStyleLabel(choice)}`,
+            variant: "success"
+          });
+        }
       }, {
         id: "progress.set-root-cap",
         title: "Progress: set root cap",

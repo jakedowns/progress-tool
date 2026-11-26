@@ -38,6 +38,10 @@ import {
   barParts,
   compactTreeSuffix,
   countActive,
+  INDICATOR_STYLE_CHOICES,
+  indicatorGlyph,
+  indicatorStyleLabel,
+  normalizeIndicatorStyle,
   countDescendants,
   dismissedMap,
   isDismissed,
@@ -55,6 +59,7 @@ import {
   themePresetFrom,
   themePresetLabel,
   type BarOptions,
+  type IndicatorStyle,
   type ThemePreset,
   type VisibilityOptions,
 } from "./tree.js";
@@ -101,6 +106,11 @@ let visibilityOptions: VisibilityOptions = {};
 let themeState: { value: ThemePreset } = { value: "ascii" };
 let setTreeThemeState:
   | ((mutation: (draft: { value: ThemePreset }) => void) => void)
+  | undefined;
+/** Runtime status indicator family; independent of the tree theme. */
+let indicatorState: { value: IndicatorStyle } = { value: "dot" };
+let setIndicatorState:
+  | ((mutation: (draft: { value: IndicatorStyle }) => void) => void)
   | undefined;
 
 /** Bar options for the active preset; `barOptions` keeps the configured size. */
@@ -157,11 +167,7 @@ function startPolling(refreshMs: number): () => void {
 }
 
 function glyph(status: ProgressStatus): string {
-  if (status === "done") return "✓";
-  if (status === "error") return "✗";
-  if (status === "waiting") return "◐";
-  if (status === "pending") return "○";
-  return "●";
+  return indicatorGlyph(indicatorState.value, status);
 }
 
 function expandedFor(sessionID: string): ReadonlySet<string> {
@@ -1011,6 +1017,18 @@ export default Plugin.define({
     });
     themeState = themeStore;
     setTreeThemeState = updateTheme;
+    const [indicatorStore, updateIndicator] = context.storage.memory("tuiIndicatorStyle", {
+      initial: {
+        value: normalizeIndicatorStyle(
+          context.options?.indicatorStyle,
+          normalizeTreeTheme(context.options?.treeTheme) === "ultra-compact"
+            ? "circles"
+            : "dot"
+        ),
+      },
+    });
+    indicatorState = indicatorStore;
+    setIndicatorState = updateIndicator;
 
     const stopPolling = startPolling(normalizeRefreshMs(context.options));
     if (context.options?.notifyOnLoad === true) {
@@ -1068,6 +1086,35 @@ export default Plugin.define({
           group: "progress",
           palette: true,
           run: () => switchTreeTheme(context),
+        },
+        {
+          id: "progress.indicator-style",
+          title: "Progress: indicator style",
+          description: "Swap status indicators: flat dots, emoji circles, or checkbox emoji",
+          group: "progress",
+          palette: true,
+          run: async () => {
+            const choice = await context.ui.dialog.select<IndicatorStyle>({
+              title: "Progress indicator style",
+              current: indicatorState.value,
+              options: INDICATOR_STYLE_CHOICES.map((option) => ({
+                title: option.title,
+                value: option.value,
+                description:
+                  option.value === indicatorState.value
+                    ? `${option.description} · current`
+                    : option.description,
+              })),
+            });
+            if (!choice) return;
+            setIndicatorState?.((draft) => {
+              draft.value = choice;
+            });
+            context.ui.toast.show({
+              message: `Indicator style: ${indicatorStyleLabel(choice)}`,
+              variant: "success",
+            });
+          },
         },
         {
           id: "progress.set-root-cap",
