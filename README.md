@@ -194,8 +194,10 @@ files, presets, and semantics.
   gate rejections, clears, touches, and legacy suppressions. Each row is tagged
   `[in]` (an agent wrote progress or used the nudge tool) or `[out]` (a reminder
   aimed at the agent); child-session traffic also carries a `[sub]` tag with
-  the subagent's name. The tab polls every 5 seconds and stays available in
-  either layout mode.
+  the subagent's name. State chips above the log show the live gate:
+  `[muted • 3m remaining]`, `[nudged • 2m ago]`, `[grace • 7m left]`,
+  `[gap • 40s left]`, `[capped • 2/2]`, or `[listening]`. The tab polls every
+  5 seconds and stays available in either layout mode.
 - **TUI:** compact tree above the composer, roots collapsed, capped at
   `tuiMaxRoots` (default 3) and scrollable inside `tuiMaxRows` (default 8) so
   long lists never push the prompt away. A `--- scroll to see N more ---` hint

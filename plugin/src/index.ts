@@ -8,6 +8,7 @@
 import { closeSync, fstatSync, openSync, readFileSync, readSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
+import { homedir } from "node:os";
 import path from "node:path";
 import { Plugin, Skill } from "@opencode/plugin";
 import { ProgressRpc } from "./rpc.js";
@@ -692,6 +693,45 @@ export default Plugin.define({
       }
     };
 
+    /** Read the adapter's own session record so the panel shows real gate values. */
+    const readSharedNudgeSession = (sessionID: string) => {
+      try {
+        const xdg = process.env.XDG_CONFIG_HOME;
+        const base = xdg ? path.join(xdg, "opencode") : path.join(homedir(), ".config", "opencode");
+        const parsed = JSON.parse(
+          readFileSync(path.join(base, "nudge-state.json"), "utf8")
+        ) as {
+          sessions?: Record<
+            string,
+            { lastReminderAt?: number; lastProgressAt?: number; fires?: number }
+          >;
+        };
+        let defaults: Record<string, unknown> = {};
+        try {
+          const config = JSON.parse(
+            readFileSync(path.join(base, "nudge.json"), "utf8")
+          ) as { defaults?: Record<string, unknown> };
+          defaults = config.defaults ?? {};
+        } catch {
+          // No unified config; adapter defaults apply.
+        }
+        const session = parsed?.sessions?.[sessionID];
+        if (!session) {
+          return { lastReminderAt: 0, lastProgressAt: 0, fires: 0, defaults };
+        }
+        return {
+          lastReminderAt:
+            typeof session.lastReminderAt === "number" ? session.lastReminderAt : 0,
+          lastProgressAt:
+            typeof session.lastProgressAt === "number" ? session.lastProgressAt : 0,
+          fires: typeof session.fires === "number" ? session.fires : 0,
+          defaults,
+        };
+      } catch {
+        return undefined;
+      }
+    };
+
     const registration = await ctx.rpc.register(ProgressRpc, {
       list: async (input) => {
         const { sessionID, scope } = (input ?? {}) as {
@@ -838,6 +878,15 @@ export default Plugin.define({
       nudgeTelemetry: async ({ sessionID, limit }) => {
         const tail = readNudgeTail(sessionID, Math.min(200, Math.max(10, limit ?? 60)));
         const status = sharedNudge?.adapter.status(sessionID);
+        const state = readSharedNudgeSession(sessionID);
+        const gapOption = ctx.options?.nudgeGapMs;
+        const graceOption = ctx.options?.nudgeGraceMs;
+        const defaults = state?.defaults ?? {};
+        const numberOption = (value: unknown) =>
+          typeof value === "number" && Number.isFinite(value) && value >= 0
+            ? value
+            : undefined;
+        const capOption = defaults.capPerSession;
         return {
           engine: nudgeMode,
           mutedUntil: status?.mutedUntil ?? 0,
@@ -849,7 +898,16 @@ export default Plugin.define({
                 at: status.standing.at,
               }
             : { severity: "", source: "", text: "", at: 0 },
-          fires: status?.fires ?? 0,
+          fires: status?.fires ?? state?.fires ?? 0,
+          lastReminderAt: state?.lastReminderAt ?? 0,
+          lastProgressAt: state?.lastProgressAt ?? 0,
+          gapMs: numberOption(gapOption) ?? numberOption(defaults.gapMs) ?? 60_000,
+          graceMs:
+            numberOption(graceOption) ?? numberOption(defaults.graceMs) ?? 10 * 60_000,
+          capPerSession:
+            typeof capOption === "number" && Number.isFinite(capOption) && capOption >= 0
+              ? Math.floor(capOption)
+              : 2,
           events: tail.events,
           counts: tail.counts,
         };

@@ -837,6 +837,11 @@ export default Plugin.define({
         mutedUntil: number;
         standing: { severity: string; source: string; text: string; at: number };
         fires: number;
+        lastReminderAt: number;
+        lastProgressAt: number;
+        gapMs: number;
+        graceMs: number;
+        capPerSession: number;
         events: Array<Record<string, unknown>>;
         counts: Record<string, number>;
       }>;
@@ -2921,6 +2926,82 @@ export default Plugin.define({
         return minutes >= 60 ? `${Math.ceil(minutes / 60)}h` : `${minutes}m`;
       };
 
+      const shortDuration = (ms: number) => {
+        const seconds = Math.max(0, Math.ceil(ms / 1000));
+        if (seconds < 60) return `${seconds}s`;
+        const minutes = Math.ceil(seconds / 60);
+        if (minutes < 60) return `${minutes}m`;
+        const hours = Math.floor(minutes / 60);
+        const rest = minutes % 60;
+        return rest > 0 ? `${hours}h ${rest}m` : `${hours}h`;
+      };
+
+      /** Real gate state from the shared adapter's session record. */
+      const sessionState = () => {
+        const view = telemetry();
+        if (!view) return [];
+        if (view.engine === "legacy") {
+          return [
+            {
+              label: "legacy engine",
+              color: "#94a3b8",
+              title: "Set nudgeEngine: shared to use the shared gate",
+            },
+          ];
+        }
+        const now = Date.now();
+        const chips: Array<{ label: string; color: string; title: string }> = [];
+        if (view.mutedUntil > now) {
+          chips.push({
+            label: `muted • ${shortDuration(view.mutedUntil - now)} remaining`,
+            color: "#fbbf24",
+            title: "Non-block reminders are muted; block reminders still fire",
+          });
+        }
+        if (view.standing?.at) {
+          chips.push({
+            label: `nudged • ${shortDuration(now - view.standing.at)} ago`,
+            color: nudgeSeverityColor(view.standing.severity),
+            title: `Standing ${view.standing.severity} reminder from ${view.standing.source}`,
+          });
+        }
+        if (view.graceMs > 0 && view.lastProgressAt > 0) {
+          const elapsed = now - view.lastProgressAt;
+          if (elapsed >= 0 && elapsed < view.graceMs) {
+            chips.push({
+              label: `grace • ${shortDuration(view.graceMs - elapsed)} left`,
+              color: "#34d399",
+              title: "Grace after the last progress write; non-block reminders wait",
+            });
+          }
+        }
+        if (view.gapMs > 0 && view.lastReminderAt > 0) {
+          const elapsed = now - view.lastReminderAt;
+          if (elapsed >= 0 && elapsed < view.gapMs) {
+            chips.push({
+              label: `gap • ${shortDuration(view.gapMs - elapsed)} left`,
+              color: "#38bdf8",
+              title: "Global gap since the last reminder; non-block reminders wait",
+            });
+          }
+        }
+        if (view.capPerSession > 0 && view.fires >= view.capPerSession) {
+          chips.push({
+            label: `capped • ${view.fires}/${view.capPerSession}`,
+            color: "#f87171",
+            title: "Per-stretch fire cap reached until the next progress write",
+          });
+        }
+        if (chips.length === 0) {
+          chips.push({
+            label: "listening",
+            color: "#34d399",
+            title: "No mute, standing nudge, grace, gap, or cap",
+          });
+        }
+        return chips;
+      };
+
       const toggleMute = async () => {
         if (busy()) return;
         setBusy(true);
@@ -3009,6 +3090,34 @@ export default Plugin.define({
             >
               {mutedMs() > 0 ? `Unmute ${mutedLabel()}` : "Mute 30m"}
             </button>
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              "flex-wrap": "wrap",
+              gap: "4px",
+              "flex": "0 0 auto",
+            }}
+          >
+            <For each={sessionState()}>
+              {(chip) => (
+                <span
+                  title={chip.title}
+                  style={{
+                    "font-size": "11px",
+                    color: chip.color,
+                    border: "1px solid currentColor",
+                    "border-radius": "4px",
+                    padding: "1px 5px",
+                    opacity: "0.9",
+                    "white-space": "nowrap",
+                  }}
+                >
+                  [{chip.label}]
+                </span>
+              )}
+            </For>
           </div>
 
           <Show when={error()}>
