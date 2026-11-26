@@ -223,7 +223,7 @@ Shipped since `mcp-server@2.10.2`:
 - **Store and mirror support** for cleared/dismissed entries plus expanded MCP
   smoke and task-list suites (**57 tests**).
 
-## 2.27.0 — nudge redesign (unreleased)
+## 2.27.0 — nudge redesign (released, `plugin@2.27.0`)
 
 Feedback round from a long authoring + subagent session.
 
@@ -245,7 +245,7 @@ Feedback round from a long authoring + subagent session.
   fraction as normal for authoring/research; no empty bar or `0%` is implied.
 - **Docs:** native tool, grace window, and auto-node behavior documented.
 
-## 2.26.0 — ultra-compact tree theme (unreleased)
+## 2.26.0 — ultra-compact tree theme (shipped in `plugin@2.27.0`)
 
 - **Ultra-compact is the default.** `treeTheme` falls back to `"ultra-compact"`
   when unset; set `"default"` to restore bars and detail lines.
@@ -281,7 +281,7 @@ Feedback round from a long authoring + subagent session.
   version display”.
 - Settings shows the active theme value automatically.
 
-## 2.25.0 — quieter multi-agent nudges (unreleased)
+## 2.25.0 — quieter multi-agent nudges (shipped in `plugin@2.27.0`)
 
 Second feedback round from a five-subagent, multi-hour session.
 
@@ -314,7 +314,7 @@ Second feedback round from a five-subagent, multi-hour session.
 Tests: plugin **231** (new idle ownership, old-error grace, relay-pattern, and
 reminder-gap cases).
 
-## 2.24.0 — settings tab and release links (unreleased)
+## 2.24.0 — settings tab and release links (shipped in `plugin@2.27.0`)
 
 - **Settings tab in the tree view.** The desktop pill popover and pinned
   sidebar footer now has a **[Settings]** tab beside **[Feedback]**. It shows
