@@ -2,6 +2,9 @@
 
 Ideas and reminders that are **not yet implemented** (notes dated 2026-11-23).
 
+> **Shared nudge migration:** see [`TODO-nudges.md`](./TODO-nudges.md) for the
+> `nudge-core` / `nudge-opencode` extraction and wording-variation plan.
+
 ## Tree updates must freeze over dismiss controls
 
 - **Risk.** The GUI tree can refresh, insert, or reorder rows while the pointer
