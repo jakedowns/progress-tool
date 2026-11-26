@@ -7,8 +7,9 @@
 
 > **PUBLISHING HOLD (2026-11-26):** do not `git push`, tag, or `npm publish`
 > anything for this migration. The maintainer will confirm when to publish.
-> The plugin now depends on `@jakedowns/opencode-nudge@0.1.0`, which is not
-> published; do not tag a progress release until the shared packages are live.
+> Shared packages `@jakedowns/opencode-nudge-core@0.1.2` and
+> `@jakedowns/opencode-nudge@0.1.2` are published and verified. A progress
+> release still needs explicit confirmation.
 
 ## Phase 0 status (2026-11-26)
 
