@@ -441,7 +441,7 @@ Both the TUI and GUI parts read these options.
 - `registerSkills`: set to `false` to skip skill registration entirely. Default: the usage and delegation skills register automatically.
 - `demoSkills`: set to `true` to also register the two demo skills (`osc-demo`, `tree-demo`) shipped in `optional-skills/`. **Default `false`**.
 - `injectInstructions`: set to `false` to skip the injected progress/relay rules (useful if you maintain your own `AGENTS.md`).
-- `relayHints`: set to `false` to disable the repeating-command relay hint. It fires **once per command shape**, on the second occurrence, so a single already-finished command is not nagged about retrospectively.
+- `relayHints`: set to `false` to disable the repeating-command relay hint. It fires **once per command shape**, on the second occurrence, so a single already-finished command is not nagged about retrospectively. Heredoc and inline-script bodies are ignored.
 - `customNudges`: set to `true` to enable custom nudge rules and the TUI/palette editors. **Default `false`**. The `progress_nudge` agent tool is always registered so agents can `mute`/`unmute`/`status`, but with the flag off it refuses rule editing and no rule files are read.
 - `notifyOnLoad`: set to `true` for a toast when the plugin loads.
 - `nudgeGapMs`: global quiet period between non-block reminders from any source (default `60000`, `0` disables). Block-level reminders bypass it.

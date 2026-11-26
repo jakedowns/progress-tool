@@ -319,6 +319,12 @@ test('relay hint: detects long commands, skips relays and quick commands', () =>
   assert.equal(relayHintFor('git commit -m "fix npm test"'), null, 'git commit messages mention commands in prose');
   assert.equal(relayHintFor('ls -la'), null);
   assert.equal(relayHintFor(''), null);
+  assert.equal(
+    relayHintFor("python3 - <<'PY'\nprint('npm run build')\nPY"),
+    null,
+    'heredoc bodies are script text, not the command to relay'
+  );
+  assert.equal(relayHintFor('node -e "require(\'child_process\').execSync(\'npm test\')"'), null);
 
   assert.match(relayHintMessage('npm test'), /progress-relay --id <id> -- npm test/);
   assert.match(relayHintMessage('npm test'), /^Long command/);

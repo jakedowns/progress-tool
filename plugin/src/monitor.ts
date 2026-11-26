@@ -337,6 +337,10 @@ export function relayHintFor(command: string | null | undefined): string | null 
   // Git operations are fast; their commit messages often mention test/build
   // commands in prose, which must not trigger a relay hint.
   if (/^\s*git\b/.test(command)) return null;
+  // Heredocs and inline scripts often *contain* long commands as text. The
+  // script itself is not the command to relay.
+  if (/<<-?\s*['"]?[A-Za-z_]/.test(command)) return null;
+  if (/^\s*(?:python3?|node|ruby|perl)\s+-(?:c|e)\b/.test(command)) return null;
   if (!LONG_COMMAND_RE.test(command)) return null;
   return command.trim();
 }

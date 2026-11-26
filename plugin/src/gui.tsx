@@ -282,9 +282,9 @@ function MenuRow(props: {
           "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
           "font-size": "9px",
           width: "18px",
-          "margin-top": ultra() ? "2px" : "4px",
+          "margin-top": ultra() ? "0" : "4px",
           "user-select": "none",
-          "line-height": "1",
+          "line-height": ultra() ? "16px" : "1",
           display: "inline-block",
           "text-align": "center",
         }}
@@ -298,7 +298,7 @@ function MenuRow(props: {
             flex: "0 0 auto",
             "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
             "font-size": "11px",
-            "line-height": "1",
+            "line-height": ultra() ? "16px" : "1",
             "margin-top": ultra() ? "0" : "5px",
             opacity: "0.55",
             "user-select": "none",
@@ -317,7 +317,12 @@ function MenuRow(props: {
             style={{
               flex: "0 0 auto",
               "font-size": "11px",
-              "line-height": "1",
+              "line-height": ultra() ? "16px" : "1",
+              height: ultra() ? "16px" : "auto",
+              width: ultra() ? "14px" : "auto",
+              display: "inline-flex",
+              "align-items": "center",
+              "justify-content": "center",
               "user-select": "none",
             }}
           >
@@ -330,7 +335,7 @@ function MenuRow(props: {
             width: "8px",
             height: "8px",
             "border-radius": "50%",
-            "margin-top": ultra() ? "0" : "6px",
+            "margin-top": ultra() ? "4px" : "6px",
             flex: "0 0 auto",
             background: dotColor(props.node.status),
           }}
@@ -340,7 +345,7 @@ function MenuRow(props: {
         <div
           style={{
             ...(ultra()
-              ? { "font-size": "12px", "font-weight": "400" }
+              ? { "font-size": "12px", "font-weight": "400", "line-height": "16px" }
               : { "font-weight": props.depth === 0 ? "650" : "500" }),
             "white-space": ultra() ? "nowrap" : "normal",
             "overflow-wrap": ultra() ? "normal" : "anywhere",
@@ -366,6 +371,7 @@ function MenuRow(props: {
                 "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
                 "font-size": "9px",
                 "font-weight": "400",
+                "line-height": "16px",
                 opacity: "0.5",
                 "margin-right": "6px",
                 "white-space": "nowrap",
@@ -479,8 +485,9 @@ function MenuRow(props: {
             color: "inherit",
             opacity: "0.65",
             "border-radius": "50%",
-            width: "22px",
-            height: "22px",
+            width: ultra() ? "18px" : "22px",
+            height: ultra() ? "18px" : "22px",
+            "margin-top": ultra() ? "-1px" : "0",
             cursor: "pointer",
             "line-height": "1",
           }}

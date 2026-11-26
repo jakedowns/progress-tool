@@ -234,7 +234,8 @@ Shipped since `mcp-server@2.10.2`:
   last-updated age. Hovering it shows a tip with the absolute start→end clock
   times and total duration; the row tooltip carries the full local date/time.
   Ultra titles are 12px regular weight, rows use 3px total spacing, and the
-  tree gets a 5px outer margin.
+  tree gets a 5px outer margin. Status light, age, and title share a 16px
+  line box so they stay on one baseline.
 - **Preset picker.** The **Progress: switch tree theme** command now offers
   **Ultra** alongside ASCII/Emoji/Compact and persists
   `treeTheme: "ultra-compact"`. The TUI renders the theme as a title-only line
@@ -268,7 +269,8 @@ Second feedback round from a five-subagent, multi-hour session.
 - **Relay hints once per pattern.** The hint now keys on the command shape
   (`gradlew assembleDebug`, env assignments and `cd … &&` stripped) and fires
   once, on the second occurrence, so a single finished command is not nagged
-  about after the fact.
+  about after the fact. Heredoc and `python -c`/`node -e` script bodies are
+  ignored so embedded text cannot trigger the hint.
 - **Global quiet gap.** Non-block reminders from any source share
   `nudgeGapMs` (default 60s); block reminders bypass it.
 - **Always-available agent mute.** `progress_nudge` is registered even when
