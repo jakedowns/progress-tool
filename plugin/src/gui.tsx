@@ -3041,13 +3041,21 @@ export default Plugin.define({
       return (
         <div
           style={{
-            display: "flex",
-            "flex-direction": "column",
             height: "100%",
-            "min-height": "0",
-            gap: "6px",
+            "overflow-y": "auto",
+            "overflow-x": "hidden",
+            "box-sizing": "border-box",
           }}
         >
+          <div
+            style={{
+              display: "flex",
+              "flex-direction": "column",
+              "min-height": "100%",
+              "box-sizing": "border-box",
+              gap: "6px",
+            }}
+          >
           <div
             style={{
               display: "flex",
@@ -3170,9 +3178,6 @@ export default Plugin.define({
             style={{
               display: "flex",
               "flex-direction": "column",
-              flex: "1 1 auto",
-              "min-height": "0",
-              "overflow-y": "auto",
               "padding-right": "2px",
             }}
           >
@@ -3270,6 +3275,7 @@ export default Plugin.define({
                 )}
               </For>
             </Show>
+          </div>
           </div>
         </div>
       );
