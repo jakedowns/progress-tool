@@ -1314,7 +1314,10 @@ export default Plugin.define({
                     : "hidden"
                 }
               />
-              <SettingsRow label="Expand roots" value={expandRootsByDefault ? "yes" : "no"} />
+              <SettingsRow
+                label="Expand roots"
+                value={ctx.options?.expandRootsByDefault === true ? "yes" : "no"}
+              />
             </SettingsGroup>
             <SettingsGroup title="Reminders">
               <SettingsRow label="Strict mode" value={String(ctx.options?.strictMode ?? "nudge")} />
