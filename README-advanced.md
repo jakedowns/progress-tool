@@ -815,7 +815,8 @@ PROGRESS_DEV=0 npm run build   # force clean (packaging outside a tag)
 A tree without `.git` (an npm install) is treated as a release build. The
 suffix is display-only; `package.json` and the tag/version checks are unchanged.
 Committed `dist/` bundles built locally may therefore contain `-dev`; the
-release workflow rebuilds them before publishing.
+release workflow rebuilds them before publishing and fails the job if the
+bundle still contains a `-dev` marker.
 
 ## Components and files
 

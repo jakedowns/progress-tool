@@ -83,6 +83,20 @@ jobs:
         working-directory: plugin
         run: npm install --no-audit --no-fund
 
+      # Tag-aware builds must not ship a `-dev` suffix. This also proves the
+      # checkout really carries plugin@<version> before publishing.
+      - name: Verify release bundle is not marked dev
+        if: startsWith(env.RELEASE_TAG, 'plugin@')
+        working-directory: plugin
+        run: |
+          set -euo pipefail
+          npm run build
+          if grep -q -- '-dev' dist/gui-experimental.cjs; then
+            echo "::error::Release bundle contains a -dev suffix; check tag detection"
+            exit 1
+          fi
+          echo "Release bundle is clean"
+
       # prepublishOnly runs the test suite and rebuilds both bundles.
       - name: Publish plugin
         if: startsWith(env.RELEASE_TAG, 'plugin@')
