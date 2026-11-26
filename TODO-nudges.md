@@ -81,6 +81,10 @@
 - [x] Basic telemetry: fired/deduped/muted/gap/grace/cap with producer + rule id.
 - [x] Single-process conformance test: one gate, one key, priority/gap/grace/cap.
 - [ ] Cross-process concurrency stress test.
+- [x] `plugin/scripts/nudge-report.mjs`: streaming summary of the JSONL log
+      (fires by source/severity, suppressions, shared events, `--json`).
+- [x] Desktop **Nudges** sidebar panel: launcher on the New tab page, live
+      engine/standing/mute state, per-session event tail, 30-minute mute.
 
 ## 4. Config + migration
 

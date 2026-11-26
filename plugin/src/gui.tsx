@@ -8,7 +8,7 @@
 
 import { ComposerPill, Command, MenuItem, Panel, Plugin, Style } from "@opencode/plugin/gui";
 import type { MountedSession } from "@opencode/plugin/gui";
-import { ErrorBoundary, For, Index, Show, batch, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
+import { ErrorBoundary, For, Index, Show, batch, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import { displayVersion } from "./build-version.js";
 import { feedbackIssueUrl, releasesUrl } from "./feedback.js";
 import { ProgressRpc } from "./rpc.js";
@@ -832,6 +832,18 @@ export default Plugin.define({
         scope: "global" | "project" | "session";
         id: string;
       }): Promise<{ ok: boolean; error?: string }>;
+      nudgeTelemetry(input: { sessionID: string; limit?: number }): Promise<{
+        engine: "legacy" | "shadow" | "shared";
+        mutedUntil: number;
+        standing: { severity: string; source: string; text: string; at: number };
+        fires: number;
+        events: Array<Record<string, unknown>>;
+        counts: Record<string, number>;
+      }>;
+      nudgeMute(input: {
+        sessionID: string;
+        minutes?: number;
+      }): Promise<{ ok: boolean; mutedUntil: number }>;
       setIndicatorStyle(input: {
         indicatorStyle: "dot" | "circles" | "checkbox";
       }): Promise<{
@@ -2744,9 +2756,310 @@ export default Plugin.define({
       fallback: true,
     };
 
+    const NUDGE_PANEL_TAB_ID = "nudges";
+    const nudgesTab = {
+      id: NUDGE_PANEL_TAB_ID,
+      title: "Nudges",
+      closable: "compact" as const,
+    };
+
+    type NudgeTelemetry = Awaited<ReturnType<ProgressClient["nudgeTelemetry"]>>;
+
+    const nudgeSeverityColor = (severity: unknown) =>
+      severity === "block" ? "#f87171" : severity === "warn" ? "#fbbf24" : "#60a5fa";
+
+    const nudgeAge = (ts: unknown) => {
+      const at = typeof ts === "string" ? Date.parse(ts) : NaN;
+      if (!Number.isFinite(at)) return "";
+      const seconds = Math.max(0, Math.round((Date.now() - at) / 1000));
+      if (seconds < 60) return `${seconds}s`;
+      if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
+      return `${Math.round(seconds / 3600)}h`;
+    };
+
+    const nudgeEventSummary = (event: Record<string, unknown>) => {
+      const parts: string[] = [];
+      const producer =
+        typeof event.producer === "string"
+          ? event.producer
+          : typeof event.source === "string"
+            ? event.source
+            : "";
+      if (producer) parts.push(producer);
+      if (typeof event.severity === "string" && event.severity) parts.push(event.severity);
+      if (typeof event.delivery === "string" && event.delivery) parts.push(event.delivery);
+      if (typeof event.reason === "string" && event.reason) parts.push(event.reason);
+      if (typeof event.suppressed === "string") parts.push(`suppressed: ${event.suppressed}`);
+      if (event.deduped === true) parts.push("deduped");
+      if (typeof event.minutes === "number") parts.push(`${event.minutes}m`);
+      return parts.join(" · ");
+    };
+
+    const nudgeEventText = (event: Record<string, unknown>) => {
+      if (typeof event.text !== "string" || !event.text) return "";
+      return event.text.length > 240 ? `${event.text.slice(0, 240)}…` : event.text;
+    };
+
+    const NudgePanel = (props: {
+      session: () => MountedSession;
+      sessionID: () => string;
+    }) => {
+      const [telemetry, setTelemetry] = createSignal<NudgeTelemetry>();
+      const [error, setError] = createSignal("");
+      const [busy, setBusy] = createSignal(false);
+      let currentSession = "";
+
+      const refresh = async () => {
+        try {
+          const next = await withTimeout(
+            rpcFor(props.session()).nudgeTelemetry({
+              sessionID: props.sessionID(),
+              limit: 60,
+            }),
+            4000
+          );
+          setTelemetry(next);
+          setError("");
+        } catch (failure) {
+          setError(String(failure));
+        }
+      };
+
+      createEffect(() => {
+        const id = props.sessionID();
+        if (!id || id === currentSession) return;
+        currentSession = id;
+        void refresh();
+      });
+
+      onMount(() => {
+        const timer = setInterval(() => void refresh(), 5000);
+        onCleanup(() => clearInterval(timer));
+      });
+
+      const mutedMs = () => {
+        const until = telemetry()?.mutedUntil ?? 0;
+        return until > Date.now() ? until - Date.now() : 0;
+      };
+
+      const mutedLabel = () => {
+        const ms = mutedMs();
+        if (ms <= 0) return "";
+        const minutes = Math.ceil(ms / 60_000);
+        return minutes >= 60 ? `${Math.ceil(minutes / 60)}h` : `${minutes}m`;
+      };
+
+      const toggleMute = async () => {
+        if (busy()) return;
+        setBusy(true);
+        try {
+          const result = await withTimeout(
+            rpcFor(props.session()).nudgeMute({
+              sessionID: props.sessionID(),
+              minutes: mutedMs() > 0 ? 0 : 30,
+            }),
+            4000
+          );
+          if (!result.ok) {
+            ctx.toast.show({
+              title: "Nudges are legacy-managed",
+              description: "The shared adapter is not attached for this session.",
+              variant: "default",
+            });
+          }
+          await refresh();
+        } catch (failure) {
+          setError(String(failure));
+        } finally {
+          setBusy(false);
+        }
+      };
+
+      const events = () => telemetry()?.events ?? [];
+      const counts = () => telemetry()?.counts ?? {};
+      const standing = () => telemetry()?.standing;
+      const standingActive = () => {
+        const value = standing();
+        return Boolean(value && value.at > 0 && value.text);
+      };
+
+      return (
+        <div
+          style={{
+            display: "flex",
+            "flex-direction": "column",
+            height: "100%",
+            "min-height": "0",
+            gap: "6px",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              "align-items": "center",
+              gap: "8px",
+              "padding-bottom": "6px",
+              "border-bottom": "1px solid rgba(127,127,127,0.2)",
+              "flex": "0 0 auto",
+            }}
+          >
+            <span style={{ "font-size": "12px", opacity: "0.65" }}>
+              {telemetry()?.engine ?? "loading"}
+            </span>
+            <span
+              title={`${telemetry()?.fires ?? 0} adapter fires this process`}
+              style={{
+                "font-size": "11px",
+                opacity: "0.55",
+                flex: "1 1 auto",
+                "white-space": "nowrap",
+                overflow: "hidden",
+                "text-overflow": "ellipsis",
+              }}
+            >
+              {telemetry()
+                ? `${telemetry()!.fires} fires · ${counts().nudge ?? 0} logged`
+                : "reading telemetry"}
+            </span>
+            <button
+              type="button"
+              class="progress-pill-button"
+              disabled={busy() || telemetry()?.engine === "legacy"}
+              title={
+                telemetry()?.engine === "legacy"
+                  ? "Mute is managed by the legacy reminder options"
+                  : mutedMs() > 0
+                    ? "Resume reminders for this session"
+                    : "Mute reminders for this session for 30 minutes"
+              }
+              onClick={() => void toggleMute()}
+              style={sidebarHeaderButtonStyle}
+            >
+              {mutedMs() > 0 ? `Unmute ${mutedLabel()}` : "Mute 30m"}
+            </button>
+          </div>
+
+          <Show when={error()}>
+            <div style={{ "font-size": "11px", color: "#f87171" }}>{error()}</div>
+          </Show>
+
+          <Show when={standingActive()}>
+            <div
+              style={{
+                display: "flex",
+                "flex-direction": "column",
+                gap: "3px",
+                padding: "6px 8px",
+                "border-radius": "6px",
+                background: "rgba(127,127,127,0.1)",
+                "border-left": `3px solid ${nudgeSeverityColor(standing()?.severity)}`,
+                "flex": "0 0 auto",
+              }}
+            >
+              <div style={{ display: "flex", gap: "6px", "font-size": "11px" }}>
+                <span style={{ color: nudgeSeverityColor(standing()?.severity), "font-weight": "600" }}>
+                  {standing()?.severity || "reminder"}
+                </span>
+                <span style={{ opacity: "0.55", flex: "1 1 auto" }}>{standing()?.source}</span>
+                <span style={{ opacity: "0.4" }}>
+                  {standing()?.at ? nudgeAge(new Date(standing()!.at).toISOString()) : ""}
+                </span>
+              </div>
+              <div style={{ "font-size": "12px", "white-space": "pre-wrap" }}>
+                {standing()?.text}
+              </div>
+            </div>
+          </Show>
+
+          <div
+            style={{
+              "font-size": "11px",
+              opacity: "0.5",
+              "flex": "0 0 auto",
+            }}
+          >
+            {telemetry()?.engine === "legacy"
+              ? "Legacy engine · recent reminders"
+              : "Shared adapter · recent gate decisions"}
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              "flex-direction": "column",
+              flex: "1 1 auto",
+              "min-height": "0",
+              "overflow-y": "auto",
+              "padding-right": "2px",
+            }}
+          >
+            <Show
+              when={events().length > 0}
+              fallback={
+                <div style={{ opacity: "0.6", "font-size": "13px", padding: "8px 2px" }}>
+                  No nudge events for this session yet
+                </div>
+              }
+            >
+              <For each={events()}>
+                {(event) => (
+                  <div
+                    style={{
+                      display: "flex",
+                      "flex-direction": "column",
+                      gap: "2px",
+                      padding: "5px 0",
+                      "border-bottom": "1px solid rgba(127,127,127,0.12)",
+                    }}
+                  >
+                    <div style={{ display: "flex", gap: "6px", "font-size": "11px" }}>
+                      <span
+                        style={{
+                          color: nudgeSeverityColor(event.severity),
+                          "font-weight": "600",
+                        }}
+                      >
+                        {String(event.event ?? "event")}
+                      </span>
+                      <span
+                        title={nudgeEventSummary(event)}
+                        style={{
+                          flex: "1 1 auto",
+                          opacity: "0.6",
+                          "white-space": "nowrap",
+                          overflow: "hidden",
+                          "text-overflow": "ellipsis",
+                        }}
+                      >
+                        {nudgeEventSummary(event)}
+                      </span>
+                      <span style={{ opacity: "0.4" }}>{nudgeAge(event.ts)}</span>
+                    </div>
+                    <Show when={nudgeEventText(event)}>
+                      <div
+                        title={nudgeEventText(event)}
+                        style={{
+                          "font-size": "11px",
+                          opacity: "0.78",
+                          "white-space": "pre-wrap",
+                        }}
+                      >
+                        {nudgeEventText(event)}
+                      </div>
+                    </Show>
+                  </div>
+                )}
+              </For>
+            </Show>
+          </div>
+        </div>
+      );
+    };
+
     // A pinned side-region tab: it is listed without being opened, sits before
     // other tabs and cannot be closed or dragged, so sidebar mode behaves like
-    // the TUI's sidebar slot. Composer mode lists nothing and leaves no tab.
+    // the TUI's sidebar slot. The Nudges tab is always listed so the launcher
+    // can open it from the New tab page in either layout mode.
     ctx.add(Panel, {
       id: GUI_PROGRESS_PANEL_ID,
       region: "side",
@@ -2757,13 +3070,16 @@ export default Plugin.define({
         kind: "menu",
         icon: "checklist",
       },
-      list: () => (layoutMode() === "sidebar" ? [progressTab] : []),
-      render: (input) => (
-        <ProgressSidebar
-          session={() => input.session}
-          sessionID={() => input.session.id}
-        />
-      ),
+      list: () => [...(layoutMode() === "sidebar" ? [progressTab] : []), nudgesTab],
+      render: (input) =>
+        input.tab.id === NUDGE_PANEL_TAB_ID ? (
+          <NudgePanel session={() => input.session} sessionID={() => input.session.id} />
+        ) : (
+          <ProgressSidebar
+            session={() => input.session}
+            sessionID={() => input.session.id}
+          />
+        ),
     });
 
     ctx.add(Command, () => ({
@@ -2843,6 +3159,23 @@ export default Plugin.define({
           tab: "select",
           background: true,
         });
+      },
+    });
+
+    // Sidebar launcher for the Nudges tab. Listed on the New tab page beside
+    // Progress / Review / Browser, and opens the shared panel on that tab.
+    ctx.add(MenuItem, {
+      menu: "session.panel",
+      id: "nudge-telemetry-launcher",
+      title: "Nudges",
+      icon: "notifications",
+      order: 21,
+      description: "Nudge fires, gate decisions, and mute state",
+      opened: false,
+      run: () => {
+        const current = ctx.sessions.current();
+        if (!current) return;
+        ctx.layout.open(`${ctx.id}:${NUDGE_PANEL_TAB_ID}`, current, { tab: "select" });
       },
     });
 

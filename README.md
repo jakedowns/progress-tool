@@ -187,6 +187,12 @@ files, presets, and semantics.
   `treeTheme` plus `barStyle` in the OpenCode config that declares the plugin.
   Expanded child rows use the same `└─` branch prefix as the TUI, placed before
   the status dot.
+- **Nudges panel (desktop):** the sidebar's New tab page lists **Nudges** next
+  to Progress. It opens a live tab with the active engine (legacy/shadow/shared),
+  the standing reminder text, mute state with a 30-minute mute/unmute action for
+  the shared engine, and the newest nudge events for the routed session — fires,
+  gate rejections, clears, touches, and legacy suppressions. The tab polls every
+  5 seconds and stays available in either layout mode.
 - **TUI:** compact tree above the composer, roots collapsed, capped at
   `tuiMaxRoots` (default 3) and scrollable inside `tuiMaxRows` (default 8) so
   long lists never push the prompt away. A `--- scroll to see N more ---` hint

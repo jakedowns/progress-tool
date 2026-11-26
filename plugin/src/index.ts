@@ -5,7 +5,7 @@
  * relay and exposes it to the TUI and GUI parts through RPC.
  */
 
-import { readFileSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readFileSync, readSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -109,7 +109,7 @@ import {
   type IdleTracker,
   type WallClockState,
 } from "./monitor.js";
-import { logNudge, nudgeLoggingEnabled, diffStatuses, type StatusSnapshot } from "./telemetry.js";
+import { logNudge, nudgeLogPath, nudgeLoggingEnabled, diffStatuses, type StatusSnapshot } from "./telemetry.js";
 import { resolveMcpLaunch, taskListEnvironment } from "./mcp.js";
 import { injectParentSession, isSubagentTool } from "./subagent.js";
 import {
@@ -641,6 +641,45 @@ export default Plugin.define({
       JSON.stringify([state.entries ?? {}, state.notes ?? {}]);
     let signature = stateSignature(readProgressState());
 
+    /** Tail the JSONL log without loading 180MB into memory. */
+    const readNudgeTail = (sessionID: string, limit: number) => {
+      const file = nudgeLogPath();
+      let fd: number | undefined;
+      try {
+        fd = openSync(file, "r");
+        const size = fstatSync(fd).size;
+        const bytes = Math.min(size, 512 * 1024);
+        const buffer = Buffer.alloc(bytes);
+        readSync(fd, buffer, 0, bytes, Math.max(0, size - bytes));
+        const events: Array<Record<string, unknown>> = [];
+        const counts: Record<string, number> = {};
+        for (const line of buffer.toString("utf8").split("\n")) {
+          if (!line.trim()) continue;
+          let parsed: Record<string, unknown>;
+          try {
+            parsed = JSON.parse(line) as Record<string, unknown>;
+          } catch {
+            continue;
+          }
+          if (parsed.sessionID !== sessionID) continue;
+          const eventName = String(parsed.event ?? "unknown");
+          counts[eventName] = (counts[eventName] ?? 0) + 1;
+          events.push(parsed);
+        }
+        return { events: events.slice(-limit).reverse(), counts };
+      } catch {
+        return { events: [], counts: {} };
+      } finally {
+        if (fd != null) {
+          try {
+            closeSync(fd);
+          } catch {
+            // Already closed.
+          }
+        }
+      }
+    };
+
     const registration = await ctx.rpc.register(ProgressRpc, {
       list: async (input) => {
         const { sessionID, scope } = (input ?? {}) as {
@@ -783,6 +822,35 @@ export default Plugin.define({
         const mode = toggleTaskListMode();
         console.log(`[opencode-progress] v${pluginVersion} task-list mode=${mode}`);
         return { ok: true, mode };
+      },
+      nudgeTelemetry: async ({ sessionID, limit }) => {
+        const tail = readNudgeTail(sessionID, Math.min(200, Math.max(10, limit ?? 60)));
+        const status = sharedNudge?.adapter.status(sessionID);
+        return {
+          engine: nudgeMode,
+          mutedUntil: status?.mutedUntil ?? 0,
+          standing: status?.standing
+            ? {
+                severity: status.standing.severity,
+                source: status.standing.source,
+                text: status.standing.text,
+                at: status.standing.at,
+              }
+            : { severity: "", source: "", text: "", at: 0 },
+          fires: status?.fires ?? 0,
+          events: tail.events,
+          counts: tail.counts,
+        };
+      },
+      nudgeMute: async ({ sessionID, minutes }) => {
+        if (!sharedNudge) return { ok: false, mutedUntil: 0 };
+        const value = typeof minutes === "number" && Number.isFinite(minutes) ? minutes : 0;
+        if (value > 0) await sharedNudge.adapter.mute(sessionID, value);
+        else await sharedNudge.adapter.unmute(sessionID);
+        return {
+          ok: true,
+          mutedUntil: sharedNudge.adapter.status(sessionID).mutedUntil ?? 0,
+        };
       },
       nudgeList: async ({ sessionID }) => {
         if (!customNudgesOn) {

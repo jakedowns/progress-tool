@@ -225,6 +225,63 @@ export const ProgressRpc = Rpc.define({
         additionalProperties: false,
       },
     },
+    nudgeTelemetry: {
+      input: {
+        type: "object",
+        properties: {
+          sessionID: { type: "string" },
+          limit: { type: "number" },
+        },
+        required: ["sessionID"],
+        additionalProperties: false,
+      },
+      output: {
+        type: "object",
+        properties: {
+          engine: { type: "string", enum: ["legacy", "shadow", "shared"] },
+          mutedUntil: { type: "number" },
+          standing: {
+            type: "object",
+            properties: {
+              severity: { type: "string" },
+              source: { type: "string" },
+              text: { type: "string" },
+              at: { type: "number" },
+            },
+            required: ["severity", "source", "text", "at"],
+            additionalProperties: false,
+          },
+          fires: { type: "number" },
+          events: {
+            type: "array",
+            items: { type: "object", additionalProperties: true },
+          },
+          counts: { type: "object", additionalProperties: true },
+        },
+        required: ["engine", "mutedUntil", "standing", "fires", "events", "counts"],
+        additionalProperties: false,
+      },
+    },
+    nudgeMute: {
+      input: {
+        type: "object",
+        properties: {
+          sessionID: { type: "string" },
+          minutes: { type: "number" },
+        },
+        required: ["sessionID"],
+        additionalProperties: false,
+      },
+      output: {
+        type: "object",
+        properties: {
+          ok: { type: "boolean" },
+          mutedUntil: { type: "number" },
+        },
+        required: ["ok", "mutedUntil"],
+        additionalProperties: false,
+      },
+    },
     nudgeList: {
       input: {
         type: "object",
