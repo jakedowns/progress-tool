@@ -1049,6 +1049,9 @@ function updateThemeInConfig(text, theme, options) {
   if (theme.barStyle !== void 0) {
     settings.push(["barStyle", normalizeBarStyle(theme.barStyle)]);
   }
+  if (theme.indicatorStyle !== void 0) {
+    settings.push(["indicatorStyle", normalizeIndicatorStyle(theme.indicatorStyle)]);
+  }
   if (settings.length === 0) return text;
   let updated = text;
   for (const [key, value] of settings) {
@@ -1072,11 +1075,14 @@ function writeThemeToConfig(values, options = {}) {
   if (values.barStyle !== void 0) {
     theme.barStyle = normalizeBarStyle(values.barStyle);
   }
-  if (theme.treeTheme === void 0 && theme.barStyle === void 0) {
+  if (values.indicatorStyle !== void 0) {
+    theme.indicatorStyle = normalizeIndicatorStyle(values.indicatorStyle);
+  }
+  if (theme.treeTheme === void 0 && theme.barStyle === void 0 && theme.indicatorStyle === void 0) {
     return { ok: false, error: "no theme values supplied" };
   }
   const env = options.env ?? process.env;
-  const candidates = treeThemeConfigCandidates(options.directory, env);
+  const candidates = options.globalOnly ? treeThemeConfigCandidates(void 0, env) : treeThemeConfigCandidates(options.directory, env);
   for (const file of candidates) {
     let text;
     try {
@@ -3081,9 +3087,22 @@ var tui_default = Plugin.define({
           setIndicatorState?.((draft) => {
             draft.value = choice;
           });
+          let saved = writeThemeToConfig({
+            indicatorStyle: choice
+          }, {
+            directory: context.location?.directory,
+            globalOnly: true
+          });
+          if (!saved.ok) {
+            saved = writeThemeToConfig({
+              indicatorStyle: choice
+            }, {
+              directory: context.location?.directory
+            });
+          }
           context.ui.toast.show({
-            message: `Indicator style: ${indicatorStyleLabel(choice)}`,
-            variant: "success"
+            message: saved.ok ? `Indicator style: ${indicatorStyleLabel(choice)} \xB7 saved to ${saved.file}` : `Indicator style: ${indicatorStyleLabel(choice)} \xB7 config not updated`,
+            variant: saved.ok ? "success" : "warning"
           });
         }
       }, {

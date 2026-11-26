@@ -17,20 +17,24 @@ import os from "node:os";
 import path from "node:path";
 import {
   normalizeBarStyle,
+  normalizeIndicatorStyle,
   normalizeTreeTheme,
   type BarStyle,
+  type IndicatorStyle,
   type TreeTheme,
 } from "./tree.js";
 
 export interface ThemeOptions {
   treeTheme?: TreeTheme;
   barStyle?: BarStyle;
+  indicatorStyle?: IndicatorStyle;
 }
 
 export interface ThemeWriteResult {
   ok: boolean;
   treeTheme?: TreeTheme;
   barStyle?: BarStyle;
+  indicatorStyle?: IndicatorStyle;
   /** Config file that received the change, when one was found. */
   file?: string;
   /** Why nothing was written; the theme still applies to this run. */
@@ -51,6 +55,8 @@ export interface TreeThemeWriteOptions {
   directory?: string;
   /** Environment override, mainly for tests. */
   env?: NodeJS.ProcessEnv;
+  /** Only consider the global config, ignoring any project entry. */
+  globalOnly?: boolean;
 }
 
 const PROGRESS_PLUGIN_NAME = "@jakedowns/progress-tool-opencode-plugin";
@@ -435,6 +441,9 @@ export function updateThemeInConfig(
   if (theme.barStyle !== undefined) {
     settings.push(["barStyle", normalizeBarStyle(theme.barStyle)]);
   }
+  if (theme.indicatorStyle !== undefined) {
+    settings.push(["indicatorStyle", normalizeIndicatorStyle(theme.indicatorStyle)]);
+  }
   if (settings.length === 0) return text;
 
   let updated = text;
@@ -479,12 +488,21 @@ export function writeThemeToConfig(
   if (values.barStyle !== undefined) {
     theme.barStyle = normalizeBarStyle(values.barStyle);
   }
-  if (theme.treeTheme === undefined && theme.barStyle === undefined) {
+  if (values.indicatorStyle !== undefined) {
+    theme.indicatorStyle = normalizeIndicatorStyle(values.indicatorStyle);
+  }
+  if (
+    theme.treeTheme === undefined &&
+    theme.barStyle === undefined &&
+    theme.indicatorStyle === undefined
+  ) {
     return { ok: false, error: "no theme values supplied" };
   }
 
   const env = options.env ?? process.env;
-  const candidates = treeThemeConfigCandidates(options.directory, env);
+  const candidates = options.globalOnly
+    ? treeThemeConfigCandidates(undefined, env)
+    : treeThemeConfigCandidates(options.directory, env);
 
   for (const file of candidates) {
     let text: string;

@@ -1113,9 +1113,21 @@ export default Plugin.define({
             setIndicatorState?.((draft) => {
               draft.value = choice;
             });
+            let saved = writeThemeToConfig(
+              { indicatorStyle: choice },
+              { directory: context.location?.directory, globalOnly: true }
+            );
+            if (!saved.ok) {
+              saved = writeThemeToConfig(
+                { indicatorStyle: choice },
+                { directory: context.location?.directory }
+              );
+            }
             context.ui.toast.show({
-              message: `Indicator style: ${indicatorStyleLabel(choice)}`,
-              variant: "success",
+              message: saved.ok
+                ? `Indicator style: ${indicatorStyleLabel(choice)} · saved to ${saved.file}`
+                : `Indicator style: ${indicatorStyleLabel(choice)} · config not updated`,
+              variant: saved.ok ? "success" : "warning",
             });
           },
         },

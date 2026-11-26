@@ -353,6 +353,27 @@ export const ProgressRpc = Rpc.define({
         additionalProperties: false,
       },
     },
+    setIndicatorStyle: {
+      input: {
+        type: "object",
+        properties: {
+          indicatorStyle: { type: "string", enum: ["dot", "circles", "checkbox"] },
+        },
+        required: ["indicatorStyle"],
+        additionalProperties: false,
+      },
+      output: {
+        type: "object",
+        properties: {
+          ok: { type: "boolean" },
+          indicatorStyle: { type: "string", enum: ["dot", "circles", "checkbox"] },
+          file: { type: "string" },
+          error: { type: "string" },
+        },
+        required: ["ok", "indicatorStyle"],
+        additionalProperties: false,
+      },
+    },
     setTreeTheme: {
       input: {
         type: "object",

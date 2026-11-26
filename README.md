@@ -251,7 +251,7 @@ files, presets, and semantics.
 | `guiSidebarWidth` | Desktop sidebar initial width in CSS pixels (default 360, clamp 240-800) |
 | `guiDetailLines` | Detail line cap in pill menu and sidebar: `-1` full, `0` hidden, `n` lines (default 1) |
 | `treeTheme` | Tree row theme: `"ultra-compact"` (default; title + status-light emoji + age + dismiss), `"compact"` (no bars/started line, one detail line), or `"default"` (bars). The **Progress: switch tree theme** preset picker writes this and `barStyle` back to the config |
-| `indicatorStyle` | Status indicator: `"dot"` (default), `"circles"`, or `"checkbox"`; also **Progress: indicator style** |
+| `indicatorStyle` | Status indicator: `"dot"` (default), `"circles"`, or `"checkbox"`. The **Progress: indicator style** command saves it globally (project config fallback) |
 | `customNudges` | Enable custom nudge rules, the `progress_nudge` tool, and their TUI/palette commands (default `false`) |
 | `taskListFile` | Mirror tasks to a local Markdown checklist (default off) |
 | `taskListLocation` | `1` = project root (default), `0` = `.progress/`, `2` = `~/.opencode-progress/` |

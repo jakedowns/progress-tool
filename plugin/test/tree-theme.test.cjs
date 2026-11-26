@@ -154,6 +154,40 @@ test('a theme preset writes both treeTheme and barStyle without touching comment
   assert.match(updated, /"say": true/);
 });
 
+test('indicatorStyle writes to the global config and ignores a project entry', () => {
+  const project = tempDir();
+  const home = tempDir('progress-tree-theme-home-');
+  const env = envFor(home);
+  const globalFile = path.join(globalConfigDir(env), 'opencode.json');
+  fs.mkdirSync(path.dirname(globalFile), { recursive: true });
+  fs.writeFileSync(
+    path.join(project, 'opencode.json'),
+    JSON.stringify({ plugins: [{ package: PACKAGE, options: { treeTheme: 'default' } }] }, null, 2)
+  );
+  fs.writeFileSync(
+    globalFile,
+    JSON.stringify({ plugins: [{ package: PACKAGE, options: { say: true } }] }, null, 2)
+  );
+
+  const result = writeThemeToConfig(
+    { indicatorStyle: 'checkbox' },
+    { directory: project, env, globalOnly: true }
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.indicatorStyle, 'checkbox');
+  assert.equal(result.file, globalFile);
+
+  const globalOptions = JSON.parse(fs.readFileSync(globalFile, 'utf8')).plugins[0].options;
+  assert.equal(globalOptions.indicatorStyle, 'checkbox');
+  assert.equal(globalOptions.say, true);
+
+  const projectOptions = JSON.parse(
+    fs.readFileSync(path.join(project, 'opencode.json'), 'utf8')
+  ).plugins[0].options;
+  assert.equal(projectOptions.indicatorStyle, undefined, 'project entry untouched');
+  assert.equal(projectOptions.treeTheme, 'default');
+});
+
 test('treeTheme is inserted into an existing options object', () => {
   const text = JSON.stringify(
     { plugins: [{ package: PACKAGE, options: { say: true } }] },

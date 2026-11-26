@@ -410,7 +410,7 @@ Both the TUI and GUI parts read these options.
 }
 ```
 
-- `indicatorStyle`: status indicator for every tree theme — `"dot"` (default; solid CSS dots), `"circles"` (🟢 🔴 🟡 ⚪ 🔵), or `"checkbox"` (✅ ❌ ⏳ ⬜ 🔄). The **Progress: indicator style** command picks one at runtime; the config value seeds the next run.
+- `indicatorStyle`: status indicator for every tree theme — `"dot"` (default; solid CSS dots), `"circles"` (🟢 🔴 🟡 ⚪ 🔵), or `"checkbox"` (✅ ❌ ⏳ ⬜ 🔄). The **Progress: indicator style** command saves the choice to the **global** OpenCode config (falling back to the project entry only when the plugin is not declared globally), so it follows the user across projects. The config value seeds each run.
 - `barStyle`: `"blocks"` (default, ASCII) or `"emoji"`. The **Progress: switch tree theme** preset picker shows rendered previews for both and writes this option together with `treeTheme`.
 - `barSegments`: cells per bar (default 10 for blocks, 6 for emoji).
 - `barTotal`: denominator for the `(done/total)` label (default 100).

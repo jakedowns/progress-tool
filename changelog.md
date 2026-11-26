@@ -248,7 +248,8 @@ Shipped since `mcp-server@2.10.2`:
   a 5px margin. Hovering a row reveals its one-line description.
 - **Indicator style command.** **Progress: indicator style** (GUI and TUI)
   swaps every tree theme between flat CSS dots, emoji circles, and checkbox
-  emoji. `indicatorStyle: "dot" | "circles" | "checkbox"` seeds it from config.
+  emoji. The choice is saved to the global plugin config (project fallback), so
+  it persists across sessions/projects; `indicatorStyle` seeds it from config.
 - **`-dev` version suffix.** GUI builds from an untagged commit show
   `2.26.0-dev` in the footer, Settings, and feedback title. Release builds
   detect the `plugin@<version>` tag automatically; `PROGRESS_DEV=1|0` overrides

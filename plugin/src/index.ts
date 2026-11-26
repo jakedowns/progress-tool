@@ -785,6 +785,29 @@ export default Plugin.define({
           ? { ok: false, error: result.errors.join("; ") }
           : { ok: true };
       },
+      setIndicatorStyle: async ({ indicatorStyle }) => {
+        const directory = ctx.location?.directory;
+        // A user preference should follow them across projects: write the
+        // global config first, then fall back to the project entry only when
+        // the plugin is not declared globally.
+        let result = writeThemeToConfig(
+          { indicatorStyle },
+          { directory, globalOnly: true }
+        );
+        if (!result.ok) {
+          result = writeThemeToConfig({ indicatorStyle }, { directory });
+        }
+        console.log(
+          `[opencode-progress] v${pluginVersion} indicator style=${result.indicatorStyle ?? indicatorStyle} ` +
+            (result.ok ? `saved to ${result.file}` : `config not updated: ${result.error}`)
+        );
+        return {
+          ok: result.ok,
+          indicatorStyle: result.indicatorStyle ?? indicatorStyle,
+          file: result.file,
+          error: result.error,
+        };
+      },
       setTreeTheme: async ({ theme, barStyle }) => {
         const result = writeThemeToConfig(
           { treeTheme: theme, barStyle },

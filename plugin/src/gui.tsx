@@ -601,10 +601,27 @@ export default Plugin.define({
       updateIndicator((draft) => {
         draft.value = choice;
       });
-      ctx.toast.show({
-        title: `Indicator style: ${indicatorStyleLabel(choice)}`,
-        variant: "success",
-      });
+      try {
+        const result = await withTimeout(
+          ctx.client.rpc(ProgressRpc).setIndicatorStyle({ indicatorStyle: choice }),
+          4000
+        );
+        ctx.toast.show({
+          title: `Indicator style: ${indicatorStyleLabel(choice)}`,
+          description: result.ok
+            ? `Saved to ${result.file}`
+            : `Applied for this run; config not updated: ${result.error ?? "unknown error"}`,
+          variant: result.ok ? "success" : "default",
+          duration: result.ok ? 2500 : 5000,
+        });
+      } catch (error) {
+        ctx.toast.show({
+          title: `Indicator style: ${indicatorStyleLabel(choice)}`,
+          description: `Applied for this run; config not updated: ${String(error)}`,
+          variant: "default",
+          duration: 5000,
+        });
+      }
     };
     const currentPreset = (): ThemePreset =>
       themePresetFrom(themeStore.treeTheme, themeStore.barStyle);
@@ -770,6 +787,14 @@ export default Plugin.define({
         scope: "global" | "project" | "session";
         id: string;
       }): Promise<{ ok: boolean; error?: string }>;
+      setIndicatorStyle(input: {
+        indicatorStyle: "dot" | "circles" | "checkbox";
+      }): Promise<{
+        ok: boolean;
+        indicatorStyle: "dot" | "circles" | "checkbox";
+        file?: string;
+        error?: string;
+      }>;
     };
     const rpcFor = (session: MountedSession) =>
       session.server.client.rpc(ProgressRpc) as unknown as ProgressClient;
