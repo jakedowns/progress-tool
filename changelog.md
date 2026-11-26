@@ -230,8 +230,9 @@ Shipped since `mcp-server@2.10.2`:
   the dismiss button. Detail text, percentage, and the `& N more` suffix are
   hidden.
 - **Timestamp prefix.** Ultra rows prepend a small monospace
-  `09:12→09:41 · 29m` prefix: started clock time, last-updated clock time, and
-  elapsed duration. The row tooltip carries the full local date/time.
+  `5m ago · 29m` prefix: last-updated age and elapsed duration. Hovering the
+  prefix swaps in the absolute `09:12→09:41` started/updated times; the row
+  tooltip carries the full local date/time.
 - **Preset picker.** The **Progress: switch tree theme** command now offers
   **Ultra** alongside ASCII/Emoji/Compact and persists
   `treeTheme: "ultra-compact"`. The TUI renders the theme as a title-only line

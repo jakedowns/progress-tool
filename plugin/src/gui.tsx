@@ -148,6 +148,20 @@ function formatElapsedShort(ms: number | undefined): string {
   return `${Math.floor(hours / 24)}d ${hours % 24}h`;
 }
 
+/** Very short age: "just now", "42s ago", "5m ago", "2h ago", "3d ago". */
+function formatAgoShort(ms: number | undefined): string {
+  if (!ms) return "";
+  const delta = Math.max(0, Date.now() - ms);
+  if (delta < 10_000) return "just now";
+  const seconds = Math.floor(delta / 1000);
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
 /** Emoji status light used by ultra-compact rows. */
 function statusLight(status: string | undefined): string {
   if (status === "done") return "🟢";
@@ -200,6 +214,7 @@ function MenuRow(props: {
   const effectiveDetailLines = () =>
     ultra() ? 0 : compact() ? (props.detailLines === 0 ? 0 : 1) : props.detailLines;
   const ultra = () => props.theme === "ultra-compact";
+  const [hoverTime, setHoverTime] = createSignal(false);
   const compactMeta = () =>
     compactTreeSuffix(
       props.node.progress,
@@ -220,7 +235,14 @@ function MenuRow(props: {
   const timePrefix = () => {
     const start = startedAt();
     if (!start) return "";
-    return `${formatClock(start)}→${formatClock(updatedAt())} · ${formatElapsedShort(elapsedMs())}`;
+    const elapsed = formatElapsedShort(elapsedMs());
+    // Default: last update age, then total elapsed. Hover swaps the age for
+    // the absolute started→updated clock times.
+    if (!hoverTime()) {
+      const ago = formatAgoShort(updatedAt());
+      return ago ? `${ago} · ${elapsed}` : elapsed;
+    }
+    return `${formatClock(start)}→${formatClock(updatedAt())} · ${elapsed}`;
   };
   const timeTitle = () =>
     `Started ${formatDateTime(startedAt()) || "unknown"} · Updated ${
@@ -327,6 +349,9 @@ function MenuRow(props: {
         >
           <Show when={ultra() && timePrefix()}>
             <span
+              onMouseEnter={() => setHoverTime(true)}
+              onMouseLeave={() => setHoverTime(false)}
+              title={timeTitle()}
               style={{
                 "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
                 "font-size": "9px",
@@ -334,6 +359,7 @@ function MenuRow(props: {
                 opacity: "0.5",
                 "margin-right": "6px",
                 "white-space": "nowrap",
+                cursor: "default",
               }}
             >
               {timePrefix()}

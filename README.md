@@ -176,8 +176,9 @@ files, presets, and semantics.
   `treeTheme: "compact"` renders tree rows (pill popover and sidebar) without
   progress-bar glyphs or the started line, with a single clamped detail line
   and a `40% · & N more` meta suffix. `treeTheme: "ultra-compact"` goes further:
-  one title line only, with a status-light emoji, a small
-  `[09:12→09:41 · 29m]` started/updated/elapsed prefix, and the dismiss button.
+  one title line only, with a status-light emoji, a small `5m ago · 29m`
+  last-updated/elapsed prefix (hover it to see `09:12→09:41`), and the dismiss
+  button.
   There is **no progress bar, percentage, `started` row, detail, or `& N more`**;
   rows use 3px total spacing. The composer pill capsule
   itself keeps its `barStyle` rendering. Use the **Progress: switch tree theme**
