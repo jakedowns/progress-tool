@@ -437,6 +437,21 @@ export default Plugin.define({
     };
 
     const clearReminder = (sessionID: string, source?: string): void => {
+      if (sharedNudge && nudgeMode === "shared") {
+        const producer =
+          source === "strict"
+            ? "progress.tree"
+            : source === "wall"
+              ? "progress.wall"
+              : source === "idle"
+                ? "progress.idle"
+                : source === "relay"
+                  ? "progress.relay"
+                  : source === "say"
+                    ? "say"
+                    : source;
+        void Promise.resolve(sharedNudge.adapter.clear(sessionID, producer)).catch(() => {});
+      }
       const current = standingReminders.get(sessionID);
       if (!current) return;
       if (source && current.source !== source) return;
@@ -1095,6 +1110,9 @@ export default Plugin.define({
             stepsSinceProgress.set(event.sessionID, 0);
             lastProgressWriteAt.set(event.sessionID, now);
             nudgeFireCount.delete(event.sessionID);
+            if (sharedNudge && nudgeMode === "shared") {
+              void Promise.resolve(sharedNudge.adapter.touch(event.sessionID)).catch(() => {});
+            }
             clearReminder(event.sessionID);
           }
           const target = pickTarget(entries, now);
