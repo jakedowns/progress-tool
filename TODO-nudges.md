@@ -1,9 +1,24 @@
 # Nudge migration TODO
 
-**Status:** plan / not started  
+**Status:** Phase 0 scaffolded; policy extraction not started  
 **Target:** extract nudges into shared packages so progress, say, voice, and future tools use one policy engine.  
 **Full design:** `/home/ubuntu/.opencode/plan/shared-nudges.md` (shared design notes)  
 **Current plugin:** `2.27.0` on `feat/nudge-redesign`
+
+> **PUBLISHING HOLD (2026-11-26):** do not `git push`, tag, or `npm publish`
+> anything for this migration. The maintainer will confirm when to publish.
+> Local files only until then.
+
+## Phase 0 status (2026-11-26)
+
+- [x] `NudgeCandidate`, gate result, rule/config/state types.
+- [x] Adapter surface (`NudgeHost`, `NudgeAdapter`) with no OpenCode imports.
+- [x] Baseline fixture for current progress/say thresholds and messages.
+- [x] Contract doc (`opencode-helpers/docs/contract.md`).
+- [x] Workspace scaffold at `/media/share/opencode-helpers` (packages/core/adapter).
+- [ ] Monorepo `git init` / first commit (held).
+- [ ] Install dev deps + typecheck/build (held with publishing).
+- [ ] Phase 1 extraction.
 
 ---
 
@@ -20,28 +35,35 @@
 
 ## 1. Monorepo bootstrap
 
-- [ ] `git init /media/share/opencode-helpers`
-- [ ] npm workspaces root (`package.json`, `tsconfig.base.json`)
-- [ ] `packages/nudge-core` — `@jakedowns/opencode-nudge-core@0.1.0`
-- [ ] `packages/nudge-opencode` — `@jakedowns/opencode-nudge@0.1.0`
+- [ ] `git init /media/share/opencode-helpers` (held)
+- [x] npm workspaces root (`package.json`, `tsconfig.base.json`)
+- [x] `packages/nudge-core` — `@jakedowns/opencode-nudge-core@0.1.0`
+- [x] `packages/nudge-opencode` — `@jakedowns/opencode-nudge@0.1.0`
 - [ ] ESM + TypeScript strict, `node:test`, `npm test` at root
 - [ ] Publish workflow keyed by `nudge-core@x.y.z` / `nudge-opencode@x.y.z`
 - [ ] README with install + producer contract
 
 ## 2. Core extraction
 
-- [ ] Define `NudgeCandidate`, `NudgeGateResult`, rule schema, config normalizer.
-- [ ] Move/port from `plugin/src/reminders.ts`:
+- [x] Define `NudgeCandidate`, `NudgeGateResult`, rule schema, config normalizer.
+- [x] Move/port from `plugin/src/reminders.ts`:
       severity, hash/dedupe, age formatting, gap/grace helpers.
-- [ ] Move/port policy from `plugin/src/monitor.ts`:
+- [x] Move/port policy from `plugin/src/monitor.ts`:
       strict/wall/idle criteria, thresholds, escalation.
-- [ ] Move/port from `plugin/src/say-monitor.ts`:
-      trigger/cooldown/cap decisions (message text stays in the producer).
-- [ ] Move/port from `plugin/src/custom-nudges.ts`:
+- [x] Move/port from `plugin/src/say-monitor.ts`:
+      trigger/cooldown/cap decisions.
+- [x] Move/port from `plugin/src/custom-nudges.ts`:
       rule store, merge/tombstones, matcher, scheduler, placeholders.
-- [ ] Keep filesystem stores behind injected path/store adapters; policy stays pure.
-- [ ] Move tests with golden message texts and fake clocks.
-- [ ] Golden-test current progress/say behavior before changing call sites.
+- [x] Split filesystem stores out of `custom-nudges.ts` into `custom-nudge-store.ts`.
+- [ ] Inject the store into the adapter so policy never imports `node:fs`.
+- [x] Move tests with golden message texts and fake clocks.
+- [x] Golden-test current progress/say behavior before changing call sites.
+      (74 passed against extracted core)
+
+> **Phase 1 note:** product message builders are temporarily colocated in core
+> for parity. Move them back to producer modules when the adapter is wired.
+> `custom-nudges.ts` is pure; `custom-nudge-store.ts` owns `node:fs` and will be
+> injected into the adapter in Phase 2.
 
 ## 3. Host adapter
 
