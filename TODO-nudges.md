@@ -71,11 +71,11 @@
 - [x] Shared runtime file: `~/.config/opencode/nudge-state.json`
       (atomic temp+rename + sibling lock).
 - [x] One standing key **`nudge`**; migrate/remove `progress-reminder` once per session.
-- [ ] One timer for scheduled rules; prompt reset; idle flush.
+- [x] One timer for scheduled rules; prompt reset; idle/tool callbacks.
 - [x] Delivery: context entry; synthetic only for `block`.
 - [x] One generic `nudge` tool definition: `status|mute|unmute|clear`.
-- [ ] Register it from the host adapter (first loader wins).
-- [ ] Registration race: if `nudge` is taken, later adapter copies skip the tool but still share state.
+- [x] Register it from the host adapter (first loader wins).
+- [x] Registration race: if `nudge` is taken, later adapter copies skip the tool but still share state.
 - [x] Basic telemetry: fired/deduped/muted/gap/grace/cap with producer + rule id.
 - [x] Single-process conformance test: one gate, one key, priority/gap/grace/cap.
 - [ ] Cross-process concurrency stress test.
