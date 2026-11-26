@@ -2786,11 +2786,18 @@ export default Plugin.define({
             ? event.source
             : "";
       if (producer) parts.push(producer);
+      if (typeof event.id === "string" && event.id) {
+        const raw = event.id.includes(":")
+          ? event.id.slice(event.id.lastIndexOf(":") + 1)
+          : event.id;
+        parts.push(raw.length > 28 ? `${raw.slice(0, 27)}…` : raw);
+      }
       if (typeof event.to === "string" && event.to) {
         const from = typeof event.from === "string" && event.from ? event.from : "new";
         parts.push(`${from} → ${event.to}`);
       }
       if (typeof event.action === "string" && event.action) parts.push(event.action);
+      if (typeof event.count === "number") parts.push(`#${event.count}`);
       if (typeof event.severity === "string" && event.severity) parts.push(event.severity);
       if (typeof event.delivery === "string" && event.delivery) parts.push(event.delivery);
       if (typeof event.reason === "string" && event.reason) parts.push(event.reason);
@@ -3040,7 +3047,11 @@ export default Plugin.define({
                         {String(event.event ?? "event")}
                       </span>
                       <span
-                        title={nudgeEventSummary(event)}
+                        title={
+                          typeof event.id === "string" && event.id
+                            ? `${event.id}\n${nudgeEventSummary(event)}`
+                            : nudgeEventSummary(event)
+                        }
                         style={{
                           flex: "1 1 auto",
                           opacity: "0.6",
