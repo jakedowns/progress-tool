@@ -27,10 +27,7 @@ import {
   writeDismissal,
 } from "./state.js";
 import { readTaskListStatus, toggleTaskListMode } from "./tasklist-prefs.js";
-import {
-  attachNudge,
-  type AttachedNudge,
-} from "@jakedowns/opencode-nudge";
+import type { AttachedNudge } from "@jakedowns/opencode-nudge";
 import {
   upsertNativeProgress,
   type NativeProgressInput,
@@ -1890,6 +1887,7 @@ export default Plugin.define({
 
     if (nudgeMode !== "legacy") {
       try {
+        const { attachNudge } = await import("@jakedowns/opencode-nudge");
         sharedNudge = await attachNudge(ctx as never, {
           shadow: nudgeMode === "shadow",
           registerTool: nudgeMode === "shared",
