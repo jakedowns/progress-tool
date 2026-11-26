@@ -373,18 +373,18 @@ export interface IndicatorStyleChoice {
 export const INDICATOR_STYLE_CHOICES: readonly IndicatorStyleChoice[] = [
   {
     value: "dot",
-    title: "Flat dots",
+    title: "● ● ●  Flat dots",
     description: "Solid CSS status dots (default)",
   },
   {
     value: "circles",
-    title: "Emoji circles",
-    description: "🟢 🔴 🟡 ⚪ 🔵 status lights",
+    title: "🟢 🟡 🔴  Emoji circles",
+    description: "Colored emoji status lights",
   },
   {
     value: "checkbox",
-    title: "Checkbox emoji",
-    description: "✅ ❌ ⏳ ⬜ 🔄 checklist marks",
+    title: "✅ ⏳ ❌  Checkbox emoji",
+    description: "Checklist marks for each status",
   },
 ];
 

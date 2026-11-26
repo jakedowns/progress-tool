@@ -262,7 +262,7 @@ function MenuRow(props: {
       }}
       style={{
         display: "flex",
-        "align-items": ultra() ? "center" : "flex-start",
+        "align-items": "flex-start",
         gap: ultra() ? "6px" : "8px",
         "padding-left": `${props.depth * 14}px`,
         "padding-top": ultra() ? "1px" : compact() ? "2px" : "5px",
@@ -274,25 +274,23 @@ function MenuRow(props: {
         "transition-delay": `${props.leaveDelayMs ?? 0}ms`,
       }}
     >
-      <Show when={props.hasChildren}>
-        <span
-          aria-hidden="true"
-          style={{
-            flex: "0 0 auto",
-            opacity: "0.6",
-            "font-size": "11px",
-            width: "14px",
-            "margin-top": ultra() ? "0" : "4px",
-            "user-select": "none",
-            "line-height": "1",
-            display: "inline-block",
-            transform: props.collapsed ? "rotate(0deg)" : "rotate(90deg)",
-            transition: "transform 0.35s ease-in-out",
-          }}
-        >
-          {props.collapsed ? "▸" : "▾"}
-        </span>
-      </Show>
+      <span
+        aria-hidden="true"
+        style={{
+          flex: "0 0 auto",
+          opacity: props.hasChildren ? "0.6" : "0",
+          "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+          "font-size": "9px",
+          width: "18px",
+          "margin-top": ultra() ? "2px" : "4px",
+          "user-select": "none",
+          "line-height": "1",
+          display: "inline-block",
+          "text-align": "center",
+        }}
+      >
+        {props.hasChildren ? (props.collapsed ? "[+]" : "[-]") : ""}
+      </span>
       <Show when={props.depth > 0}>
         <span
           aria-hidden="true"
@@ -351,7 +349,13 @@ function MenuRow(props: {
           }}
           title={
             ultra()
-              ? `${props.node.status}: ${timeTitle()} — ${oneLineText(titleText())}`
+              ? [
+                  `${props.node.status}: ${oneLineText(titleText())}`,
+                  props.node.detail ? normalizeProgressText(props.node.detail) : "",
+                  timeTitle(),
+                ]
+                  .filter(Boolean)
+                  .join("\n\n")
               : `${props.node.status}: ${oneLineText(titleText())}`
           }
         >
@@ -378,9 +382,9 @@ function MenuRow(props: {
         <Show when={props.node.detail && effectiveDetailLines() !== 0}>
           <div
             style={{
-              "margin-top": "2px",
-              "font-size": "12px",
-              opacity: "0.72",
+              "margin-top": ultra() ? "1px" : "2px",
+              "font-size": ultra() ? "10px" : "12px",
+              opacity: ultra() ? "0.58" : "0.72",
               "white-space": "normal",
               "overflow-wrap": "anywhere",
               "word-break": "break-word",
@@ -1177,43 +1181,54 @@ export default Plugin.define({
      * effective runtime options; edits belong in the OpenCode config that
      * declares the plugin and apply on reload.
      */
-    const SettingsPanel = (props: { onBack: () => void }) => {
-      const sections = () => [
-        {
-          title: "View",
-          rows: [
-            ["Placement", layoutMode()],
-            ["Tree theme", treeTheme()],
-            ["Indicator", indicatorStyleLabel(indicatorStyle())],
-            ["Bar style", themeStore.barStyle],
-            ["Detail lines", String(detailLines)],
-            ["Refresh", `${refreshMs}ms`],
-            ["Done entries", visibility.showDone ? (visibility.autoHideDone ? "auto-hide" : "shown") : "hidden"],
-            ["Expand roots", expandRootsByDefault ? "yes" : "no"],
-          ] as Array<[string, string]>,
-        },
-        {
-          title: "Reminders",
-          rows: [
-            ["Strict mode", String(ctx.options?.strictMode ?? "nudge")],
-            ["Wall clock", `${Math.round((typeof ctx.options?.wallClockMs === "number" ? ctx.options.wallClockMs : 120_000) / 1000)}s`],
-            ["Idle reminder", ctx.options?.idleReminder === false ? "off" : "on"],
-            ["Relay hints", ctx.options?.relayHints === false ? "off" : "on"],
-            ["Custom nudges", ctx.options?.customNudges === true ? "on" : "off (opt-in)"],
-            ["Say notes", ctx.options?.say === true ? "on" : "off"],
-            ["Say surfaces", sayModes.length > 0 ? sayModes.join(", ") : "none"],
-          ] as Array<[string, string]>,
-        },
-        {
-          title: "Data",
-          rows: [
-            ["Scope", visibility.scope],
-            ["Task-list mirror", taskListStatus()?.enabled ? taskListStatus()?.mode ?? "on" : "off"],
-            ["Workspace", ctx.location?.directory ?? "unknown"],
-          ] as Array<[string, string]>,
-        },
-      ];
+    const SettingsGroup = (props: { title: string; children?: unknown }) => (
+      <div style={{ display: "flex", "flex-direction": "column", gap: "2px" }}>
+        <div
+          style={{
+            "font-size": "10px",
+            "text-transform": "uppercase",
+            "letter-spacing": "0.04em",
+            opacity: "0.45",
+          }}
+        >
+          {props.title}
+        </div>
+        {props.children as never}
+      </div>
+    );
 
+    const SettingsRow = (props: { label: string; value: string }) => (
+      <div
+        style={{
+          display: "flex",
+          "align-items": "baseline",
+          gap: "8px",
+          "font-size": "11px",
+          "line-height": "1.35",
+        }}
+      >
+        <span style={{ flex: "0 0 96px", opacity: "0.55" }}>{props.label}</span>
+        <span
+          style={{
+            flex: "1 1 auto",
+            "min-width": "0",
+            overflow: "hidden",
+            "text-overflow": "ellipsis",
+            "white-space": "nowrap",
+          }}
+          title={props.value}
+        >
+          {props.value}
+        </span>
+      </div>
+    );
+
+    /**
+     * Read-only settings tab for the pill popover and sidebar. Values are the
+     * effective runtime options; edits belong in the OpenCode config that
+     * declares the plugin and apply on reload.
+     */
+    const SettingsPanel = (props: { onBack: () => void }) => {
       const linkStyle = {
         border: "none",
         background: "transparent",
@@ -1254,46 +1269,74 @@ export default Plugin.define({
               type="button"
               class="progress-pill-button"
               onClick={props.onBack}
-              style={{ ...footerButtonStyle, flex: "0 0 auto", padding: "0", opacity: "1", "font-size": "10px", "text-decoration": "underline" }}
+              style={{
+                ...footerButtonStyle,
+                flex: "0 0 auto",
+                padding: "0",
+                opacity: "1",
+                "font-size": "10px",
+                "text-decoration": "underline",
+              }}
             >
               [Tree]
             </button>
           </div>
-          <div
-            style={{
-              display: "flex",
-              "flex-direction": "column",
-              gap: "8px",
-              "padding-right": "4px",
-            }}
-          >
-            <For each={sections()}>
-              {(section) => (
-                <div style={{ display: "flex", "flex-direction": "column", gap: "2px" }}>
-                  <div style={{ "font-size": "10px", "text-transform": "uppercase", "letter-spacing": "0.04em", opacity: "0.45" }}>
-                    {section.title}
-                  </div>
-                  <For each={section.rows}>
-                    {([label, value]) => (
-                      <div
-                        style={{
-                          display: "flex",
-                          "align-items": "baseline",
-                          gap: "8px",
-                          "font-size": "11px",
-                          "line-height": "1.35",
-                        }}
-                      >
-                        <span style={{ flex: "0 0 96px", opacity: "0.55" }}>{label}</span>
-                        <span style={{ flex: "1 1 auto", "min-width": "0", overflow: "hidden", "text-overflow": "ellipsis", "white-space": "nowrap" }} title={value}>
-                          {value}
-                        </span>
-                      </div>
-                    )}
-                  </For>
-                </div>
-              )}
-            </For>
+          <div style={{ display: "flex", "flex-direction": "column", gap: "8px", "padding-right": "4px" }}>
+            <SettingsGroup title="View">
+              <SettingsRow label="Placement" value={layoutMode()} />
+              <SettingsRow label="Tree theme" value={treeTheme()} />
+              <SettingsRow label="Indicator" value={indicatorStyleLabel(indicatorStyle())} />
+              <SettingsRow label="Bar style" value={themeStore.barStyle} />
+              <SettingsRow label="Detail lines" value={String(detailLines)} />
+              <SettingsRow label="Refresh" value={`${refreshMs}ms`} />
+              <SettingsRow
+                label="Done entries"
+                value={
+                  visibility.showDone
+                    ? visibility.autoHideDone
+                      ? "auto-hide"
+                      : "shown"
+                    : "hidden"
+                }
+              />
+              <SettingsRow label="Expand roots" value={expandRootsByDefault ? "yes" : "no"} />
+            </SettingsGroup>
+            <SettingsGroup title="Reminders">
+              <SettingsRow label="Strict mode" value={String(ctx.options?.strictMode ?? "nudge")} />
+              <SettingsRow
+                label="Wall clock"
+                value={`${Math.round(
+                  (typeof ctx.options?.wallClockMs === "number"
+                    ? ctx.options.wallClockMs
+                    : 600_000) / 1000
+                )}s`}
+              />
+              <SettingsRow
+                label="Idle reminder"
+                value={ctx.options?.idleReminder === false ? "off" : "on"}
+              />
+              <SettingsRow
+                label="Relay hints"
+                value={ctx.options?.relayHints === false ? "off" : "on"}
+              />
+              <SettingsRow
+                label="Custom nudges"
+                value={ctx.options?.customNudges === true ? "on" : "off (opt-in)"}
+              />
+              <SettingsRow label="Say notes" value={ctx.options?.say === true ? "on" : "off"} />
+              <SettingsRow
+                label="Say surfaces"
+                value={sayModes.length > 0 ? sayModes.join(", ") : "none"}
+              />
+            </SettingsGroup>
+            <SettingsGroup title="Data">
+              <SettingsRow label="Scope" value={visibility.scope} />
+              <SettingsRow
+                label="Task-list mirror"
+                value={taskListStatus()?.enabled ? taskListStatus()?.mode ?? "on" : "off"}
+              />
+              <SettingsRow label="Workspace" value={ctx.location?.directory ?? "unknown"} />
+            </SettingsGroup>
           </div>
           <div
             style={{
@@ -1307,10 +1350,20 @@ export default Plugin.define({
               "flex": "0 0 auto",
             }}
           >
-            <button type="button" class="progress-pill-button" style={linkStyle} onClick={() => ctx.system.openExternal(releasesUrl())}>
+            <button
+              type="button"
+              class="progress-pill-button"
+              style={linkStyle}
+              onClick={() => ctx.system.openExternal(releasesUrl())}
+            >
               v{displayVersion} release notes ↗
             </button>
-            <button type="button" class="progress-pill-button" style={linkStyle} onClick={() => ctx.system.openExternal("https://github.com/jakedowns/progress-tool#readme")}>
+            <button
+              type="button"
+              class="progress-pill-button"
+              style={linkStyle}
+              onClick={() => ctx.system.openExternal("https://github.com/jakedowns/progress-tool#readme")}
+            >
               Docs ↗
             </button>
           </div>
@@ -1494,6 +1547,7 @@ export default Plugin.define({
               "max-height": "min(60vh, 520px)",
               "overflow-y": "auto",
               "overflow-x": "hidden",
+              "scrollbar-gutter": treeTheme() === "ultra-compact" ? "stable" : "auto",
               "padding-right": "4px",
             }}
           >
@@ -1853,6 +1907,7 @@ export default Plugin.define({
                 "min-height": "0",
                 "overflow-y": "auto",
                 "overflow-x": "hidden",
+                "scrollbar-gutter": treeTheme() === "ultra-compact" ? "stable" : "auto",
                 "padding-right": "2px",
               }}
             >

@@ -251,7 +251,7 @@ function ProgressRow(props: { row: TuiRow; sessionID: string }) {
   const title = () =>
     `${props.row.depth === 0 ? subagentPrefix(props.row.node) : ""}${props.row.node.title}`;
 
-  const marker = () => (props.row.collapsed ? "▸ " : "▾ ");
+  const marker = () => (props.row.collapsed ? "[+] " : "[-] ");
 
   const suffix = () =>
     props.row.hiddenChildren > 0 ? `  +${props.row.hiddenChildren}` : "";
@@ -288,7 +288,10 @@ function ProgressRow(props: { row: TuiRow; sessionID: string }) {
   return (
     <box flexDirection="column" paddingLeft={props.row.depth === 0 ? 0 : 2}>
       <box flexDirection="row" alignItems="flex-start">
-        <Show when={hasMarker()}>
+        <Show
+          when={hasMarker()}
+          fallback={isRoot() ? <text selectable={false}>{"    "}</text> : null}
+        >
           <text selectable={false} fg={ctx.theme.text.muted} onMouseUp={onToggle}>
             {marker()}
           </text>
