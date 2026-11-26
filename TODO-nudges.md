@@ -67,16 +67,17 @@
 
 ## 3. Host adapter
 
-- [ ] `createNudgeAdapter(ctx, options)` with `submit`, `clear`, `touch`, `mute`, `status`.
-- [ ] Shared runtime file: `~/.config/opencode/nudge-state.json`
+- [x] `createNudgeAdapter(host, options)` with `submit`, `clear`, `touch`, `mute`, `status`.
+- [x] Shared runtime file: `~/.config/opencode/nudge-state.json`
       (atomic temp+rename + sibling lock).
-- [ ] One standing key **`nudge`**; migrate/remove `progress-reminder` once per session.
+- [x] One standing key **`nudge`**; migrate/remove `progress-reminder` once per session.
 - [ ] One timer for scheduled rules; prompt reset; idle flush.
-- [ ] Delivery: context entry; synthetic only for `block`.
-- [ ] One `nudge` agent tool: `status|mute|unmute|rules|...`.
+- [x] Delivery: context entry; synthetic only for `block`.
+- [ ] One `nudge` agent tool: `status|mute|unmute|rules|...` (next).
 - [ ] Registration race: if `nudge` is taken, later adapter copies skip the tool but still share state.
-- [ ] Telemetry: fired/deduped/muted/gap/grace/cap with producer + rule id.
-- [ ] Cross-process conformance test: two producers, one gate, one key.
+- [x] Basic telemetry: fired/deduped/muted/gap/grace/cap with producer + rule id.
+- [x] Single-process conformance test: one gate, one key, priority/gap/grace/cap.
+- [ ] Cross-process concurrency stress test.
 
 ## 4. Config + migration
 
