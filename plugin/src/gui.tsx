@@ -849,6 +849,7 @@ export default Plugin.define({
         sessionID: string;
         minutes?: number;
       }): Promise<{ ok: boolean; mutedUntil: number }>;
+      nudgePurge(input: { sessionID: string }): Promise<{ ok: boolean }>;
       setIndicatorStyle(input: {
         indicatorStyle: "dot" | "circles" | "checkbox";
       }): Promise<{
@@ -3030,6 +3031,38 @@ export default Plugin.define({
         }
       };
 
+      const purge = async () => {
+        if (busy()) return;
+        const confirmed = await ctx.dialogs.confirm({
+          title: "Purge nudge state?",
+          description:
+            "Clears this session's mute, standing reminder, gap clock, and fire count. " +
+            "The telemetry log is kept. Progress and task state are untouched.",
+          confirm: "Purge",
+          danger: true,
+        });
+        if (!confirmed) return;
+        setBusy(true);
+        try {
+          const result = await withTimeout(
+            rpcFor(props.session()).nudgePurge({ sessionID: props.sessionID() }),
+            8000
+          );
+          ctx.toast.show({
+            title: result.ok ? "Nudge state purged" : "Nudges are legacy-managed",
+            description: result.ok
+              ? "Mute, standing reminder, gap, and cap reset."
+              : "The shared adapter is not attached for this session.",
+            variant: result.ok ? "success" : "default",
+          });
+          await refresh();
+        } catch (failure) {
+          setError(String(failure));
+        } finally {
+          setBusy(false);
+        }
+      };
+
       const events = () => telemetry()?.events ?? [];
       const counts = () => telemetry()?.counts ?? {};
       const standing = () => telemetry()?.standing;
@@ -3099,6 +3132,16 @@ export default Plugin.define({
               style={sidebarHeaderButtonStyle}
             >
               {mutedMs() > 0 ? `Unmute ${mutedLabel()}` : "Mute 30m"}
+            </button>
+            <button
+              type="button"
+              class="progress-pill-button"
+              disabled={busy() || telemetry()?.engine === "legacy"}
+              title="Clear this session's mute, standing reminder, gap clock, and fire count"
+              onClick={() => void purge()}
+              style={sidebarHeaderButtonStyle}
+            >
+              Purge
             </button>
           </div>
 

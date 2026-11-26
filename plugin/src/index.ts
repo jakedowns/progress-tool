@@ -922,6 +922,14 @@ export default Plugin.define({
           mutedUntil: sharedNudge.adapter.status(sessionID).mutedUntil ?? 0,
         };
       },
+      nudgePurge: async ({ sessionID }) => {
+        if (!sharedNudge) return { ok: false };
+        // Clear the host context entry before reset deletes the state it keys.
+        await sharedNudge.adapter.clear(sessionID);
+        await sharedNudge.adapter.reset(sessionID);
+        await sharedNudge.adapter.unmute(sessionID);
+        return { ok: true };
+      },
       nudgeList: async ({ sessionID }) => {
         if (!customNudgesOn) {
           return { rules: [], errors: ["custom nudges are disabled (set customNudges: true)"] };

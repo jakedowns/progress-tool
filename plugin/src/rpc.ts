@@ -299,6 +299,24 @@ export const ProgressRpc = Rpc.define({
         additionalProperties: false,
       },
     },
+    nudgePurge: {
+      input: {
+        type: "object",
+        properties: {
+          sessionID: { type: "string" },
+        },
+        required: ["sessionID"],
+        additionalProperties: false,
+      },
+      output: {
+        type: "object",
+        properties: {
+          ok: { type: "boolean" },
+        },
+        required: ["ok"],
+        additionalProperties: false,
+      },
+    },
     nudgeList: {
       input: {
         type: "object",
