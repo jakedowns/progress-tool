@@ -236,6 +236,14 @@ Shipped since `mcp-server@2.10.2`:
   **Ultra** alongside ASCII/Emoji/Compact and persists
   `treeTheme: "ultra-compact"`. The TUI renders the theme as a title-only line
   without detail.
+- **Strict one-line rows.** Ultra hides the progress bar, percentage,
+  `started` row, detail, and `& N more` count; only the status light, time
+  prefix, title, and dismiss remain. Row spacing is 3px total.
+- **`-dev` version suffix.** GUI builds from an untagged commit show
+  `2.26.0-dev` in the footer, Settings, and feedback title. Release builds
+  detect the `plugin@<version>` tag automatically; `PROGRESS_DEV=1|0` overrides
+  for local packaging. Documented in README-advanced under “Dev builds and
+  version display”.
 - Settings shows the active theme value automatically.
 
 ## 2.25.0 — quieter multi-agent nudges (unreleased)

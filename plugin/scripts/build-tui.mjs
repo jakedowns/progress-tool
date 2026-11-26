@@ -15,6 +15,7 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
+import { resolveDevFlag } from "../../scripts/dev-version-flag.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
@@ -35,7 +36,12 @@ const { transformSolidSource } = await import(pathToFileURL(solidTransformPath()
 const source = fs.readFileSync(path.join(root, "src", "tui.tsx"), "utf8");
 const transformed = await transformSolidSource(source, { filename: "src/tui.tsx" });
 
+const devFlag = resolveDevFlag(path.resolve(root, ".."), root);
+
 await build({
+  define: {
+    __PROGRESS_DEV__: JSON.stringify(devFlag),
+  },
   stdin: {
     contents: transformed,
     resolveDir: path.join(root, "src"),

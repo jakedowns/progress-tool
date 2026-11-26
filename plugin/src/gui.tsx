@@ -9,7 +9,7 @@
 import { ComposerPill, Command, MenuItem, Panel, Plugin, Style } from "@opencode/plugin/gui";
 import type { MountedSession } from "@opencode/plugin/gui";
 import { ErrorBoundary, For, Index, Show, batch, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
-import pkg from "../package.json";
+import { displayVersion } from "./build-version.js";
 import { feedbackIssueUrl, releasesUrl } from "./feedback.js";
 import { ProgressRpc } from "./rpc.js";
 import {
@@ -367,6 +367,7 @@ function MenuRow(props: {
             <Multiline text={props.node.detail ?? ""} />
           </div>
         </Show>
+        <Show when={!ultra()}>
         <Show
           when={compact()}
           fallback={
@@ -422,6 +423,7 @@ function MenuRow(props: {
               <span>{compactMeta()}</span>
             </div>
           </Show>
+        </Show>
         </Show>
       </div>
       <Show when={props.onDismiss}>
@@ -854,11 +856,11 @@ export default Plugin.define({
       }
     };
 
-    console.log(`[opencode-progress] gui setup v${pkg.version} (opencode ${ctx.app.version}, ${ctx.app.platform})`);
+    console.log(`[opencode-progress] gui setup v${displayVersion} (opencode ${ctx.app.version}, ${ctx.app.platform})`);
     if (ctx.options?.notifyOnLoad === true) {
       ctx.toast.show({
         title: "Progress plugin loaded",
-        description: `${ctx.app.platform} · opencode-progress v${pkg.version}`,
+        description: `${ctx.app.platform} · opencode-progress v${displayVersion}`,
         variant: "success",
         duration: 2500,
       });
@@ -1242,7 +1244,7 @@ export default Plugin.define({
             }}
           >
             <button type="button" class="progress-pill-button" style={linkStyle} onClick={() => ctx.system.openExternal(releasesUrl())}>
-              v{pkg.version} release notes ↗
+              v{displayVersion} release notes ↗
             </button>
             <button type="button" class="progress-pill-button" style={linkStyle} onClick={() => ctx.system.openExternal("https://github.com/jakedowns/progress-tool#readme")}>
               Docs ↗
@@ -1421,7 +1423,7 @@ export default Plugin.define({
             style={{
               display: "flex",
               "flex-direction": "column",
-              gap: "2px",
+              gap: treeTheme() === "ultra-compact" ? "1px" : "2px",
               "flex": "0 1 auto",
               "min-height": "0",
               "max-height": "min(60vh, 520px)",
@@ -1571,7 +1573,7 @@ export default Plugin.define({
                 "text-decoration": "underline",
               }}
             >
-              [v{pkg.version}]
+              [v{displayVersion}]
             </button>
             <button
               type="button"
@@ -1611,7 +1613,7 @@ export default Plugin.define({
             <button
               type="button"
               class="progress-pill-button"
-              onClick={() => ctx.system.openExternal(feedbackIssueUrl(pkg.version))}
+              onClick={() => ctx.system.openExternal(feedbackIssueUrl(displayVersion))}
               style={{
                 ...footerButtonStyle,
                 flex: "0 0 auto",
@@ -1780,7 +1782,7 @@ export default Plugin.define({
               style={{
                 display: "flex",
                 "flex-direction": "column",
-                gap: "2px",
+                gap: treeTheme() === "ultra-compact" ? "1px" : "2px",
                 flex: "1 1 auto",
                 "min-height": "0",
                 "overflow-y": "auto",
@@ -1904,7 +1906,7 @@ export default Plugin.define({
                 "text-decoration": "underline",
               }}
             >
-              [v{pkg.version}]
+              [v{displayVersion}]
             </button>
             <button
               type="button"
@@ -1925,7 +1927,7 @@ export default Plugin.define({
             <button
               type="button"
               class="progress-pill-button"
-              onClick={() => ctx.system.openExternal(feedbackIssueUrl(pkg.version))}
+              onClick={() => ctx.system.openExternal(feedbackIssueUrl(displayVersion))}
               style={{
                 ...footerButtonStyle,
                 flex: "0 0 auto",

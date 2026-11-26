@@ -20,6 +20,12 @@ if [ ! -e "$PLUGIN/node_modules" ]; then
 fi
 DEPS=$(cd "$PLUGIN/node_modules" && pwd -P)
 
+# `-dev` suffix: release builds are the ones checked out at plugin@<version>.
+# PROGRESS_DEV=1/0 overrides detection (see scripts/dev-version-flag.mjs).
+DEV_FLAG=$(node "$ROOT/scripts/dev-version-flag.mjs" "$ROOT" "$PLUGIN")
+export PROGRESS_DEV="$DEV_FLAG"
+echo "GUI build version suffix: $( [ "$DEV_FLAG" = "1" ] && echo dev || echo release )"
+
 mkdir -p "$STAGE"
 rsync -a --delete \
   --exclude node_modules \

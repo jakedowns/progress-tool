@@ -177,8 +177,9 @@ files, presets, and semantics.
   progress-bar glyphs or the started line, with a single clamped detail line
   and a `40% · & N more` meta suffix. `treeTheme: "ultra-compact"` goes further:
   one title line only, with a status-light emoji, a small
-  `[09:12→09:41 · 29m]` started/updated/elapsed prefix, and the dismiss button;
-  detail, percentage, and `& N more` are hidden. The composer pill capsule
+  `[09:12→09:41 · 29m]` started/updated/elapsed prefix, and the dismiss button.
+  There is **no progress bar, percentage, `started` row, detail, or `& N more`**;
+  rows use 3px total spacing. The composer pill capsule
   itself keeps its `barStyle` rendering. Use the **Progress: switch tree theme**
   palette command to pick **ASCII**, **Emoji**, **Compact**, or **Ultra**;
   each option shows a live preview. The choice applies immediately and is saved as

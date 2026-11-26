@@ -425,7 +425,7 @@ Both the TUI and GUI parts read these options.
 - `guiLayout`: desktop/web placement — `"composer"` (default) keeps the pill above the composer; `"sidebar"` registers a pinned Progress tab in the session's side region. The "Progress: swap layout (composer/sidebar)" command flips it at runtime.
 - `guiSidebarWidth`: desktop sidebar initial width in CSS pixels (default `360`, clamped to `240-800`). A user drag still overrides it.
 - `guiDetailLines`: detail text cap in the pill menu and sidebar rows (default `1` line, rendered with an ellipsis). `0` hides details for titles only; `-1` disables truncation and shows the full text; any positive number clamps to that many lines (max `100`).
-- `treeTheme`: tree-row rendering for the GUI pill popover, GUI sidebar panel, and TUI tree — `"default"` (default), `"compact"`, or `"ultra-compact"`. `"compact"` removes every progress-bar glyph from those rows (no blocks, emoji bar, or fraction), hides the GUI `started …` line, keeps one detail line regardless of `guiDetailLines` (`guiDetailLines: 0` still hides it), tightens GUI row padding, and shows the percentage plus a `& N more` collapsed-descendant suffix instead. `"ultra-compact"` is GUI one-line mode: title only, status-light emoji, dismiss button, and a small `09:12→09:41 · 29m` prefix (started, last updated, elapsed) before the title; detail, percentage, and child count are hidden. The TUI renders the same theme as a title-only line without detail. It is view-only: the GUI composer pill capsule and its `barStyle` rendering are unchanged. The **Progress: switch tree theme** palette command presents four presets with inline previews — **ASCII** (`treeTheme: "default"`, `barStyle: "blocks"`), **Emoji** (`"default"`/`"emoji"`), **Compact** (`treeTheme: "compact"`), and **Ultra** (`treeTheme: "ultra-compact"`) — applies the choice immediately, and writes both `treeTheme` and `barStyle` into the OpenCode config that declares the plugin (project `opencode.json`/`.jsonc` first, then the global config); a config it cannot find or parse leaves the runtime choice applied and reports why nothing was saved. Expanded child rows in the GUI pill popover and sidebar are prefixed with `└─` before the status indicator, matching the TUI.
+- `treeTheme`: tree-row rendering for the GUI pill popover, GUI sidebar panel, and TUI tree — `"default"` (default), `"compact"`, or `"ultra-compact"`. `"compact"` removes every progress-bar glyph from those rows (no blocks, emoji bar, or fraction), hides the GUI `started …` line, keeps one detail line regardless of `guiDetailLines` (`guiDetailLines: 0` still hides it), tightens GUI row padding, and shows the percentage plus a `& N more` collapsed-descendant suffix instead. `"ultra-compact"` is GUI one-line mode: title only, status-light emoji, dismiss button, and a small `09:12→09:41 · 29m` prefix (started, last updated, elapsed) before the title. It hides the progress bar, percentage, `started` row, detail, and child count, and tightens inter-row spacing to 3px total (1px gap + 1px top/bottom padding). The TUI renders the same theme as a title-only line without detail. It is view-only: the GUI composer pill capsule and its `barStyle` rendering are unchanged. The **Progress: switch tree theme** palette command presents four presets with inline previews — **ASCII** (`treeTheme: "default"`, `barStyle: "blocks"`), **Emoji** (`"default"`/`"emoji"`), **Compact** (`treeTheme: "compact"`), and **Ultra** (`treeTheme: "ultra-compact"`) — applies the choice immediately, and writes both `treeTheme` and `barStyle` into the OpenCode config that declares the plugin (project `opencode.json`/`.jsonc` first, then the global config); a config it cannot find or parse leaves the runtime choice applied and reports why nothing was saved. Expanded child rows in the GUI pill popover and sidebar are prefixed with `└─` before the status indicator, matching the TUI.
 - `refreshMs`: how often the views re-read progress state in milliseconds (default `1000`, minimum `100`). Applies to the TUI poller, desktop GUI refresh loop, and the plugin's server-side state watcher. The standalone GUI server has the same knob via `PROGRESS_GUI_REFRESH_MS`.
 - `taskListFile`: set `true` to mirror the session's tasks to `tasklist-<session>.md` on every progress write. **Default `false`**. The file is plaintext and may contain sensitive detail; see the mirror section below.
 - `taskListLocation`: `1` (default) writes `<project>/tasklist-<session>.md`; `0` writes `<project>/.progress/tasklist-<session>.md`; `2` writes `~/.opencode-progress/tasklist-<session>.md`. There is no raw path option, so `..`/absolute paths are not part of the config.
@@ -796,6 +796,26 @@ flowchart LR
 ```
 
 Custom rules survive prompts; their counters and TTL do not reset.
+
+## Dev builds and version display
+
+The GUI shows the package version with a **`-dev`** suffix when it is built from
+a commit that is not tagged `plugin@<package version>`. No manual step is
+needed for a release: the release workflow checks out the tag, so the
+`prepublishOnly` rebuild produces a clean version.
+
+Detection lives in `scripts/dev-version-flag.mjs` (shared by the GUI and TUI
+builds). Overrides:
+
+```bash
+PROGRESS_DEV=1 npm run build   # force -dev (UI testing)
+PROGRESS_DEV=0 npm run build   # force clean (packaging outside a tag)
+```
+
+A tree without `.git` (an npm install) is treated as a release build. The
+suffix is display-only; `package.json` and the tag/version checks are unchanged.
+Committed `dist/` bundles built locally may therefore contain `-dev`; the
+release workflow rebuilds them before publishing.
 
 ## Components and files
 
