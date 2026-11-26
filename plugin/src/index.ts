@@ -358,6 +358,35 @@ export default Plugin.define({
           })
         ).catch((error) => console.warn("[opencode-progress] shadow nudge failed", String(error)));
       }
+      if (sharedNudge && nudgeMode === "shared" && !source.startsWith("custom:")) {
+        const sharedText = /^\[(info|warn|block)\]\s/.test(body)
+          ? body.trim()
+          : formatReminder(severity, body);
+        const producer =
+          source === "strict"
+            ? "progress.tree"
+            : source === "wall"
+              ? "progress.wall"
+              : source === "idle"
+                ? "progress.idle"
+                : source === "relay"
+                  ? "progress.relay"
+                  : source === "say"
+                    ? "say"
+                    : `custom.${source}`;
+        void Promise.resolve(
+          sharedNudge.adapter.submit({
+            sessionId: sessionID,
+            producer,
+            ruleId: source,
+            severity,
+            text: sharedText,
+            channel: severity === "block" ? "synthetic" : "context",
+            at: now,
+          })
+        ).catch((error) => console.warn("[opencode-progress] shared nudge failed", String(error)));
+        return true;
+      }
       if (severity !== "block" && reminderMuted(sessionID)) {
         if (verbose) logNudge({ event: 'reminder', sessionID, severity, source, suppressed: 'muted' });
         return false;
@@ -428,6 +457,7 @@ export default Plugin.define({
       options: { idle?: boolean; timer?: boolean } = {}
     ): void {
       if (!customNudgesOn) return;
+      if (nudgeMode === "shared") return;
       try {
         knownSessions.add(sessionID);
         const now = Date.now();
@@ -1165,7 +1195,19 @@ export default Plugin.define({
           }
           if (step.action === 'force' || step.action === 'stale-escalate') {
             clearReminder(event.sessionID, 'strict');
-            if (!hasActiveReplace(event.sessionID)) {
+            if (sharedNudge && nudgeMode === "shared") {
+              void Promise.resolve(
+                sharedNudge.adapter.submit({
+                  sessionId: event.sessionID,
+                  producer: "progress.tree",
+                  ruleId: step.action === "force" ? "strict-force" : "strict-escalate",
+                  severity: "block",
+                  text,
+                  channel: "synthetic",
+                  at: Date.now(),
+                })
+              ).catch((error) => console.warn("[opencode-progress] shared block failed", String(error)));
+            } else if (!hasActiveReplace(event.sessionID)) {
               void ctx.session
                 .synthetic({ sessionID: event.sessionID, text })
                 .catch(() => {});
@@ -1292,7 +1334,17 @@ export default Plugin.define({
           if (verbose) {
             logNudge({ event: 'idle-reminder', sessionID: event.sessionID, count: decision.count, openEntries: decision.signature.split(' | ').filter(Boolean).length });
           }
-          if (!hasActiveReplace(event.sessionID)) {
+          if (sharedNudge && nudgeMode === "shared") {
+            await sharedNudge.adapter.submit({
+              sessionId: event.sessionID,
+              producer: "progress.idle",
+              ruleId: "turn-end",
+              severity: "block",
+              text: decision.message,
+              channel: "synthetic",
+              at: Date.now(),
+            });
+          } else if (!hasActiveReplace(event.sessionID)) {
             await ctx.session.synthetic({ sessionID: event.sessionID, text: decision.message });
           }
         } catch (error) {
@@ -1735,6 +1787,41 @@ export default Plugin.define({
             const sessionID = context.sessionID;
             knownSessions.add(sessionID);
             const action = String(input?.action ?? "list");
+            if (
+              sharedNudge &&
+              nudgeMode === "shared" &&
+              (action === "mute" ||
+                action === "unmute" ||
+                action === "status" ||
+                action === "clear")
+            ) {
+              if (action === "unmute") {
+                await sharedNudge.adapter.unmute(sessionID);
+                return { content: "Session reminders unmuted." };
+              }
+              if (action === "clear") {
+                await sharedNudge.adapter.clear(sessionID, String(input?.producer ?? "") || undefined);
+                return { content: "Cleared the shared standing reminder." };
+              }
+              if (action === "mute") {
+                const raw = Number(input?.minutes);
+                const minutes =
+                  Number.isFinite(raw) && raw > 0 ? Math.min(240, Math.max(1, Math.floor(raw))) : 30;
+                await sharedNudge.adapter.mute(sessionID, minutes);
+                return { content: `Session reminders muted for ${minutes}m (non-block only).` };
+              }
+              const status = sharedNudge.adapter.status(sessionID);
+              const remaining = Math.max(0, status.mutedUntil - Date.now());
+              return {
+                content: [
+                  remaining > 0 ? `Muted for another ${Math.ceil(remaining / 60_000)}m.` : "Not muted.",
+                  status.standing
+                    ? `Standing [${status.standing.severity}] ${status.standing.source}: ${status.standing.text}`
+                    : "No standing reminder.",
+                  `Fires this session: ${status.fires}.`,
+                ].join("\n"),
+              };
+            }
             if (action === "mute" || action === "unmute") {
               if (action === "unmute") {
                 nudgeMutedUntil.delete(sessionID);
@@ -1891,6 +1978,11 @@ export default Plugin.define({
         sharedNudge = await attachNudge(ctx as never, {
           shadow: nudgeMode === "shadow",
           registerTool: nudgeMode === "shared",
+          gapMs: typeof ctx.options?.nudgeGapMs === "number" ? ctx.options.nudgeGapMs : undefined,
+          graceMs:
+            typeof ctx.options?.nudgeGraceMs === "number"
+              ? ctx.options.nudgeGraceMs
+              : undefined,
           log: (event) =>
             console.log(`[opencode-progress] shared nudge ${JSON.stringify(event)}`),
         });

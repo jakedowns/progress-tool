@@ -97,16 +97,16 @@
 
 - [x] Add a shadow adapter path behind `nudgeEngine: "shadow"`; submit legacy
       reminders without changing delivery.
-- [ ] Replace `putReminder`, `lastReminderAt`, mute/gap/grace/cap, delivery and
-      `progress_nudge` plumbing with adapter calls in `"shared"` mode.
+- [x] Shared mode routes built-in reminders and `progress_nudge` mute/status through
+      the adapter. Legacy delivery remains the default.
+- [ ] Remove legacy delivery/custom engine and make `shared` the default.
 - [ ] Keep progress signal detection and message builders.
 - [ ] Submit candidates:
       `progress.tree` (strict/wall), `progress.idle`, `progress.relay`,
       `say`, custom rules.
 - [ ] Move `progress_nudge` behind the shared `nudge` tool (alias for one release).
 - [ ] Delete duplicated policy modules after regression tests pass.
-- [ ] Keep existing behavior behind feature flag `nudgeEngine: "shared"|"legacy"`
-      for one release.
+- [x] Keep existing behavior behind `nudgeEngine: "shared" | "shadow" | "legacy"`.
 
 ## 6. Voice integration
 
