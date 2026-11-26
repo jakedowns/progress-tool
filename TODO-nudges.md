@@ -254,6 +254,48 @@ useful evidence that a workstream already exists.
 **Do not implement yet.** Record the tradeoff and test after the shared nudge
 adapter exists, so delivery and wording can be measured independently.
 
+### 10.2 Config: prefer root reuse vs episodic root genesis
+
+**Idea.** Add a config option such as:
+
+```json
+{ "rootPolicy": "reuse" | "episodic" | "auto" }
+```
+
+- `reuse`: keep one root per workstream/feature and nest phases under it.
+- `episodic`: start a new root for each long-running phase or work session,
+  connecting it to the previous root in `detail` (no new schema required yet).
+- `auto`: reuse while the root is still running/recent; start a new root when
+  the previous root is `done`, cold (untouched for N hours), or the user’s
+  intent clearly changed.
+
+**Why.** Long-running work can become one enormous root that is hard to scan,
+or a pile of duplicate roots that fragment history. The right default probably
+depends on work type: a build/debug thread wants continuity; a multi-week
+research program wants episodic chapters.
+
+**Interactions**
+
+- Pairs with `list.includeTerminal`: episodic mode needs enough recent done
+  roots visible to link the next chapter.
+- Interacts with dismissal/revival: a done root hidden from `list` is less
+  likely to be revived.
+- Nudge copy should say which policy is active, e.g. “reuse `feature-auth`” vs
+  “start `feature-auth-2` linked to the previous root”.
+- Do not add a schema field yet; first test `detail` linkage. If it works,
+  consider a real `continuesFrom`/`rootGroup` field later.
+
+**Metrics**
+
+- roots per workstream and duplicate-root rate;
+- average root size/depth and list response size;
+- done-root revival rate;
+- time for a new agent to understand the current state from `list`;
+- user-visible clarity in the pill.
+
+**Do not implement yet.** Decide after the shared adapter + list-first experiment;
+root policy should be core policy, not a progress-only option.
+
 ## Acceptance
 
 - [ ] A new tool adds a nudge with only a signal + config mapping.
