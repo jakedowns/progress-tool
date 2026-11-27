@@ -221,10 +221,13 @@ files, presets, and semantics.
 - Running and waiting tasks stay visible; errors stay until dismissed or
   updated; completed tasks stay unless dismissed (or `autoHideDone` is on).
 - Dismissal works at any depth: every nested row has its own `✕`; dismissing a child hides its subtree and re-rolls the parent from the remaining children. A dismissed tree stays hidden
-  through relay telemetry and sibling activity. An **agent update clears the
+  through relay ticks and sibling activity. An **agent update clears the
   dismissal** on that entry and its ancestors — except a terminal dismissal
   (dismissed while done/error), which later done/error re-reports do not revive;
-  a restart or a child failure does.
+  a lifecycle restart or a child failure does. A relay lifecycle restart (a
+  terminal entry returning to running) also revives the entry and its ancestors,
+  and any descendant update revives an ancestor that was soft-cleared with
+  *Progress: clear list*.
 - **Clear/delete are palette commands** (not pill buttons): *Progress: clear
   list* soft-deletes finished/dismissed entries while keeping records on disk,
   *hard clear this session* removes one session's store copy, and *hard clear

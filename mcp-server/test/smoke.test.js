@@ -527,6 +527,63 @@ test('agent writes clear dismissal on the entry and ancestors; relay telemetry p
   assert.equal(entries['dismiss-parent'].dismissed ?? null, null, 'ancestor dismissal cleared by descendant update');
 });
 
+test('relay lifecycle restart revives the entry and its hidden ancestors', () => {
+  const { file } = tempState();
+  const store = require(path.join(ROOT, 'state-store'));
+
+  run(['emit', '--id', 'relay-parent', '--status', 'done', '--title', 'Parent'], { state: file });
+  run(
+    ['emit', '--id', 'relay-child', '--status', 'done', '--title', 'Child', '--parent', 'relay-parent'],
+    { state: file }
+  );
+
+  store.mutateState((state) => {
+    state.entries['relay-child'].dismissed = { status: 'done', at: 12345 };
+    state.entries['relay-parent'].dismissed = { status: 'done', at: 12345 };
+    state.entries['relay-parent'].cleared = true;
+    return state;
+  }, file);
+
+  // No --status on a terminal entry is a lifecycle restart, not a tick. Pipe
+  // mode closes right after the tick, so the final status is done again.
+  const result = run(['relay', '--id', 'relay-child', '--quiet'], {
+    state: file,
+    input: 'tick\n',
+  });
+  assert.equal(result.status, 0, result.stderr);
+
+  const entries = readState(file).entries;
+  assert.equal(entries['relay-child'].status, 'done');
+  assert.equal(entries['relay-child'].dismissed ?? null, null);
+  assert.equal(entries['relay-parent'].dismissed ?? null, null);
+  assert.equal(entries['relay-parent'].cleared ?? null, null);
+});
+
+test('a descendant update revives a soft-cleared ancestor', () => {
+  const { file } = tempState();
+  const store = require(path.join(ROOT, 'state-store'));
+
+  run(['emit', '--id', 'soft-parent', '--status', 'running', '--title', 'Parent'], { state: file });
+  run(
+    ['emit', '--id', 'soft-child', '--status', 'running', '--title', 'Child', '--parent', 'soft-parent'],
+    { state: file }
+  );
+
+  store.mutateState((state) => {
+    state.entries['soft-parent'].cleared = true;
+    state.entries['soft-child'].cleared = true;
+    return state;
+  }, file);
+
+  run(['emit', '--id', 'soft-child', '--status', 'running', '--detail', 'agent update'], {
+    state: file,
+  });
+
+  const entries = readState(file).entries;
+  assert.equal(entries['soft-child'].cleared ?? null, null);
+  assert.equal(entries['soft-parent'].cleared ?? null, null, 'soft-cleared ancestor revived by descendant update');
+});
+
 test('lifecycle restart clears a stale dismissal', () => {
   const { file } = tempState();
   const store = require(path.join(ROOT, 'state-store'));
