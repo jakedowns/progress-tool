@@ -1973,10 +1973,64 @@ export default Plugin.define({
           dismissKey(props.session(), root.key, root.status ?? "");
         }
       };
+      const [notesExpanded, setNotesExpanded] = createSignal(false);
+      const notes = createMemo(() => notesForSession(props.sessionID()));
       const notesLine = createMemo(() => {
         if (!guiSaySurfaces(sayModes, "sidebar").line) return "";
-        return buildNotesLine(notesForSession(props.sessionID()), props.sessionID());
+        return buildNotesLine(notes(), props.sessionID());
       });
+
+      const markNotePending = (ids: readonly string[], pending: boolean) =>
+        setPendingNoteDismissals((prev) => {
+          const next = { ...prev };
+          const at = Date.now();
+          for (const id of ids) {
+            if (pending) next[id] = at;
+            else delete next[id];
+          }
+          return next;
+        });
+      const dismissNote = (note: GuiNote) => {
+        markNotePending([note.id], true);
+        void rpcFor(props.session())
+          .dismissNote({ noteID: note.id })
+          .then((result) => {
+            if (result.ok) return;
+            markNotePending([note.id], false);
+            ctx.toast.show({
+              title: "Note already dismissed",
+              description: "It was removed by another view.",
+              variant: "default",
+            });
+          })
+          .catch((error: unknown) => {
+            markNotePending([note.id], false);
+            ctx.toast.show({
+              title: "Dismiss note failed",
+              description: String(error),
+              variant: "error",
+            });
+          });
+      };
+      const dismissAllNotes = () => {
+        const ids = notes().map((note) => note.id);
+        if (ids.length === 0) return;
+        markNotePending(ids, true);
+        void rpcFor(props.session())
+          .clearNotes({ sessionID: props.sessionID() })
+          .then((result) => {
+            if (result.removed === 0) markNotePending(ids, false);
+            void refresh();
+          })
+          .catch((error: unknown) => {
+            markNotePending(ids, false);
+            ctx.toast.show({
+              title: "Dismiss all notes failed",
+              description: String(error),
+              variant: "error",
+            });
+          });
+      };
 
       return (
         <div
@@ -2024,17 +2078,114 @@ export default Plugin.define({
           </div>
           <Show when={notesLine()}>
             <div
-              title={notesLine()}
               style={{
-                "font-size": "11px",
-                opacity: "0.62",
-                "white-space": "nowrap",
-                overflow: "hidden",
-                "text-overflow": "ellipsis",
+                display: "flex",
+                "align-items": "center",
+                gap: "4px",
                 "flex": "0 0 auto",
               }}
             >
-              {notesLine()}
+              <div
+                title={notesLine()}
+                onClick={() => setNotesExpanded((value) => !value)}
+                style={{
+                  flex: "1 1 auto",
+                  "min-width": "0",
+                  "font-size": "11px",
+                  opacity: "0.62",
+                  cursor: "pointer",
+                  "white-space": "nowrap",
+                  overflow: "hidden",
+                  "text-overflow": "ellipsis",
+                }}
+              >
+                {notesLine()}
+              </div>
+              <Show when={notes().length > 1 || notesExpanded()}>
+                <button
+                  type="button"
+                  class="progress-pill-button"
+                  title={
+                    notesExpanded()
+                      ? "Collapse the notes list"
+                      : `Show all ${notes().length} notes`
+                  }
+                  onClick={() => setNotesExpanded((value) => !value)}
+                  style={{ ...sidebarHeaderButtonStyle, "flex": "0 0 auto" }}
+                >
+                  {notesExpanded() ? "▴" : `▾ ${notes().length}`}
+                </button>
+              </Show>
+            </div>
+          </Show>
+          <Show when={notesExpanded() && notes().length > 0}>
+            <div
+              style={{
+                display: "flex",
+                "flex-direction": "column",
+                gap: "3px",
+                "max-height": "42vh",
+                "overflow-y": "auto",
+                "flex": "0 0 auto",
+                "padding": "4px 6px",
+                "border-radius": "6px",
+                background: "rgba(127,127,127,0.08)",
+                "border": "1px solid rgba(127,127,127,0.18)",
+              }}
+            >
+              <For each={notes()}>
+                {(note) => (
+                  <div
+                    style={{
+                      display: "flex",
+                      "align-items": "baseline",
+                      gap: "5px",
+                      "font-size": "11px",
+                    }}
+                  >
+                    <span style={{ opacity: "0.55", "flex": "0 0 auto" }}>
+                      {noteAuthorLabel(note, props.sessionID())}
+                    </span>
+                    <span
+                      title={note.text}
+                      style={{
+                        flex: "1 1 auto",
+                        "min-width": "0",
+                        overflow: "hidden",
+                        "text-overflow": "ellipsis",
+                        "white-space": "nowrap",
+                      }}
+                    >
+                      {note.text}
+                    </span>
+                    <span style={{ opacity: "0.4", "flex": "0 0 auto" }}>
+                      {formatAgoShort(note.at)}
+                    </span>
+                    <button
+                      type="button"
+                      class="progress-pill-button"
+                      title="Dismiss this note"
+                      onClick={() => dismissNote(note)}
+                      style={{
+                        ...sidebarHeaderButtonStyle,
+                        "flex": "0 0 auto",
+                        padding: "0 4px",
+                      }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                )}
+              </For>
+              <button
+                type="button"
+                class="progress-pill-button"
+                title="Dismiss every note shown here"
+                onClick={dismissAllNotes}
+                style={{ alignSelf: "flex-start", "flex": "0 0 auto" }}
+              >
+                ✕ Dismiss all notes ({notes().length})
+              </button>
             </div>
           </Show>
           <Show

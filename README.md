@@ -250,7 +250,8 @@ files, presets, and semantics.
   so `tree` falls back to the pill. An empty array records notes without
   showing them. Click the TUI line or open `/progress` → **Notes** / the pill
   popover for newest-first history; dismiss one note with its `×` or all notes
-  at once. Dismissals delete the note from the shared ring buffer, so every
+  at once. In the desktop sidebar, click the notes line to expand the full
+  undismissed list inline; each row has its own `×` and a dismiss-all button. Dismissals delete the note from the shared ring buffer, so every
   client updates. Notes also auto-hide from every surface after
   `sayAutoHideTimeoutMs` (default 60s; `0` keeps them until dismissed). An
   opt-in `sayNudge` reminds a silent agent after a long tool
