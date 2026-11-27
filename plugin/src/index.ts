@@ -913,15 +913,37 @@ export default Plugin.define({
         const status = sharedNudge?.adapter.status(sessionID);
         const state = readSharedNudgeSession(sessionID);
         const progress = readProgressState();
-        const entryView: Record<string, string> = {};
-        for (const entry of Object.values(progress.entries ?? {})) {
+        const progressEntries = Object.values(progress.entries ?? {});
+        const entriesById = new Map<string, (typeof progressEntries)[number]>();
+        for (const entry of progressEntries) {
           if (!entry || typeof entry.id !== "string") continue;
-          const key = `${entry.sessionId ?? ""}:${entry.id}`;
-          entryView[key] = entry.cleared
-            ? "cleared"
-            : entry.dismissed
-              ? "dismissed"
-              : "visible";
+          entriesById.set(`${entry.sessionId ?? ""}:${entry.id}`, entry);
+        }
+        // The tree prunes a dismissed/cleared subtree, so a child with no
+        // dismissal of its own is still hidden when an ancestor is hidden.
+        const effectiveView = (entry: (typeof progressEntries)[number]): string => {
+          if (entry.cleared) return "cleared";
+          if (entry.dismissed) return "dismissed";
+          let parentId = typeof entry.parentId === "string" ? entry.parentId : "";
+          const seen = new Set<string>();
+          let cursor = entry;
+          for (let depth = 0; depth < 50 && parentId; depth += 1) {
+            const key = `${cursor.sessionId ?? ""}:${parentId}`;
+            if (seen.has(key)) break;
+            seen.add(key);
+            const parent = entriesById.get(key);
+            if (!parent) break;
+            if (parent.cleared) return "ancestor cleared";
+            if (parent.dismissed) return "ancestor dismissed";
+            cursor = parent;
+            parentId = typeof parent.parentId === "string" ? parent.parentId : "";
+          }
+          return "visible";
+        };
+        const entryView: Record<string, string> = {};
+        for (const entry of progressEntries) {
+          if (!entry || typeof entry.id !== "string") continue;
+          entryView[`${entry.sessionId ?? ""}:${entry.id}`] = effectiveView(entry);
         }
         let logBytes = 0;
         try {
