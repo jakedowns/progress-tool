@@ -1851,7 +1851,7 @@ export default Plugin.define({
       sayNudgeBeforeHook = await ctx.tool.hook('execute.before', (event) => {
         toolStartedAt.set(String(event.id), Date.now());
       });
-      sayNudgeAfterHook = await ctx.tool.hook('execute.after', (event) => {
+      sayNudgeAfterHook = await ctx.tool.hook('execute.after', async (event) => {
         try {
           if (event.tool === sayToolName || /(^|_)progress(_touch)?$/.test(event.tool)) return;
           const callsSinceSay = (sayCallsSinceNote.get(event.sessionID) ?? 0) + 1;
