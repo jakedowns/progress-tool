@@ -414,3 +414,33 @@ test('decideSayNudge never mutates the state it reads', () => {
   decideSayNudge(state, input(), opts());
   assert.deepEqual(state, snapshot);
 });
+
+test('say nudge wording escalates with the ignored-nudge strike', () => {
+  assert.match(sayNudgeMessage('bash', 30_000, 1), /no narration this turn/);
+  assert.match(sayNudgeMessage('bash', 30_000, 2), /Still no say note/);
+  assert.match(sayNudgeMessage('bash', 30_000, 3), /Say nudge ignored 3 times/);
+
+  assert.match(saySilentRunNudgeMessage(4, 1), /tool call 4 in a row/);
+  assert.match(saySilentRunNudgeMessage(4, 2), /Still no say note after 4 tool calls/);
+  assert.match(saySilentRunNudgeMessage(4, 3), /Stop and call say now/);
+});
+
+test('decideSayNudge passes strike into escalation wording', () => {
+  const input = {
+    sessionID: 's',
+    tool: 'bash',
+    durationMs: 30_000,
+    callsSinceSay: 4,
+    saidThisTurn: false,
+    progressNudgeActive: false,
+    strike: 3,
+    now: NOW,
+  };
+  const decision = decideSayNudge(
+    { lastNudgeAt: 0, nudgesThisTurn: 0 },
+    input,
+    normalizeSayNudgeOptions({ sayNudge: 'silent-run' })
+  );
+  assert.equal(decision.reason, 'accept');
+  assert.match(decision.message, /Say nudge ignored 3 times/);
+});

@@ -302,6 +302,7 @@ files, presets, and semantics.
 | `sayToastScope` | Toast `"own"` notes (default), own + child `"warnings"`, or `"all"`; child notes still roll up in the tree/pill |
 | `sayNudge` | Opt-in reminder, only with `say: true`: `"long-tool"`/`true`, `"silent-run"` (forgot-to-narrate call count), or `"both"` (default off; context-only, never synthetic) |
 | `sayNudgeMinCalls` | Tool calls with no note before a `"silent-run"` reminder (default `3`, clamp `1..50`) |
+| `sayNudgeEscalateAfter` | Ignored say nudges before one synthetic `block` (default `3`; `0` disables) |
 | `retainDeletedSessionProgress` | Keep store entries when a session is deleted (default off) |
 
 The optional task-list mirror is always written as `tasklist-<session>.md`. Add `tasklist-*.md` (and `.progress/` if you use location `0`) to your `.gitignore` — it contains plaintext task titles and details. When enabled, the palette command **Progress: task-list mirror view** switches between the UI view and the raw store view.

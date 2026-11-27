@@ -215,6 +215,15 @@ export default Plugin.define({
     const sayOptions = normalizeSayOptions(ctx.options);
     const sayNudgeOptions = normalizeSayNudgeOptions(ctx.options);
     const sayNudgeStates = new Map<string, SayNudgeState>();
+    /** Consecutive ignored say nudges since the last accepted note. */
+    const sayNudgeStrikes = new Map<string, number>();
+    /** Sessions already escalated once; cleared by an accepted note. */
+    const sayNudgeEscalated = new Set<string>();
+    const sayNudgeEscalateAfter = (() => {
+      const raw = ctx.options?.sayNudgeEscalateAfter;
+      if (typeof raw !== "number" || !Number.isFinite(raw)) return 3;
+      return Math.min(10, Math.max(0, Math.floor(raw)));
+    })();
     /** Non-say/progress tool calls this turn, reset by an accepted note/prompt. */
     const sayCallsSinceNote = new Map<string, number>();
     const toolStartedAt = new Map<string, number>();
@@ -619,6 +628,8 @@ export default Plugin.define({
               // also resets the say-specific grace clock, independent of
               // progress writes.
               sayCallsSinceNote.set(note.sessionID, 0);
+              sayNudgeStrikes.delete(note.sessionID);
+              sayNudgeEscalated.delete(note.sessionID);
               clearReminder(note.sessionID, 'say');
               if (sharedNudge && nudgeMode === "shared") {
                 void Promise.resolve(
@@ -1851,6 +1862,11 @@ export default Plugin.define({
           const durationMs = started === undefined ? 0 : now - started;
           const controller = sayController?.get(event.sessionID);
           const state = sayNudgeStates.get(event.sessionID) ?? emptySayNudgeState();
+          const strikes = (sayNudgeStrikes.get(event.sessionID) ?? 0) + 1;
+          const escalate =
+            sayNudgeEscalateAfter > 0 &&
+            strikes >= sayNudgeEscalateAfter &&
+            !sayNudgeEscalated.has(event.sessionID);
           const decision = decideSayNudge(
             state,
             {
@@ -1860,13 +1876,34 @@ export default Plugin.define({
               callsSinceSay,
               saidThisTurn: controller?.accepted === true,
               progressNudgeActive: Boolean(standingReminders.get(event.sessionID)),
+              strike: strikes,
               now,
             },
             sayNudgeOptions
           );
           if (!decision.nudge || !decision.message) return;
           sayNudgeStates.set(event.sessionID, recordSayNudge(state, now));
-          putReminder(event.sessionID, 'warn', 'say', decision.message);
+          sayNudgeStrikes.set(event.sessionID, strikes);
+          if (escalate) sayNudgeEscalated.add(event.sessionID);
+          const text = decision.message;
+          if (sharedNudge && nudgeMode === "shared") {
+            await sharedNudge.adapter.submit({
+              sessionId: event.sessionID,
+              producer: "say",
+              ruleId: escalate ? "narrate-escalated" : "narrate",
+              severity: escalate ? "block" : "warn",
+              text,
+              channel: escalate ? "synthetic" : "context",
+              at: now,
+            });
+          } else if (escalate) {
+            await ctx.session.synthetic({
+              sessionID: event.sessionID,
+              text: `[block] ${text}`,
+            });
+          } else {
+            putReminder(event.sessionID, 'warn', 'say', text);
+          }
           if (verbose) {
             logNudge({
               event: 'say-nudge',
@@ -1875,6 +1912,9 @@ export default Plugin.define({
               durationMs,
               callsSinceSay,
               reason: decision.reason,
+              strikes,
+              escalated: escalate,
+              delivery: escalate ? "synthetic" : "context",
             });
           }
         } catch (error) {
@@ -1889,11 +1929,13 @@ export default Plugin.define({
           sayNudgeMinCalls: sayNudgeOptions.minCalls,
           sayNudgeCooldownMs: sayNudgeOptions.cooldownMs,
           sayNudgeMaxPerTurn: sayNudgeOptions.maxPerTurn,
+          sayNudgeEscalateAfter,
         });
       }
       console.log(
         `[opencode-progress] v${pluginVersion} say nudge: ${sayNudgeOptions.mode} ` +
-          `(after ${sayNudgeOptions.afterMs}ms or ${sayNudgeOptions.minCalls} calls)`
+          `(after ${sayNudgeOptions.afterMs}ms or ${sayNudgeOptions.minCalls} calls; ` +
+          `synthetic at ${sayNudgeEscalateAfter || "off"})`
       );
     }
 
