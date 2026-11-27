@@ -214,9 +214,13 @@ files, presets, and semantics.
   `tuiMaxRoots` (default 3) and scrollable inside `tuiMaxRows` (default 8) so
   long lists never push the prompt away. A `--- scroll to see N more ---` hint
   appears on overflow; `/progress` opens a dialog to expand a tree or dismiss
-  tasks, and the palette can change the root cap, switch the tree theme, or
-  collapse the tree to a one-line status summary. With `treeTheme: "compact"`,
-  TUI rows drop the progress bar and show `title 40% · & N more` instead. Set
+  tasks, and the palette can change the root cap or switch the tree theme.
+  Click the `[-]` marker in the header to collapse to a one-line
+  `[+] progress: …` summary (click it again to expand); the palette command
+  does the same. With `treeTheme: "compact"`, TUI rows drop the progress bar
+  and show `title 40% · & N more` instead. With `treeTheme: "ultra-compact"`,
+  rows match the desktop ultra theme: one line per task with a status light and
+  a short age prefix (`5m ago`), no bar, percentage, or detail row. Set
   `tuiLayout: "sidebar"` to
   park the tree in the sidebar instead, or run `/progress swap-layout` to flip
   placements at runtime.

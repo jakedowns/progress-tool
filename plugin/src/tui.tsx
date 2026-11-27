@@ -220,6 +220,20 @@ function leftClick(event: TuiMouseEvent): boolean {
   return event.button === undefined || event.button === 0;
 }
 
+/** Short age for the ultra-compact row prefix ("just now", "5m ago", "2h ago"). */
+function formatAgoShort(ms: number | undefined): string {
+  if (!ms) return "";
+  const delta = Math.max(0, Date.now() - ms);
+  if (delta < 10_000) return "just now";
+  const seconds = Math.floor(delta / 1000);
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
 function ProgressRow(props: { row: TuiRow; sessionID: string }) {
   const ctx = usePlugin();
   const indent = () => (props.row.depth === 0 ? "" : "└─ ");
@@ -266,7 +280,10 @@ function ProgressRow(props: { row: TuiRow; sessionID: string }) {
       return `${glyph(props.row.node.status)} ${title()}${suffix()}`;
     }
     if (themeState.value === "ultra-compact") {
-      return `${glyph(props.row.node.status)} ${title()}`;
+      const ago = formatAgoShort(
+        props.row.node.updatedAt ?? props.row.node.createdAt
+      );
+      return `${glyph(props.row.node.status)} ${ago ? `${ago} · ` : ""}${title()}`;
     }
     if (themeState.value === "compact") {
       const meta = compactTreeSuffix(props.row.node.progress, props.row.hiddenChildren);
@@ -385,14 +402,29 @@ function ProgressTree(props: { sessionID: string; capacity?: number; variant?: "
     void confirmDismissAll(ctx, roots());
   };
 
+  const onToggleCollapsed = (event: TuiMouseEvent) => {
+    if (!leftClick(event)) return;
+    event.stopPropagation();
+    toggleCollapsed(ctx);
+  };
+
   const title = () => (
-    <text
-      selectable={false}
-      fg={ctx.theme.text.muted}
-      onMouseUp={() => openProgressDialog(ctx)}
-    >
-      progress
-    </text>
+    <box flexDirection="row">
+      <text
+        selectable={false}
+        fg={ctx.theme.text.base}
+        onMouseUp={onToggleCollapsed}
+      >
+        {"[-] "}
+      </text>
+      <text
+        selectable={false}
+        fg={ctx.theme.text.muted}
+        onMouseUp={() => openProgressDialog(ctx)}
+      >
+        progress
+      </text>
+    </box>
   );
 
   const actions = () => (
@@ -454,7 +486,8 @@ function ProgressTree(props: { sessionID: string; capacity?: number; variant?: "
               })
             }
           >
-            <span fg={ctx.theme.text.muted}>progress: </span>
+            <span fg={ctx.theme.text.base}>{"[+] "}</span>
+            <span fg={ctx.theme.text.muted}>{"progress: "}</span>
             {summary()}
           </text>
         </Show>
