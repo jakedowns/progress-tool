@@ -323,6 +323,43 @@ export const ProgressRpc = Rpc.define({
         additionalProperties: false,
       },
     },
+    nudgeTest: {
+      input: {
+        type: "object",
+        properties: {
+          sessionID: { type: "string" },
+          text: { type: "string" },
+          severity: { type: "string", enum: ["info", "warn", "block"] },
+        },
+        required: ["sessionID"],
+        additionalProperties: false,
+      },
+      output: {
+        type: "object",
+        properties: {
+          ok: { type: "boolean" },
+          reason: { type: "string" },
+        },
+        required: ["ok"],
+        additionalProperties: false,
+      },
+    },
+    nudgeTruncateLog: {
+      input: {
+        type: "object",
+        properties: {},
+        additionalProperties: false,
+      },
+      output: {
+        type: "object",
+        properties: {
+          ok: { type: "boolean" },
+          bytes: { type: "number" },
+        },
+        required: ["ok", "bytes"],
+        additionalProperties: false,
+      },
+    },
     nudgePurge: {
       input: {
         type: "object",

@@ -5,7 +5,15 @@
  * relay and exposes it to the TUI and GUI parts through RPC.
  */
 
-import { closeSync, fstatSync, openSync, readFileSync, readSync, statSync } from "node:fs";
+import {
+  closeSync,
+  fstatSync,
+  openSync,
+  readFileSync,
+  readSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
@@ -952,6 +960,39 @@ export default Plugin.define({
           ok: true,
           mutedUntil: sharedNudge.adapter.status(sessionID).mutedUntil ?? 0,
         };
+      },
+      nudgeTest: async ({ sessionID, text, severity }) => {
+        if (!sharedNudge) return { ok: false };
+        const tier =
+          severity === "block" ? "block" : severity === "warn" ? "warn" : "info";
+        const body =
+          typeof text === "string" && text.trim()
+            ? text.trim().slice(0, 500)
+            : "Panel test nudge";
+        const outcome = await sharedNudge.adapter.submit({
+          sessionId: sessionID,
+          producer: "panel.test",
+          ruleId: "panel.test",
+          severity: tier,
+          text: body,
+          // Context only: a test must never inject a synthetic turn.
+          channel: "context",
+          at: Date.now(),
+        } as never);
+        return {
+          ok: Boolean(outcome.applied),
+          ...(outcome.reason ? { reason: String(outcome.reason) } : {}),
+        };
+      },
+      nudgeTruncateLog: async () => {
+        const file = nudgeLogPath();
+        try {
+          const before = statSync(file).size;
+          writeFileSync(file, "");
+          return { ok: true, bytes: before };
+        } catch {
+          return { ok: false, bytes: 0 };
+        }
       },
       nudgePurge: async ({ sessionID }) => {
         if (!sharedNudge) return { ok: false };

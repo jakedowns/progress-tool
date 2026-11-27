@@ -687,6 +687,11 @@ export default Plugin.define({
     let alive = true;
     let inFlight = false;
 
+    // Unread warn/block nudges for the Nudges tab dot. The watermark advances
+    // as events are counted so a slow poll does not double-count them.
+    const [nudgeAttention, setNudgeAttention] = createSignal(0);
+    let nudgeSeenAt = Date.now();
+
     /** Flip between the composer pill and the pinned side-region panel. */
     const swapLayout = () => {
       const next = nextGuiLayout(layoutMode());
@@ -857,6 +862,15 @@ export default Plugin.define({
         sessionID: string;
         minutes?: number;
       }): Promise<{ ok: boolean; mutedUntil: number }>;
+      nudgeTest(input: {
+        sessionID: string;
+        text?: string;
+        severity?: "info" | "warn" | "block";
+      }): Promise<{ ok: boolean; reason?: string }>;
+      nudgeTruncateLog(input?: Record<string, never>): Promise<{
+        ok: boolean;
+        bytes: number;
+      }>;
       nudgePurge(input: { sessionID: string }): Promise<{ ok: boolean }>;
       setIndicatorStyle(input: {
         indicatorStyle: "dot" | "circles" | "checkbox";
@@ -871,6 +885,33 @@ export default Plugin.define({
       session.server.client.rpc(ProgressRpc) as unknown as ProgressClient;
     const globalRpc = () =>
       ctx.client.rpc(ProgressRpc) as unknown as ProgressClient;
+
+    const nudgeBadgeTimer = setInterval(() => {
+      const session = ctx.sessions.current();
+      if (!session) return;
+      void rpcFor(session)
+        .nudgeTelemetry({ sessionID: session.id, limit: 20 })
+        .then((view) => {
+          let newest = 0;
+          let fresh = 0;
+          for (const event of view.events ?? []) {
+            const ts = typeof event.ts === "string" ? Date.parse(event.ts) : NaN;
+            const severity = String(event.severity ?? "");
+            if (!Number.isFinite(ts) || ts <= nudgeSeenAt) continue;
+            if (severity !== "warn" && severity !== "block") continue;
+            if (typeof event.delivery !== "string") continue;
+            fresh += 1;
+            if (ts > newest) newest = ts;
+          }
+          if (fresh > 0) {
+            nudgeSeenAt = Math.max(nudgeSeenAt, newest);
+            setNudgeAttention((value) => Math.min(99, value + fresh));
+          }
+        })
+        .catch(() => {
+          // A missed poll is harmless; the next one retries.
+        });
+    }, 15_000);
 
     type TaskListViewStatus = {
       enabled: boolean;
@@ -2777,6 +2818,23 @@ export default Plugin.define({
       id: NUDGE_PANEL_TAB_ID,
       title: "Nudges",
       closable: "compact" as const,
+      label: (state: { active: boolean }) => (
+        <span style={{ display: "inline-flex", "align-items": "center", gap: "4px" }}>
+          Nudges
+          <Show when={nudgeAttention() > 0 && !state.active}>
+            <span
+              title={`${nudgeAttention()} new warn/block nudge${nudgeAttention() === 1 ? "" : "s"}`}
+              style={{
+                width: "6px",
+                height: "6px",
+                "border-radius": "50%",
+                background: "#fbbf24",
+                display: "inline-block",
+              }}
+            />
+          </Show>
+        </span>
+      ),
     };
 
     type NudgeTelemetry = Awaited<ReturnType<ProgressClient["nudgeTelemetry"]>>;
@@ -3077,6 +3135,80 @@ export default Plugin.define({
         }
       };
 
+      const testNudge = async () => {
+        if (busy() || telemetry()?.engine === "legacy") return;
+        const text = await ctx.dialogs.prompt({
+          title: "Test nudge text",
+          description:
+            "Submits through the real gate as producer panel.test. Context delivery only; no synthetic turn.",
+          placeholder: "Panel test nudge",
+          value: "Panel test nudge",
+          submit: "Next",
+        });
+        if (text === undefined) return;
+        const severity = await ctx.dialogs.select<"info" | "warn" | "block">({
+          title: "Test nudge severity",
+          options: [
+            { title: "Info", value: "info", description: "Lowest priority; still subject to mute/gap" },
+            { title: "Warn", value: "warn", description: "Replaces an info reminder" },
+            { title: "Block", value: "block", description: "Bypasses mute/gap; context only" },
+          ],
+        });
+        if (!severity) return;
+        setBusy(true);
+        try {
+          const result = await withTimeout(
+            rpcFor(props.session()).nudgeTest({
+              sessionID: props.sessionID(),
+              text,
+              severity,
+            }),
+            8000
+          );
+          ctx.toast.show({
+            title: result.ok ? `Test ${severity} nudge applied` : "Test nudge rejected",
+            description: result.ok
+              ? `"${text.trim() || "Panel test nudge"}" is now standing.`
+              : `Gate reason: ${result.reason ?? "unknown"}`,
+            variant: result.ok ? "success" : "default",
+          });
+          await refresh();
+        } catch (failure) {
+          setError(String(failure));
+        } finally {
+          setBusy(false);
+        }
+      };
+
+      const truncateLog = async () => {
+        if (busy()) return;
+        const bytes = telemetry()?.logBytes ?? 0;
+        const confirmed = await ctx.dialogs.confirm({
+          title: "Clear nudge telemetry log?",
+          description: `${formatBytes(bytes)} of JSONL history will be deleted. Nudge state and progress are untouched.`,
+          confirm: "Clear log",
+          danger: true,
+        });
+        if (!confirmed) return;
+        setBusy(true);
+        try {
+          const result = await withTimeout(
+            rpcFor(props.session()).nudgeTruncateLog({}),
+            8000
+          );
+          ctx.toast.show({
+            title: result.ok ? "Nudge log cleared" : "Could not clear the log",
+            description: result.ok ? `${formatBytes(result.bytes)} freed.` : "The log file could not be truncated.",
+            variant: result.ok ? "success" : "error",
+          });
+          await refresh();
+        } catch (failure) {
+          setError(String(failure));
+        } finally {
+          setBusy(false);
+        }
+      };
+
       const [showTransitions, setShowTransitions] = createSignal(false);
       const events = () => telemetry()?.events ?? [];
       const feedRows = createMemo(() => nudgeFeedRows(events(), showTransitions()));
@@ -3273,6 +3405,26 @@ export default Plugin.define({
             >
               {showTransitions() ? "Hide transitions" : "Show transitions"}
             </button>
+            <button
+              type="button"
+              class="progress-pill-button"
+              disabled={busy() || telemetry()?.engine === "legacy"}
+              title="Fire a test nudge through the real gate"
+              onClick={() => void testNudge()}
+              style={sidebarHeaderButtonStyle}
+            >
+              Test nudge
+            </button>
+            <button
+              type="button"
+              class="progress-pill-button"
+              disabled={busy()}
+              title="Delete the JSONL telemetry log (nudge state is kept)"
+              onClick={() => void truncateLog()}
+              style={sidebarHeaderButtonStyle}
+            >
+              Clear log
+            </button>
           </div>
 
           <Show when={error()}>
@@ -3453,6 +3605,12 @@ export default Plugin.define({
       id: GUI_PROGRESS_PANEL_ID,
       region: "side",
       width: sidebarWidth,
+      focus: (input) => {
+        if (input.tab.id === NUDGE_PANEL_TAB_ID) {
+          nudgeSeenAt = Date.now();
+          setNudgeAttention(0);
+        }
+      },
       mobile: {
         title: "Progress",
         order: 20,
@@ -3571,6 +3729,7 @@ export default Plugin.define({
     return () => {
       alive = false;
       clearInterval(timer);
+      clearInterval(nudgeBadgeTimer);
       if (notesClockTimer) clearInterval(notesClockTimer);
       unsubscribeUpdated?.();
       clearInterval(taskListTimer);
