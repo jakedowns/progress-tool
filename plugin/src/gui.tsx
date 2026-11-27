@@ -852,8 +852,20 @@ export default Plugin.define({
         health: {
           bySource: Record<string, number>;
           rejects: Record<string, number>;
+          sources: Record<
+            string,
+            { attempts: number; applied: number; suppressed: Record<string, number> }
+          >;
           compliance: { samples: number; medianMs: number; p90Ms: number };
         };
+        usage: Array<{
+          tool: string;
+          nudges: number;
+          attempts: number;
+          suppressed: Record<string, number>;
+          uses?: number;
+          producers: Record<string, number>;
+        }>;
         graceByType: Record<string, number>;
         logBytes: number;
         events: Array<Record<string, unknown>>;
@@ -3242,6 +3254,7 @@ export default Plugin.define({
       };
 
       const health = () => telemetry()?.health;
+      const usage = () => telemetry()?.usage ?? [];
       const standing = () => telemetry()?.standing;
       const standingActive = () => {
         const value = standing();
@@ -3390,6 +3403,70 @@ export default Plugin.define({
                   ? ` · compliance ${shortMs(health()!.compliance.medianMs)} median`
                   : ""}
               </div>
+            </div>
+          </Show>
+
+          <Show when={usage().length > 0}>
+            <div
+              style={{
+                display: "flex",
+                "flex-direction": "column",
+                gap: "2px",
+                "font-size": "11px",
+                "flex": "0 0 auto",
+              }}
+            >
+              <div style={{ opacity: "0.45" }}>nudges → agent usage</div>
+              <For each={usage()}>
+                {(row) => {
+                  const skipped = Math.max(0, row.attempts - row.nudges);
+                  const reasons = topCounts(row.suppressed)
+                    .map(([key, value]) => `${key} ${value}`)
+                    .join(" · ");
+                  const usageLabel =
+                    row.tool === "say"
+                      ? "notes"
+                      : row.tool === "progress"
+                        ? "writes"
+                        : row.tool === "relay"
+                          ? "runs"
+                          : "uses";
+                  return (
+                    <div
+                      title={`${row.attempts} attempts · ${row.nudges} applied${
+                        reasons ? ` · skipped ${reasons}` : ""
+                      }`}
+                      style={{
+                        display: "flex",
+                        gap: "6px",
+                        "white-space": "nowrap",
+                      }}
+                    >
+                      <span
+                        style={{
+                          width: "10ch",
+                          "flex": "0 0 auto",
+                          opacity: "0.72",
+                          overflow: "hidden",
+                          "text-overflow": "ellipsis",
+                        }}
+                      >
+                        {row.tool}
+                      </span>
+                      <span
+                        style={{
+                          flex: "1 1 auto",
+                          overflow: "hidden",
+                          "text-overflow": "ellipsis",
+                        }}
+                      >
+                        {row.nudges} → {row.uses !== undefined ? `${row.uses} ${usageLabel}` : "—"}
+                        {skipped > 0 ? ` · ${skipped} skipped` : ""}
+                      </span>
+                    </div>
+                  );
+                }}
+              </For>
             </div>
           </Show>
 

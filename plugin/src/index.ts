@@ -694,10 +694,18 @@ export default Plugin.define({
           counts[eventName] = (counts[eventName] ?? 0) + 1;
           events.push(subagent ? { ...parsed, subagent } : parsed);
         }
+        let progressUses = 0;
+        for (const event of events) {
+          if (event.event === "nudge-touch" || event.event === "compliance") {
+            progressUses += 1;
+          }
+        }
         return {
           events: events.slice(-limit).reverse(),
           counts,
           health: summarizeNudgeEvents(events),
+          progressUses,
+          windowStart: events.length > 0 ? Date.parse(String(events[0].ts)) : 0,
           graceRejects: events
             .filter(
               (event) =>
@@ -713,6 +721,8 @@ export default Plugin.define({
           events: [],
           counts: {},
           health: summarizeNudgeEvents([]),
+          progressUses: 0,
+          windowStart: 0,
           graceRejects: [] as Array<{ producer: string; ts: string }>,
         };
       } finally {
@@ -945,6 +955,74 @@ export default Plugin.define({
           if (!entry || typeof entry.id !== "string") continue;
           entryView[`${entry.sessionId ?? ""}:${entry.id}`] = effectiveView(entry);
         }
+        const links = readSessionMap();
+        let sayNotes = 0;
+        for (const [author, list] of Object.entries(progress.notes ?? {})) {
+          if (!Array.isArray(list)) continue;
+          if (author !== sessionID && rootSessionFor(author, links) !== sessionID) {
+            continue;
+          }
+          for (const note of list) {
+            const at = (note as { at?: unknown } | null)?.at;
+            if (typeof at !== "number") continue;
+            if (tail.windowStart > 0 && at < tail.windowStart) continue;
+            sayNotes += 1;
+          }
+        }
+        const toolFor = (source: string) => {
+          const name = source.toLowerCase();
+          if (name === "say" || name.startsWith("say.")) return "say";
+          if (
+            name === "strict" ||
+            name === "wall" ||
+            name === "wall-clock" ||
+            name === "idle" ||
+            name === "idle-reminder" ||
+            name.startsWith("progress")
+          ) {
+            return "progress";
+          }
+          if (name === "relay" || name === "relay-hint" || name.startsWith("relay.")) {
+            return "relay";
+          }
+          if (name.startsWith("custom")) return "custom";
+          if (name.startsWith("panel.test")) return "test";
+          return name.split(".")[0] || "other";
+        };
+        const usageByTool = new Map<
+          string,
+          {
+            tool: string;
+            nudges: number;
+            attempts: number;
+            suppressed: Record<string, number>;
+            uses?: number;
+            producers: Record<string, number>;
+          }
+        >();
+        for (const [source, stats] of Object.entries(tail.health.sources)) {
+          const tool = toolFor(source);
+          const row =
+            usageByTool.get(tool) ?? {
+              tool,
+              nudges: 0,
+              attempts: 0,
+              suppressed: {} as Record<string, number>,
+              producers: {} as Record<string, number>,
+            };
+          row.nudges += stats.applied;
+          row.attempts += stats.attempts;
+          for (const [reason, count] of Object.entries(stats.suppressed)) {
+            row.suppressed[reason] = (row.suppressed[reason] ?? 0) + count;
+          }
+          row.producers[source] = (row.producers[source] ?? 0) + stats.applied;
+          usageByTool.set(tool, row);
+        }
+        for (const row of usageByTool.values()) {
+          if (row.tool === "progress") row.uses = tail.progressUses;
+          else if (row.tool === "say") row.uses = sayNotes;
+        }
+        const usage = [...usageByTool.values()].sort((a, b) => b.nudges - a.nudges);
         let logBytes = 0;
         try {
           logBytes = statSync(nudgeLogPath()).size;
@@ -982,6 +1060,7 @@ export default Plugin.define({
               : 2,
           entryView,
           health: tail.health,
+          usage,
           graceByType: (() => {
             // Grace is one per-session window (lastProgressAt), but it only
             // gates these producers; count suppressed attempts per type so the

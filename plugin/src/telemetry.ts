@@ -60,11 +60,19 @@ export function logNudge(event: Record<string, unknown>): void {
  */
 export type StatusSnapshot = Record<string, string>;
 
+export interface NudgeSourceStats {
+  attempts: number;
+  applied: number;
+  suppressed: Record<string, number>;
+}
+
 export interface NudgeHealth {
   /** Applied reminders by producer/source. */
   bySource: Record<string, number>;
   /** Suppressed attempts by reason. */
   rejects: Record<string, number>;
+  /** Attempt/applied/suppressed counts per producer. */
+  sources: Record<string, NudgeSourceStats>;
   /** Nudge-to-progress latency samples (ms). */
   compliance: { samples: number; medianMs: number; p90Ms: number };
 }
@@ -85,6 +93,7 @@ export function summarizeNudgeEvents(
 ): NudgeHealth {
   const bySource: Record<string, number> = {};
   const rejects: Record<string, number> = {};
+  const sources: Record<string, NudgeSourceStats> = {};
   const latencies: number[] = [];
   let lastAppliedAt = 0;
 
@@ -92,6 +101,8 @@ export function summarizeNudgeEvents(
     if (!key) return;
     map[key] = (map[key] ?? 0) + 1;
   };
+  const statsFor = (source: string) =>
+    (sources[source] ??= { attempts: 0, applied: 0, suppressed: {} });
   const time = (value: unknown) => {
     const parsed = typeof value === "string" ? Date.parse(value) : NaN;
     return Number.isFinite(parsed) ? parsed : 0;
@@ -100,21 +111,40 @@ export function summarizeNudgeEvents(
   for (const event of events) {
     const name = String(event.event ?? "");
     if (name === "reminder") {
-      if (typeof event.suppressed === "string") bump(rejects, event.suppressed);
-      else if (event.deduped !== true) bump(bySource, String(event.source ?? "unknown"));
+      const source = String(event.source ?? "unknown");
+      const stats = statsFor(source);
+      stats.attempts += 1;
+      if (typeof event.suppressed === "string") {
+        bump(stats.suppressed, event.suppressed);
+        bump(rejects, event.suppressed);
+      } else if (event.deduped === true) {
+        bump(stats.suppressed, "duplicate");
+      } else {
+        stats.applied += 1;
+        bump(bySource, source);
+      }
     } else if (name === "nudge") {
+      const producer = String(event.producer ?? "unknown");
+      const stats = statsFor(producer);
+      stats.attempts += 1;
       if (typeof event.delivery === "string") {
-        bump(bySource, String(event.producer ?? "unknown"));
+        stats.applied += 1;
+        bump(bySource, producer);
         lastAppliedAt = time(event.ts);
       } else if (typeof event.reason === "string") {
+        bump(stats.suppressed, event.reason);
         bump(rejects, event.reason);
       }
     } else if (name === "custom-nudge") {
+      const source = `custom:${String(event.ruleId ?? "rule")}`;
+      const stats = statsFor(source);
+      stats.attempts += 1;
       if (typeof event.severity === "string" && typeof event.text === "string") {
-        bump(bySource, `custom:${String(event.ruleId ?? "rule")}`);
+        stats.applied += 1;
+        bump(bySource, source);
         lastAppliedAt = time(event.ts);
       } else if (typeof event.reason === "string") {
-        bump(rejects, event.reason);
+        bump(stats.suppressed, event.reason);
       }
     } else if (
       name === "compliance" &&
@@ -133,6 +163,7 @@ export function summarizeNudgeEvents(
   return {
     bySource,
     rejects,
+    sources,
     compliance: {
       samples: sorted.length,
       medianMs: percentile(sorted, 50),
