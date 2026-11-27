@@ -225,6 +225,181 @@ export const ProgressRpc = Rpc.define({
         additionalProperties: false,
       },
     },
+    nudgeTelemetry: {
+      input: {
+        type: "object",
+        properties: {
+          sessionID: { type: "string" },
+          limit: { type: "number" },
+        },
+        required: ["sessionID"],
+        additionalProperties: false,
+      },
+      output: {
+        type: "object",
+        properties: {
+          engine: { type: "string", enum: ["shared", "legacy"] },
+          mutedUntil: { type: "number" },
+          standing: {
+            type: "object",
+            properties: {
+              severity: { type: "string" },
+              source: { type: "string" },
+              text: { type: "string" },
+              at: { type: "number" },
+            },
+            required: ["severity", "source", "text", "at"],
+            additionalProperties: false,
+          },
+          fires: { type: "number" },
+          lastReminderAt: { type: "number" },
+          lastProgressAt: { type: "number" },
+          gapMs: { type: "number" },
+          graceMs: { type: "number" },
+          capPerSession: { type: "number" },
+          entryView: { type: "object", additionalProperties: true },
+          health: {
+            type: "object",
+            properties: {
+              bySource: { type: "object", additionalProperties: true },
+              rejects: { type: "object", additionalProperties: true },
+              compliance: {
+                type: "object",
+                properties: {
+                  samples: { type: "number" },
+                  medianMs: { type: "number" },
+                  p90Ms: { type: "number" },
+                },
+                required: ["samples", "medianMs", "p90Ms"],
+                additionalProperties: false,
+              },
+              sources: { type: "object", additionalProperties: true },
+            },
+            required: ["bySource", "rejects", "compliance", "sources"],
+            additionalProperties: false,
+          },
+          usage: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                tool: { type: "string" },
+                nudges: { type: "number" },
+                attempts: { type: "number" },
+                suppressed: { type: "object", additionalProperties: true },
+                uses: { type: "number" },
+                producers: { type: "object", additionalProperties: true },
+              },
+              required: ["tool", "nudges", "attempts", "suppressed", "producers"],
+              additionalProperties: false,
+            },
+          },
+          graceByType: { type: "object", additionalProperties: true },
+          graceWindows: { type: "object", additionalProperties: true },
+          logBytes: { type: "number" },
+          events: {
+            type: "array",
+            items: { type: "object", additionalProperties: true },
+          },
+          counts: { type: "object", additionalProperties: true },
+        },
+        required: [
+          "engine",
+          "mutedUntil",
+          "standing",
+          "fires",
+          "lastReminderAt",
+          "lastProgressAt",
+          "gapMs",
+          "graceMs",
+          "capPerSession",
+          "entryView",
+          "health",
+          "usage",
+          "graceByType",
+          "graceWindows",
+          "logBytes",
+          "events",
+          "counts",
+        ],
+        additionalProperties: false,
+      },
+    },
+    nudgeMute: {
+      input: {
+        type: "object",
+        properties: {
+          sessionID: { type: "string" },
+          minutes: { type: "number" },
+        },
+        required: ["sessionID"],
+        additionalProperties: false,
+      },
+      output: {
+        type: "object",
+        properties: {
+          ok: { type: "boolean" },
+          mutedUntil: { type: "number" },
+        },
+        required: ["ok", "mutedUntil"],
+        additionalProperties: false,
+      },
+    },
+    nudgeTest: {
+      input: {
+        type: "object",
+        properties: {
+          sessionID: { type: "string" },
+          text: { type: "string" },
+          severity: { type: "string", enum: ["info", "warn", "block"] },
+        },
+        required: ["sessionID"],
+        additionalProperties: false,
+      },
+      output: {
+        type: "object",
+        properties: {
+          ok: { type: "boolean" },
+          reason: { type: "string" },
+        },
+        required: ["ok"],
+        additionalProperties: false,
+      },
+    },
+    nudgeTruncateLog: {
+      input: {
+        type: "object",
+        properties: {},
+        additionalProperties: false,
+      },
+      output: {
+        type: "object",
+        properties: {
+          ok: { type: "boolean" },
+          bytes: { type: "number" },
+        },
+        required: ["ok", "bytes"],
+        additionalProperties: false,
+      },
+    },
+    nudgePurge: {
+      input: {
+        type: "object",
+        properties: {
+          sessionID: { type: "string" },
+        },
+        required: ["sessionID"],
+        additionalProperties: false,
+      },
+      output: {
+        type: "object",
+        properties: {
+          ok: { type: "boolean" },
+        },
+        required: ["ok"],
+        additionalProperties: false,
+      },
+    },
     nudgeList: {
       input: {
         type: "object",

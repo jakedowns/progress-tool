@@ -2185,6 +2185,18 @@ function statusSummary(roots) {
 function leftClick(event) {
   return event.button === void 0 || event.button === 0;
 }
+function formatAgoShort(ms) {
+  if (!ms) return "";
+  const delta = Math.max(0, Date.now() - ms);
+  if (delta < 1e4) return "just now";
+  const seconds = Math.floor(delta / 1e3);
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
 function ProgressRow(props) {
   const ctx = usePlugin();
   const indent = () => props.row.depth === 0 ? "" : "\u2514\u2500 ";
@@ -2217,7 +2229,8 @@ function ProgressRow(props) {
       return `${glyph(props.row.node.status)} ${title()}${suffix()}`;
     }
     if (themeState.value === "ultra-compact") {
-      return `${glyph(props.row.node.status)} ${title()}`;
+      const ago = formatAgoShort(props.row.node.updatedAt ?? props.row.node.createdAt);
+      return `${glyph(props.row.node.status)} ${ago ? `${ago} \xB7 ` : ""}${title()}`;
     }
     if (themeState.value === "compact") {
       const meta = compactTreeSuffix(props.row.node.progress, props.row.hiddenChildren);
@@ -2349,43 +2362,62 @@ function ProgressTree(props) {
     event.stopPropagation();
     void confirmDismissAll(ctx, roots());
   };
+  const onToggleCollapsed = (event) => {
+    if (!leftClick(event)) return;
+    event.stopPropagation();
+    toggleCollapsed(ctx);
+  };
   const title = () => (() => {
-    var _el$1 = _$createElement("text");
-    _$insertNode(_el$1, _$createTextNode(`progress`));
-    _$setProp(_el$1, "selectable", false);
-    _$setProp(_el$1, "onMouseUp", () => openProgressDialog(ctx));
-    _$effect((_$p) => _$setProp(_el$1, "fg", ctx.theme.text.muted, _$p));
+    var _el$1 = _$createElement("box"), _el$10 = _$createElement("text"), _el$12 = _$createElement("text");
+    _$insertNode(_el$1, _el$10);
+    _$insertNode(_el$1, _el$12);
+    _$setProp(_el$1, "flexDirection", "row");
+    _$insertNode(_el$10, _$createTextNode(`[-] `));
+    _$setProp(_el$10, "selectable", false);
+    _$setProp(_el$10, "onMouseUp", onToggleCollapsed);
+    _$insertNode(_el$12, _$createTextNode(`progress`));
+    _$setProp(_el$12, "selectable", false);
+    _$setProp(_el$12, "onMouseUp", () => openProgressDialog(ctx));
+    _$effect((_p$) => {
+      var _v$5 = ctx.theme.text.base, _v$6 = ctx.theme.text.muted;
+      _v$5 !== _p$.e && (_p$.e = _$setProp(_el$10, "fg", _v$5, _p$.e));
+      _v$6 !== _p$.t && (_p$.t = _$setProp(_el$12, "fg", _v$6, _p$.t));
+      return _p$;
+    }, {
+      e: void 0,
+      t: void 0
+    });
     return _el$1;
   })();
   const actions = () => (() => {
-    var _el$11 = _$createElement("box"), _el$15 = _$createElement("text");
-    _$insertNode(_el$11, _el$15);
-    _$setProp(_el$11, "flexDirection", "row");
-    _$insert(_el$11, _$createComponent(Show, {
+    var _el$14 = _$createElement("box"), _el$18 = _$createElement("text");
+    _$insertNode(_el$14, _el$18);
+    _$setProp(_el$14, "flexDirection", "row");
+    _$insert(_el$14, _$createComponent(Show, {
       get when() {
         return doneRoots().length > 0;
       },
       get children() {
         return [(() => {
-          var _el$12 = _$createElement("text");
-          _$setProp(_el$12, "selectable", false);
-          _$setProp(_el$12, "onMouseUp", onDismissDone);
-          _$insert(_el$12, () => `dismiss done (${doneRoots().length})`);
-          _$effect((_$p) => _$setProp(_el$12, "fg", ctx.theme.text.base, _$p));
-          return _el$12;
+          var _el$15 = _$createElement("text");
+          _$setProp(_el$15, "selectable", false);
+          _$setProp(_el$15, "onMouseUp", onDismissDone);
+          _$insert(_el$15, () => `dismiss done (${doneRoots().length})`);
+          _$effect((_$p) => _$setProp(_el$15, "fg", ctx.theme.text.base, _$p));
+          return _el$15;
         })(), (() => {
-          var _el$13 = _$createElement("text");
-          _$insertNode(_el$13, _$createTextNode(`  \xB7  `));
-          _$effect((_$p) => _$setProp(_el$13, "fg", ctx.theme.text.muted, _$p));
-          return _el$13;
+          var _el$16 = _$createElement("text");
+          _$insertNode(_el$16, _$createTextNode(`  \xB7  `));
+          _$effect((_$p) => _$setProp(_el$16, "fg", ctx.theme.text.muted, _$p));
+          return _el$16;
         })()];
       }
-    }), _el$15);
-    _$setProp(_el$15, "selectable", false);
-    _$setProp(_el$15, "onMouseUp", onDismissAll);
-    _$insert(_el$15, () => `dismiss all (${roots().length})`);
-    _$effect((_$p) => _$setProp(_el$15, "fg", ctx.theme.text.base, _$p));
-    return _el$11;
+    }), _el$18);
+    _$setProp(_el$18, "selectable", false);
+    _$setProp(_el$18, "onMouseUp", onDismissAll);
+    _$insert(_el$18, () => `dismiss all (${roots().length})`);
+    _$effect((_$p) => _$setProp(_el$18, "fg", ctx.theme.text.base, _$p));
+    return _el$14;
   })();
   const collapsed = () => collapsedState.value === true;
   const summary = () => {
@@ -2398,57 +2430,32 @@ function ProgressTree(props) {
       return hasContent();
     },
     get children() {
-      var _el$16 = _$createElement("box");
-      _$setProp(_el$16, "flexDirection", "column");
-      _$setProp(_el$16, "paddingLeft", 1);
-      _$setProp(_el$16, "paddingRight", 1);
-      _$setProp(_el$16, "paddingTop", 1);
-      _$insert(_el$16, _$createComponent(Show, {
+      var _el$19 = _$createElement("box");
+      _$setProp(_el$19, "flexDirection", "column");
+      _$setProp(_el$19, "paddingLeft", 1);
+      _$setProp(_el$19, "paddingRight", 1);
+      _$setProp(_el$19, "paddingTop", 1);
+      _$insert(_el$19, _$createComponent(Show, {
         get when() {
           return showNotesLine();
         },
         get children() {
-          var _el$17 = _$createElement("box"), _el$18 = _$createElement("text"), _el$19 = _$createElement("text");
-          _$insertNode(_el$17, _el$18);
-          _$insertNode(_el$17, _el$19);
-          _$setProp(_el$17, "flexDirection", "row");
-          _$setProp(_el$17, "alignItems", "flex-start");
-          _$setProp(_el$18, "selectable", false);
-          _$setProp(_el$18, "wrapMode", "word");
-          _$setProp(_el$18, "flexGrow", 1);
-          _$setProp(_el$18, "flexShrink", 1);
-          _$setProp(_el$18, "onMouseUp", () => openNotesDialog(ctx, props.sessionID));
-          _$insert(_el$18, notesLine);
-          _$insertNode(_el$19, _$createTextNode(`  \u2715`));
-          _$setProp(_el$19, "selectable", false);
-          _$setProp(_el$19, "onMouseUp", onDismissNote);
-          _$effect((_p$) => {
-            var _v$5 = ctx.theme.text.muted, _v$6 = ctx.theme.text.muted;
-            _v$5 !== _p$.e && (_p$.e = _$setProp(_el$18, "fg", _v$5, _p$.e));
-            _v$6 !== _p$.t && (_p$.t = _$setProp(_el$19, "fg", _v$6, _p$.t));
-            return _p$;
-          }, {
-            e: void 0,
-            t: void 0
-          });
-          return _el$17;
-        }
-      }), null);
-      _$insert(_el$16, _$createComponent(Show, {
-        get when() {
-          return collapsed();
-        },
-        get children() {
-          var _el$21 = _$createElement("text"), _el$22 = _$createElement("span");
-          _$insertNode(_el$21, _el$22);
+          var _el$20 = _$createElement("box"), _el$21 = _$createElement("text"), _el$22 = _$createElement("text");
+          _$insertNode(_el$20, _el$21);
+          _$insertNode(_el$20, _el$22);
+          _$setProp(_el$20, "flexDirection", "row");
+          _$setProp(_el$20, "alignItems", "flex-start");
           _$setProp(_el$21, "selectable", false);
-          _$setProp(_el$21, "onMouseUp", () => setCollapsed?.((draft) => {
-            draft.value = false;
-          }));
-          _$insertNode(_el$22, _$createTextNode(`progress: `));
-          _$insert(_el$21, summary, null);
+          _$setProp(_el$21, "wrapMode", "word");
+          _$setProp(_el$21, "flexGrow", 1);
+          _$setProp(_el$21, "flexShrink", 1);
+          _$setProp(_el$21, "onMouseUp", () => openNotesDialog(ctx, props.sessionID));
+          _$insert(_el$21, notesLine);
+          _$insertNode(_el$22, _$createTextNode(`  \u2715`));
+          _$setProp(_el$22, "selectable", false);
+          _$setProp(_el$22, "onMouseUp", onDismissNote);
           _$effect((_p$) => {
-            var _v$7 = ctx.theme.text.base, _v$8 = ctx.theme.text.muted;
+            var _v$7 = ctx.theme.text.muted, _v$8 = ctx.theme.text.muted;
             _v$7 !== _p$.e && (_p$.e = _$setProp(_el$21, "fg", _v$7, _p$.e));
             _v$8 !== _p$.t && (_p$.t = _$setProp(_el$22, "fg", _v$8, _p$.t));
             return _p$;
@@ -2456,10 +2463,39 @@ function ProgressTree(props) {
             e: void 0,
             t: void 0
           });
-          return _el$21;
+          return _el$20;
         }
       }), null);
-      _$insert(_el$16, _$createComponent(Show, {
+      _$insert(_el$19, _$createComponent(Show, {
+        get when() {
+          return collapsed();
+        },
+        get children() {
+          var _el$24 = _$createElement("text"), _el$25 = _$createElement("span"), _el$27 = _$createElement("span");
+          _$insertNode(_el$24, _el$25);
+          _$insertNode(_el$24, _el$27);
+          _$setProp(_el$24, "selectable", false);
+          _$setProp(_el$24, "onMouseUp", () => setCollapsed?.((draft) => {
+            draft.value = false;
+          }));
+          _$insertNode(_el$25, _$createTextNode(`[+] `));
+          _$insertNode(_el$27, _$createTextNode(`progress: `));
+          _$insert(_el$24, summary, null);
+          _$effect((_p$) => {
+            var _v$9 = ctx.theme.text.base, _v$0 = ctx.theme.text.base, _v$1 = ctx.theme.text.muted;
+            _v$9 !== _p$.e && (_p$.e = _$setProp(_el$24, "fg", _v$9, _p$.e));
+            _v$0 !== _p$.t && (_p$.t = _$setProp(_el$25, "fg", _v$0, _p$.t));
+            _v$1 !== _p$.a && (_p$.a = _$setProp(_el$27, "fg", _v$1, _p$.a));
+            return _p$;
+          }, {
+            e: void 0,
+            t: void 0,
+            a: void 0
+          });
+          return _el$24;
+        }
+      }), null);
+      _$insert(_el$19, _$createComponent(Show, {
         get when() {
           return !collapsed();
         },
@@ -2468,12 +2504,12 @@ function ProgressTree(props) {
             when: stackedHeader,
             get fallback() {
               return (() => {
-                var _el$27 = _$createElement("box");
-                _$setProp(_el$27, "flexDirection", "row");
-                _$setProp(_el$27, "justifyContent", "space-between");
-                _$insert(_el$27, title, null);
-                _$insert(_el$27, actions, null);
-                return _el$27;
+                var _el$32 = _$createElement("box");
+                _$setProp(_el$32, "flexDirection", "row");
+                _$setProp(_el$32, "justifyContent", "space-between");
+                _$insert(_el$32, title, null);
+                _$insert(_el$32, actions, null);
+                return _el$32;
               })();
             },
             get children() {
@@ -2495,11 +2531,11 @@ function ProgressTree(props) {
               });
             },
             get children() {
-              var _el$24 = _$createElement("scrollbox");
-              _$setProp(_el$24, "scrollY", true);
-              _$setProp(_el$24, "stickyStart", "top");
-              _$setProp(_el$24, "focusable", false);
-              _$insert(_el$24, _$createComponent(For, {
+              var _el$29 = _$createElement("scrollbox");
+              _$setProp(_el$29, "scrollY", true);
+              _$setProp(_el$29, "stickyStart", "top");
+              _$setProp(_el$29, "focusable", false);
+              _$insert(_el$29, _$createComponent(For, {
                 get each() {
                   return view().rows;
                 },
@@ -2510,36 +2546,36 @@ function ProgressTree(props) {
                   }
                 })
               }));
-              _$effect((_$p) => _$setProp(_el$24, "height", viewportHeight(), _$p));
-              return _el$24;
+              _$effect((_$p) => _$setProp(_el$29, "height", viewportHeight(), _$p));
+              return _el$29;
             }
           }), _$createComponent(Show, {
             get when() {
               return capacity > 0 && overflowLines() > 0;
             },
             get children() {
-              var _el$25 = _$createElement("text");
-              _$setProp(_el$25, "selectable", false);
-              _$insert(_el$25, () => `--- scroll to see ${overflowLines()} more ---`);
-              _$effect((_$p) => _$setProp(_el$25, "fg", ctx.theme.text.muted, _$p));
-              return _el$25;
+              var _el$30 = _$createElement("text");
+              _$setProp(_el$30, "selectable", false);
+              _$insert(_el$30, () => `--- scroll to see ${overflowLines()} more ---`);
+              _$effect((_$p) => _$setProp(_el$30, "fg", ctx.theme.text.muted, _$p));
+              return _el$30;
             }
           }), _$createComponent(Show, {
             get when() {
               return view().hiddenRoots > 0;
             },
             get children() {
-              var _el$26 = _$createElement("text");
-              _$setProp(_el$26, "selectable", false);
-              _$setProp(_el$26, "onMouseUp", () => openProgressDialog(ctx));
-              _$insert(_el$26, () => `view full progress tree (${statusSummary(roots())})`);
-              _$effect((_$p) => _$setProp(_el$26, "fg", ctx.theme.text.base, _$p));
-              return _el$26;
+              var _el$31 = _$createElement("text");
+              _$setProp(_el$31, "selectable", false);
+              _$setProp(_el$31, "onMouseUp", () => openProgressDialog(ctx));
+              _$insert(_el$31, () => `view full progress tree (${statusSummary(roots())})`);
+              _$effect((_$p) => _$setProp(_el$31, "fg", ctx.theme.text.base, _$p));
+              return _el$31;
             }
           })];
         }
       }), null);
-      return _el$16;
+      return _el$19;
     }
   });
 }
@@ -2935,10 +2971,10 @@ function FooterStatus() {
       return summary();
     },
     get children() {
-      var _el$28 = _$createElement("text");
-      _$insert(_el$28, summary);
-      _$effect((_$p) => _$setProp(_el$28, "fg", ctx.theme.text.muted, _$p));
-      return _el$28;
+      var _el$33 = _$createElement("text");
+      _$insert(_el$33, summary);
+      _$effect((_$p) => _$setProp(_el$33, "fg", ctx.theme.text.muted, _$p));
+      return _el$33;
     }
   });
 }

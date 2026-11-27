@@ -5,9 +5,18 @@
  * relay and exposes it to the TUI and GUI parts through RPC.
  */
 
-import { readFileSync } from "node:fs";
+import {
+  closeSync,
+  fstatSync,
+  openSync,
+  readFileSync,
+  readSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
+import { homedir } from "node:os";
 import path from "node:path";
 import { Plugin, Skill } from "@opencode/plugin";
 import { ProgressRpc } from "./rpc.js";
@@ -27,6 +36,7 @@ import {
   writeDismissal,
 } from "./state.js";
 import { readTaskListStatus, toggleTaskListMode } from "./tasklist-prefs.js";
+import type { AttachedNudge } from "@jakedowns/opencode-nudge";
 import {
   upsertNativeProgress,
   type NativeProgressInput,
@@ -44,6 +54,7 @@ import {
   normalizeSayOptions,
   type SayController,
 } from "./say.js";
+import { resolveNudgeEngine, type NudgeEngine } from "./nudge-engine.js";
 import {
   formatReminder,
   isHealthyWaiting,
@@ -108,7 +119,14 @@ import {
   type IdleTracker,
   type WallClockState,
 } from "./monitor.js";
-import { logNudge, nudgeLoggingEnabled, diffStatuses, type StatusSnapshot } from "./telemetry.js";
+import {
+  logNudge,
+  nudgeLogPath,
+  nudgeLoggingEnabled,
+  diffStatuses,
+  summarizeNudgeEvents,
+  type StatusSnapshot,
+} from "./telemetry.js";
 import { resolveMcpLaunch, taskListEnvironment } from "./mcp.js";
 import { injectParentSession, isSubagentTool } from "./subagent.js";
 import {
@@ -198,6 +216,15 @@ export default Plugin.define({
     const sayOptions = normalizeSayOptions(ctx.options);
     const sayNudgeOptions = normalizeSayNudgeOptions(ctx.options);
     const sayNudgeStates = new Map<string, SayNudgeState>();
+    /** Consecutive ignored say nudges since the last accepted note. */
+    const sayNudgeStrikes = new Map<string, number>();
+    /** Sessions already escalated once; cleared by an accepted note. */
+    const sayNudgeEscalated = new Set<string>();
+    const sayNudgeEscalateAfter = (() => {
+      const raw = ctx.options?.sayNudgeEscalateAfter;
+      if (typeof raw !== "number" || !Number.isFinite(raw)) return 3;
+      return Math.min(10, Math.max(0, Math.floor(raw)));
+    })();
     /** Non-say/progress tool calls this turn, reset by an accepted note/prompt. */
     const sayCallsSinceNote = new Map<string, number>();
     const toolStartedAt = new Map<string, number>();
@@ -210,6 +237,18 @@ export default Plugin.define({
     /** One standing reminder entry per session. */
     const standingReminders = new Map<string, ReminderState>();
     const REMINDER_KEY = 'progress-reminder';
+    const customNudgesOn = customNudgesEnabled(ctx.options);
+    const requestedNudgeMode = resolveNudgeEngine(ctx.options?.nudgeEngine);
+    // Custom rules still use the legacy replace/alongside engine. Do not
+    // half-enable shared mode and silently disable them.
+    let nudgeMode: NudgeEngine =
+      requestedNudgeMode === "shared" && customNudgesOn ? "legacy" : requestedNudgeMode;
+    if (requestedNudgeMode === "shared" && customNudgesOn) {
+      console.warn(
+        "[opencode-progress] nudgeEngine=shared is disabled while customNudges is on; using legacy"
+      );
+    }
+    let sharedNudge: AttachedNudge | undefined;
     /** Non-block reminders stay quiet for this long after any other reminder. */
     const reminderGapMs = (() => {
       const raw = ctx.options?.nudgeGapMs;
@@ -273,7 +312,6 @@ export default Plugin.define({
     // Custom nudge rules live in dedicated files (global/project/session),
     // never in opencode.json. The scheduler reads them on demand: the files
     // are tiny, and this keeps the TUI and server in sync without IPC.
-    const customNudgesOn = customNudgesEnabled(ctx.options);
     const nudgePaths = resolveNudgePaths({ directory: ctx.location?.directory ?? process.cwd() });
     const nudgeRuntimes = new Map<string, NudgeRuntime>();
     const knownSessions = new Set<string>();
@@ -321,6 +359,35 @@ export default Plugin.define({
       // twice; helpers that return only a body get the prefix here.
       const isCustom = source.startsWith("custom:");
       const now = Date.now();
+      if (sharedNudge && nudgeMode === "shared" && !source.startsWith("custom:")) {
+        const sharedText = /^\[(info|warn|block)\]\s/.test(body)
+          ? body.trim()
+          : formatReminder(severity, body);
+        const producer =
+          source === "strict"
+            ? "progress.tree"
+            : source === "wall"
+              ? "progress.wall"
+              : source === "idle"
+                ? "progress.idle"
+                : source === "relay"
+                  ? "progress.relay"
+                  : source === "say"
+                    ? "say"
+                    : `custom.${source}`;
+        void Promise.resolve(
+          sharedNudge.adapter.submit({
+            sessionId: sessionID,
+            producer,
+            ruleId: source,
+            severity,
+            text: sharedText,
+            channel: severity === "block" ? "synthetic" : "context",
+            at: now,
+          })
+        ).catch((error) => console.warn("[opencode-progress] shared nudge failed", String(error)));
+        return true;
+      }
       if (severity !== "block" && reminderMuted(sessionID)) {
         if (verbose) logNudge({ event: 'reminder', sessionID, severity, source, suppressed: 'muted' });
         return false;
@@ -371,6 +438,21 @@ export default Plugin.define({
     };
 
     const clearReminder = (sessionID: string, source?: string): void => {
+      if (sharedNudge && nudgeMode === "shared") {
+        const producer =
+          source === "strict"
+            ? "progress.tree"
+            : source === "wall"
+              ? "progress.wall"
+              : source === "idle"
+                ? "progress.idle"
+                : source === "relay"
+                  ? "progress.relay"
+                  : source === "say"
+                    ? "say"
+                    : source;
+        void Promise.resolve(sharedNudge.adapter.clear(sessionID, producer)).catch(() => {});
+      }
       const current = standingReminders.get(sessionID);
       if (!current) return;
       if (source && current.source !== source) return;
@@ -391,6 +473,7 @@ export default Plugin.define({
       options: { idle?: boolean; timer?: boolean } = {}
     ): void {
       if (!customNudgesOn) return;
+      if (nudgeMode === "shared") return;
       try {
         knownSessions.add(sessionID);
         const now = Date.now();
@@ -508,9 +591,18 @@ export default Plugin.define({
                 at: note.at,
               });
               // A real note is compliance: reset the forgot-to-narrate counter
-              // and clear a say-sourced standing reminder.
+              // and clear a say-sourced standing reminder. In shared mode it
+              // also resets the say-specific grace clock, independent of
+              // progress writes.
               sayCallsSinceNote.set(note.sessionID, 0);
+              sayNudgeStrikes.delete(note.sessionID);
+              sayNudgeEscalated.delete(note.sessionID);
               clearReminder(note.sessionID, 'say');
+              if (sharedNudge && nudgeMode === "shared") {
+                void Promise.resolve(
+                  sharedNudge.adapter.touch(note.sessionID, "say")
+                ).catch(() => {});
+              }
             },
             synthetic: (input) =>
               hasActiveReplace(input.sessionID)
@@ -549,6 +641,138 @@ export default Plugin.define({
     const stateSignature = (state: ReturnType<typeof readProgressState>) =>
       JSON.stringify([state.entries ?? {}, state.notes ?? {}]);
     let signature = stateSignature(readProgressState());
+
+    /** Tail the JSONL log without loading 180MB into memory. */
+    const readNudgeTail = (sessionID: string, limit: number) => {
+      const file = nudgeLogPath();
+      // Child sessions share the parent's nudge view; tag their rows so the
+      // panel can tell subagent activity from the root agent's own traffic.
+      const links = readSessionMap();
+      const children = new Map<string, string>();
+      for (const child of Object.keys(links)) {
+        if (child === sessionID) continue;
+        if (rootSessionFor(child, links) !== sessionID) continue;
+        const link = links[child];
+        children.set(child, link?.name || link?.agent || child.slice(-6));
+      }
+      let fd: number | undefined;
+      try {
+        fd = openSync(file, "r");
+        const size = fstatSync(fd).size;
+        const bytes = Math.min(size, 512 * 1024);
+        const buffer = Buffer.alloc(bytes);
+        readSync(fd, buffer, 0, bytes, Math.max(0, size - bytes));
+        const events: Array<Record<string, unknown>> = [];
+        const counts: Record<string, number> = {};
+        for (const line of buffer.toString("utf8").split("\n")) {
+          if (!line.trim()) continue;
+          let parsed: Record<string, unknown>;
+          try {
+            parsed = JSON.parse(line) as Record<string, unknown>;
+          } catch {
+            continue;
+          }
+          const eventSession = String(parsed.sessionID ?? "");
+          const subagent = children.get(eventSession);
+          if (eventSession !== sessionID && !subagent) continue;
+          const eventName = String(parsed.event ?? "unknown");
+          counts[eventName] = (counts[eventName] ?? 0) + 1;
+          events.push(subagent ? { ...parsed, subagent } : parsed);
+        }
+        let touches = 0;
+        let transitions = 0;
+        let compliance = 0;
+        for (const event of events) {
+          if (event.event === "nudge-touch") touches += 1;
+          else if (event.event === "transition") transitions += 1;
+          else if (event.event === "compliance") compliance += 1;
+        }
+        // Prefer explicit progress-write touches; older logs only have
+        // status transitions (or legacy compliance clears).
+        const progressUses = touches > 0 ? touches : transitions > 0 ? transitions : compliance;
+        return {
+          events: events.slice(-limit).reverse(),
+          counts,
+          health: summarizeNudgeEvents(events),
+          progressUses,
+          windowStart: events.length > 0 ? Date.parse(String(events[0].ts)) : 0,
+          graceRejects: events
+            .filter(
+              (event) =>
+                event.reason === "grace" || event.suppressed === "grace"
+            )
+            .map((event) => ({
+              producer: String(event.producer ?? event.source ?? ""),
+              ts: String(event.ts ?? ""),
+            })),
+        };
+      } catch {
+        return {
+          events: [],
+          counts: {},
+          health: summarizeNudgeEvents([]),
+          progressUses: 0,
+          windowStart: 0,
+          graceRejects: [] as Array<{ producer: string; ts: string }>,
+        };
+      } finally {
+        if (fd != null) {
+          try {
+            closeSync(fd);
+          } catch {
+            // Already closed.
+          }
+        }
+      }
+    };
+
+    /** Read the adapter's own session record so the panel shows real gate values. */
+    const readSharedNudgeSession = (sessionID: string) => {
+      try {
+        const xdg = process.env.XDG_CONFIG_HOME;
+        const base = xdg ? path.join(xdg, "opencode") : path.join(homedir(), ".config", "opencode");
+        const parsed = JSON.parse(
+          readFileSync(path.join(base, "nudge-state.json"), "utf8")
+        ) as {
+          sessions?: Record<
+            string,
+            {
+              lastReminderAt?: number;
+              lastProgressAt?: number;
+              fires?: number;
+              activity?: Record<string, number>;
+            }
+          >;
+        };
+        let defaults: Record<string, unknown> = {};
+        try {
+          const config = JSON.parse(
+            readFileSync(path.join(base, "nudge.json"), "utf8")
+          ) as { defaults?: Record<string, unknown> };
+          defaults = config.defaults ?? {};
+        } catch {
+          // No unified config; adapter defaults apply.
+        }
+        const session = parsed?.sessions?.[sessionID];
+        if (!session) {
+          return { lastReminderAt: 0, lastProgressAt: 0, fires: 0, defaults };
+        }
+        return {
+          lastReminderAt:
+            typeof session.lastReminderAt === "number" ? session.lastReminderAt : 0,
+          lastProgressAt:
+            typeof session.lastProgressAt === "number" ? session.lastProgressAt : 0,
+          fires: typeof session.fires === "number" ? session.fires : 0,
+          activity:
+            session.activity && typeof session.activity === "object"
+              ? session.activity
+              : undefined,
+          defaults,
+        };
+      } catch {
+        return undefined;
+      }
+    };
 
     const registration = await ctx.rpc.register(ProgressRpc, {
       list: async (input) => {
@@ -692,6 +916,234 @@ export default Plugin.define({
         const mode = toggleTaskListMode();
         console.log(`[opencode-progress] v${pluginVersion} task-list mode=${mode}`);
         return { ok: true, mode };
+      },
+      nudgeTelemetry: async ({ sessionID, limit }) => {
+        const tail = readNudgeTail(sessionID, Math.min(200, Math.max(10, limit ?? 60)));
+        const status = sharedNudge?.adapter.status(sessionID);
+        const state = readSharedNudgeSession(sessionID);
+        const progress = readProgressState();
+        const progressEntries = Object.values(progress.entries ?? {});
+        const entriesById = new Map<string, (typeof progressEntries)[number]>();
+        for (const entry of progressEntries) {
+          if (!entry || typeof entry.id !== "string") continue;
+          entriesById.set(`${entry.sessionId ?? ""}:${entry.id}`, entry);
+        }
+        // The tree prunes a dismissed/cleared subtree, so a child with no
+        // dismissal of its own is still hidden when an ancestor is hidden.
+        const effectiveView = (entry: (typeof progressEntries)[number]): string => {
+          if (entry.cleared) return "cleared";
+          if (entry.dismissed) return "dismissed";
+          let parentId = typeof entry.parentId === "string" ? entry.parentId : "";
+          const seen = new Set<string>();
+          let cursor = entry;
+          for (let depth = 0; depth < 50 && parentId; depth += 1) {
+            const key = `${cursor.sessionId ?? ""}:${parentId}`;
+            if (seen.has(key)) break;
+            seen.add(key);
+            const parent = entriesById.get(key);
+            if (!parent) break;
+            if (parent.cleared) return "ancestor cleared";
+            if (parent.dismissed) return "ancestor dismissed";
+            cursor = parent;
+            parentId = typeof parent.parentId === "string" ? parent.parentId : "";
+          }
+          return "visible";
+        };
+        const entryView: Record<string, string> = {};
+        for (const entry of progressEntries) {
+          if (!entry || typeof entry.id !== "string") continue;
+          entryView[`${entry.sessionId ?? ""}:${entry.id}`] = effectiveView(entry);
+        }
+        const links = readSessionMap();
+        let sayNotes = 0;
+        for (const [author, list] of Object.entries(progress.notes ?? {})) {
+          if (!Array.isArray(list)) continue;
+          if (author !== sessionID && rootSessionFor(author, links) !== sessionID) {
+            continue;
+          }
+          for (const note of list) {
+            const at = (note as { at?: unknown } | null)?.at;
+            if (typeof at !== "number") continue;
+            if (tail.windowStart > 0 && at < tail.windowStart) continue;
+            sayNotes += 1;
+          }
+        }
+        const toolFor = (source: string) => {
+          const name = source.toLowerCase();
+          if (name === "say" || name.startsWith("say.")) return "say";
+          if (
+            name === "strict" ||
+            name === "wall" ||
+            name === "wall-clock" ||
+            name === "idle" ||
+            name === "idle-reminder" ||
+            name.startsWith("progress")
+          ) {
+            return "progress";
+          }
+          if (name === "relay" || name === "relay-hint" || name.startsWith("relay.")) {
+            return "relay";
+          }
+          if (name.startsWith("custom")) return "custom";
+          if (name.startsWith("panel.test")) return "test";
+          return name.split(".")[0] || "other";
+        };
+        const usageByTool = new Map<
+          string,
+          {
+            tool: string;
+            nudges: number;
+            attempts: number;
+            suppressed: Record<string, number>;
+            uses?: number;
+            producers: Record<string, number>;
+          }
+        >();
+        for (const [source, stats] of Object.entries(tail.health.sources)) {
+          const tool = toolFor(source);
+          const row =
+            usageByTool.get(tool) ?? {
+              tool,
+              nudges: 0,
+              attempts: 0,
+              suppressed: {} as Record<string, number>,
+              producers: {} as Record<string, number>,
+            };
+          row.nudges += stats.applied;
+          row.attempts += stats.attempts;
+          for (const [reason, count] of Object.entries(stats.suppressed)) {
+            row.suppressed[reason] = (row.suppressed[reason] ?? 0) + count;
+          }
+          row.producers[source] = (row.producers[source] ?? 0) + stats.applied;
+          usageByTool.set(tool, row);
+        }
+        for (const row of usageByTool.values()) {
+          if (row.tool === "progress") row.uses = tail.progressUses;
+          else if (row.tool === "say") row.uses = sayNotes;
+        }
+        const usage = [...usageByTool.values()].sort((a, b) => b.nudges - a.nudges);
+
+        // Per-producer grace windows. `activity` exists after the first
+        // group-aware touch; older sessions fall back to lastProgressAt.
+        const activity = status?.activity ?? state?.activity;
+        const lastProgressAt = status?.lastProgressAt ?? state?.lastProgressAt ?? 0;
+        const graceWindows: Record<string, number> = {};
+        for (const group of ["say", "progress.tree", "progress.stale"]) {
+          const at = activity
+            ? activity[group] ?? (group === "say" ? 0 : lastProgressAt)
+            : lastProgressAt;
+          if (at > 0) graceWindows[group] = at;
+        }
+        const graceTypeFor = (producer: string) => {
+          for (const prefix of ["say", "progress.tree", "progress.stale"]) {
+            if (producer === prefix || producer.startsWith(`${prefix}.`)) return prefix;
+          }
+          return producer.split(".")[0] || "other";
+        };
+        const graceByType: Record<string, number> = {};
+        for (const reject of tail.graceRejects) {
+          const type = graceTypeFor(reject.producer);
+          const start = graceWindows[type] ?? 0;
+          const at = Date.parse(reject.ts);
+          if (!Number.isFinite(at) || at < start) continue;
+          graceByType[type] = (graceByType[type] ?? 0) + 1;
+        }
+
+        let logBytes = 0;
+        try {
+          logBytes = statSync(nudgeLogPath()).size;
+        } catch {
+          // Missing log reads as empty.
+        }
+        const gapOption = ctx.options?.nudgeGapMs;
+        const graceOption = ctx.options?.nudgeGraceMs;
+        const defaults = state?.defaults ?? {};
+        const numberOption = (value: unknown) =>
+          typeof value === "number" && Number.isFinite(value) && value >= 0
+            ? value
+            : undefined;
+        const capOption = defaults.capPerSession;
+        return {
+          engine: nudgeMode,
+          mutedUntil: status?.mutedUntil ?? 0,
+          standing: status?.standing
+            ? {
+                severity: status.standing.severity,
+                source: status.standing.source,
+                text: status.standing.text,
+                at: status.standing.at,
+              }
+            : { severity: "", source: "", text: "", at: 0 },
+          fires: status?.fires ?? state?.fires ?? 0,
+          lastReminderAt: state?.lastReminderAt ?? 0,
+          lastProgressAt: state?.lastProgressAt ?? 0,
+          gapMs: numberOption(gapOption) ?? numberOption(defaults.gapMs) ?? 60_000,
+          graceMs:
+            numberOption(graceOption) ?? numberOption(defaults.graceMs) ?? 10 * 60_000,
+          capPerSession:
+            typeof capOption === "number" && Number.isFinite(capOption) && capOption >= 0
+              ? Math.floor(capOption)
+              : 2,
+          entryView,
+          health: tail.health,
+          usage,
+          graceByType,
+          graceWindows,
+          logBytes,
+          events: tail.events,
+          counts: tail.counts,
+        };
+      },
+      nudgeMute: async ({ sessionID, minutes }) => {
+        if (!sharedNudge) return { ok: false, mutedUntil: 0 };
+        const value = typeof minutes === "number" && Number.isFinite(minutes) ? minutes : 0;
+        if (value > 0) await sharedNudge.adapter.mute(sessionID, value);
+        else await sharedNudge.adapter.unmute(sessionID);
+        return {
+          ok: true,
+          mutedUntil: sharedNudge.adapter.status(sessionID).mutedUntil ?? 0,
+        };
+      },
+      nudgeTest: async ({ sessionID, text, severity }) => {
+        if (!sharedNudge) return { ok: false };
+        const tier =
+          severity === "block" ? "block" : severity === "warn" ? "warn" : "info";
+        const body =
+          typeof text === "string" && text.trim()
+            ? text.trim().slice(0, 500)
+            : "Panel test nudge";
+        const outcome = await sharedNudge.adapter.submit({
+          sessionId: sessionID,
+          producer: "panel.test",
+          ruleId: "panel.test",
+          severity: tier,
+          text: body,
+          // Context only: a test must never inject a synthetic turn.
+          channel: "context",
+          at: Date.now(),
+        } as never);
+        return {
+          ok: Boolean(outcome.applied),
+          ...(outcome.reason ? { reason: String(outcome.reason) } : {}),
+        };
+      },
+      nudgeTruncateLog: async () => {
+        const file = nudgeLogPath();
+        try {
+          const before = statSync(file).size;
+          writeFileSync(file, "");
+          return { ok: true, bytes: before };
+        } catch {
+          return { ok: false, bytes: 0 };
+        }
+      },
+      nudgePurge: async ({ sessionID }) => {
+        if (!sharedNudge) return { ok: false };
+        // Clear the host context entry before reset deletes the state it keys.
+        await sharedNudge.adapter.clear(sessionID);
+        await sharedNudge.adapter.reset(sessionID);
+        await sharedNudge.adapter.unmute(sessionID);
+        return { ok: true };
       },
       nudgeList: async ({ sessionID }) => {
         if (!customNudgesOn) {
@@ -976,7 +1428,11 @@ export default Plugin.define({
     ) => {
       if (!verbose) return;
       const prev = statusSnapshots.get(sessionID) ?? {};
-      const { transitions, next } = diffStatuses(prev, entries);
+      // The first observation of a session is a baseline, not a burst of
+      // starts: existing entries (including old or dismissed ones) must not
+      // be reported as null → done transitions when the plugin loads.
+      const baseline = !statusSnapshots.has(sessionID);
+      const { transitions, next } = diffStatuses(prev, entries, { baseline });
       statusSnapshots.set(sessionID, next);
       for (const transition of transitions) {
         logNudge({
@@ -1028,6 +1484,11 @@ export default Plugin.define({
             stepsSinceProgress.set(event.sessionID, 0);
             lastProgressWriteAt.set(event.sessionID, now);
             nudgeFireCount.delete(event.sessionID);
+            if (sharedNudge && nudgeMode === "shared") {
+              void Promise.resolve(
+                sharedNudge.adapter.touch(event.sessionID, "progress")
+              ).catch(() => {});
+            }
             clearReminder(event.sessionID);
           }
           const target = pickTarget(entries, now);
@@ -1128,7 +1589,19 @@ export default Plugin.define({
           }
           if (step.action === 'force' || step.action === 'stale-escalate') {
             clearReminder(event.sessionID, 'strict');
-            if (!hasActiveReplace(event.sessionID)) {
+            if (sharedNudge && nudgeMode === "shared") {
+              void Promise.resolve(
+                sharedNudge.adapter.submit({
+                  sessionId: event.sessionID,
+                  producer: "progress.tree",
+                  ruleId: step.action === "force" ? "strict-force" : "strict-escalate",
+                  severity: "block",
+                  text,
+                  channel: "synthetic",
+                  at: Date.now(),
+                })
+              ).catch((error) => console.warn("[opencode-progress] shared block failed", String(error)));
+            } else if (!hasActiveReplace(event.sessionID)) {
               void ctx.session
                 .synthetic({ sessionID: event.sessionID, text })
                 .catch(() => {});
@@ -1255,7 +1728,17 @@ export default Plugin.define({
           if (verbose) {
             logNudge({ event: 'idle-reminder', sessionID: event.sessionID, count: decision.count, openEntries: decision.signature.split(' | ').filter(Boolean).length });
           }
-          if (!hasActiveReplace(event.sessionID)) {
+          if (sharedNudge && nudgeMode === "shared") {
+            await sharedNudge.adapter.submit({
+              sessionId: event.sessionID,
+              producer: "progress.idle",
+              ruleId: "turn-end",
+              severity: "block",
+              text: decision.message,
+              channel: "synthetic",
+              at: Date.now(),
+            });
+          } else if (!hasActiveReplace(event.sessionID)) {
             await ctx.session.synthetic({ sessionID: event.sessionID, text: decision.message });
           }
         } catch (error) {
@@ -1335,7 +1818,7 @@ export default Plugin.define({
       sayNudgeBeforeHook = await ctx.tool.hook('execute.before', (event) => {
         toolStartedAt.set(String(event.id), Date.now());
       });
-      sayNudgeAfterHook = await ctx.tool.hook('execute.after', (event) => {
+      sayNudgeAfterHook = await ctx.tool.hook('execute.after', async (event) => {
         try {
           if (event.tool === sayToolName || /(^|_)progress(_touch)?$/.test(event.tool)) return;
           const callsSinceSay = (sayCallsSinceNote.get(event.sessionID) ?? 0) + 1;
@@ -1346,6 +1829,11 @@ export default Plugin.define({
           const durationMs = started === undefined ? 0 : now - started;
           const controller = sayController?.get(event.sessionID);
           const state = sayNudgeStates.get(event.sessionID) ?? emptySayNudgeState();
+          const strikes = (sayNudgeStrikes.get(event.sessionID) ?? 0) + 1;
+          const escalate =
+            sayNudgeEscalateAfter > 0 &&
+            strikes >= sayNudgeEscalateAfter &&
+            !sayNudgeEscalated.has(event.sessionID);
           const decision = decideSayNudge(
             state,
             {
@@ -1355,13 +1843,34 @@ export default Plugin.define({
               callsSinceSay,
               saidThisTurn: controller?.accepted === true,
               progressNudgeActive: Boolean(standingReminders.get(event.sessionID)),
+              strike: strikes,
               now,
             },
             sayNudgeOptions
           );
           if (!decision.nudge || !decision.message) return;
           sayNudgeStates.set(event.sessionID, recordSayNudge(state, now));
-          putReminder(event.sessionID, 'warn', 'say', decision.message);
+          sayNudgeStrikes.set(event.sessionID, strikes);
+          if (escalate) sayNudgeEscalated.add(event.sessionID);
+          const text = decision.message;
+          if (sharedNudge && nudgeMode === "shared") {
+            await sharedNudge.adapter.submit({
+              sessionId: event.sessionID,
+              producer: "say",
+              ruleId: escalate ? "narrate-escalated" : "narrate",
+              severity: escalate ? "block" : "warn",
+              text,
+              channel: escalate ? "synthetic" : "context",
+              at: now,
+            });
+          } else if (escalate) {
+            await ctx.session.synthetic({
+              sessionID: event.sessionID,
+              text: `[block] ${text}`,
+            });
+          } else {
+            putReminder(event.sessionID, 'warn', 'say', text);
+          }
           if (verbose) {
             logNudge({
               event: 'say-nudge',
@@ -1370,6 +1879,9 @@ export default Plugin.define({
               durationMs,
               callsSinceSay,
               reason: decision.reason,
+              strikes,
+              escalated: escalate,
+              delivery: escalate ? "synthetic" : "context",
             });
           }
         } catch (error) {
@@ -1384,11 +1896,13 @@ export default Plugin.define({
           sayNudgeMinCalls: sayNudgeOptions.minCalls,
           sayNudgeCooldownMs: sayNudgeOptions.cooldownMs,
           sayNudgeMaxPerTurn: sayNudgeOptions.maxPerTurn,
+          sayNudgeEscalateAfter,
         });
       }
       console.log(
         `[opencode-progress] v${pluginVersion} say nudge: ${sayNudgeOptions.mode} ` +
-          `(after ${sayNudgeOptions.afterMs}ms or ${sayNudgeOptions.minCalls} calls)`
+          `(after ${sayNudgeOptions.afterMs}ms or ${sayNudgeOptions.minCalls} calls; ` +
+          `synthetic at ${sayNudgeEscalateAfter || "off"})`
       );
     }
 
@@ -1698,6 +2212,41 @@ export default Plugin.define({
             const sessionID = context.sessionID;
             knownSessions.add(sessionID);
             const action = String(input?.action ?? "list");
+            if (
+              sharedNudge &&
+              nudgeMode === "shared" &&
+              (action === "mute" ||
+                action === "unmute" ||
+                action === "status" ||
+                action === "clear")
+            ) {
+              if (action === "unmute") {
+                await sharedNudge.adapter.unmute(sessionID);
+                return { content: "Session reminders unmuted." };
+              }
+              if (action === "clear") {
+                await sharedNudge.adapter.clear(sessionID, String(input?.producer ?? "") || undefined);
+                return { content: "Cleared the shared standing reminder." };
+              }
+              if (action === "mute") {
+                const raw = Number(input?.minutes);
+                const minutes =
+                  Number.isFinite(raw) && raw > 0 ? Math.min(240, Math.max(1, Math.floor(raw))) : 30;
+                await sharedNudge.adapter.mute(sessionID, minutes);
+                return { content: `Session reminders muted for ${minutes}m (non-block only).` };
+              }
+              const status = sharedNudge.adapter.status(sessionID);
+              const remaining = Math.max(0, status.mutedUntil - Date.now());
+              return {
+                content: [
+                  remaining > 0 ? `Muted for another ${Math.ceil(remaining / 60_000)}m.` : "Not muted.",
+                  status.standing
+                    ? `Standing [${status.standing.severity}] ${status.standing.source}: ${status.standing.text}`
+                    : "No standing reminder.",
+                  `Fires this session: ${status.fires}.`,
+                ].join("\n"),
+              };
+            }
             if (action === "mute" || action === "unmute") {
               if (action === "unmute") {
                 nudgeMutedUntil.delete(sessionID);
@@ -1846,6 +2395,31 @@ export default Plugin.define({
       console.log(`[opencode-progress] v${pluginVersion} custom nudge tool registered as ${nudgeToolName}`);
     } catch (error) {
       console.warn(`[opencode-progress] custom nudge tool registration failed: ${String(error)}`);
+    }
+
+    if (nudgeMode !== "legacy") {
+      try {
+        const { attachNudge } = await import("@jakedowns/opencode-nudge");
+        sharedNudge = await attachNudge(ctx as never, {
+          registerTool: true,
+          gapMs: typeof ctx.options?.nudgeGapMs === "number" ? ctx.options.nudgeGapMs : undefined,
+          graceMs:
+            typeof ctx.options?.nudgeGraceMs === "number"
+              ? ctx.options.nudgeGraceMs
+              : undefined,
+          log: (event) => {
+            if (verbose) logNudge({ engine: nudgeMode, ...event });
+          },
+        });
+      } catch (error) {
+        // Keep delivery and telemetry honest: if the adapter cannot attach,
+        // fall back to the legacy engine instead of reporting "shared" while
+        // the legacy path does the work.
+        nudgeMode = "legacy";
+        console.warn(
+          `[opencode-progress] shared nudge attach failed; falling back to legacy: ${String(error)}`
+        );
+      }
     }
 
     const wallClockMs = normalizeWallClockMs(ctx.options);
@@ -2069,6 +2643,7 @@ export default Plugin.define({
       void sayRegistration?.dispose();
       void sayPromptHook?.dispose();
       void sayIdleHook?.dispose();
+      void sharedNudge?.dispose();
     };
   },
 });

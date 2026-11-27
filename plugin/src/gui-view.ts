@@ -1,5 +1,47 @@
 import type { SayNote } from "./types.js";
 
+/** One row of the nudge telemetry feed after filtering/collapsing. */
+export type NudgeFeedRow = Record<string, unknown> & {
+  /** Transitions merged into this row (1 for a single transition). */
+  transitionCount?: number;
+  /** Oldest `from` in a collapsed transition run. */
+  transitionFrom?: string | null;
+};
+
+/**
+ * Shape the raw newest-first telemetry tail for display.
+ *
+ * Transitions dominate the log and are hidden by default. When shown,
+ * consecutive transitions for the same entry collapse into one row whose
+ * `to` is the newest status and whose `transitionFrom` is the oldest status
+ * in the run, so `pending → done ×3` reads as one movement.
+ */
+export function nudgeFeedRows(
+  events: ReadonlyArray<Record<string, unknown>>,
+  showTransitions: boolean
+): NudgeFeedRow[] {
+  const rows: NudgeFeedRow[] = [];
+  for (const event of events) {
+    if (!showTransitions && event.event === "transition") continue;
+    if (event.event !== "transition") {
+      rows.push({ ...event });
+      continue;
+    }
+    const previous = rows[rows.length - 1];
+    if (previous && previous.event === "transition" && previous.id === event.id) {
+      previous.transitionCount = (previous.transitionCount ?? 1) + 1;
+      previous.transitionFrom = (event.from as string | null | undefined) ?? null;
+      continue;
+    }
+    rows.push({
+      ...event,
+      transitionCount: 1,
+      transitionFrom: (event.from as string | null | undefined) ?? null,
+    });
+  }
+  return rows;
+}
+
 /**
  * Desktop GUI tree placement: the composer pill (default) or a pinned tab in
  * the session's side region. Kept dependency-free so the GUI bundle and the

@@ -19,7 +19,13 @@ execFileSync(
   [path.join(ROOT, 'src', 'telemetry.ts'), '--bundle', '--format=cjs', '--platform=node', `--outfile=${path.join(OUT, 'telemetry.cjs')}`],
   { stdio: 'pipe' }
 );
-const { logNudge, nudgeLogPath, nudgeLoggingEnabled, diffStatuses } = require(path.join(OUT, 'telemetry.cjs'));
+const {
+  logNudge,
+  nudgeLogPath,
+  nudgeLoggingEnabled,
+  diffStatuses,
+  summarizeNudgeEvents,
+} = require(path.join(OUT, 'telemetry.cjs'));
 
 test('disabled by default; enabled by option or env', () => {
   const saved = process.env.PROGRESS_NUDGE_LOG;
@@ -73,6 +79,51 @@ test('diffStatuses reports lifecycle transitions and a fresh snapshot', () => {
     ]
   );
   assert.deepEqual(next, { a: 'done', b: 'waiting', c: 'running' });
+});
+
+test('diffStatuses baseline seeds the snapshot without reporting starts', () => {
+  const { transitions, next } = diffStatuses(
+    {},
+    [
+      { id: 'old-done', status: 'done' },
+      { id: 'old-error', status: 'error' },
+    ],
+    { baseline: true }
+  );
+  assert.deepEqual(transitions, []);
+  assert.deepEqual(next, { 'old-done': 'done', 'old-error': 'error' });
+
+  const after = diffStatuses(next, [
+    { id: 'old-done', status: 'running' },
+    { id: 'new', status: 'running' },
+  ]);
+  assert.deepEqual(after.transitions, [
+    { id: 'old-done', from: 'done', to: 'running' },
+    { id: 'new', from: null, to: 'running' },
+  ]);
+});
+
+test('summarizeNudgeEvents tracks attempts, applied, and suppression per source', () => {
+  const health = summarizeNudgeEvents([
+    { event: 'nudge', producer: 'say', delivery: 'context' },
+    { event: 'nudge', producer: 'say', reason: 'grace' },
+    { event: 'nudge', producer: 'say', reason: 'grace' },
+    { event: 'reminder', source: 'progress.stale', suppressed: 'gap' },
+    { event: 'reminder', source: 'progress.stale' },
+  ]);
+
+  assert.deepEqual(health.sources.say, {
+    attempts: 3,
+    applied: 1,
+    suppressed: { grace: 2 },
+  });
+  assert.deepEqual(health.sources['progress.stale'], {
+    attempts: 2,
+    applied: 1,
+    suppressed: { gap: 1 },
+  });
+  assert.deepEqual(health.bySource, { say: 1, 'progress.stale': 1 });
+  assert.deepEqual(health.rejects, { grace: 2, gap: 1 });
 });
 
 test('unwritable path never throws', () => {

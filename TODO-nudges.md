@@ -7,7 +7,9 @@
 
 > **PUBLISHING HOLD (2026-11-26):** do not `git push`, tag, or `npm publish`
 > anything for this migration. The maintainer will confirm when to publish.
-> Local files only until then.
+> Shared packages `@jakedowns/opencode-nudge-core@0.1.2` and
+> `@jakedowns/opencode-nudge@0.1.2` are published and verified. A progress
+> release still needs explicit confirmation.
 
 ## Phase 0 status (2026-11-26)
 
@@ -71,19 +73,25 @@
 - [x] Shared runtime file: `~/.config/opencode/nudge-state.json`
       (atomic temp+rename + sibling lock).
 - [x] One standing key **`nudge`**; migrate/remove `progress-reminder` once per session.
-- [ ] One timer for scheduled rules; prompt reset; idle flush.
+- [x] One timer for scheduled rules; prompt reset; idle/tool callbacks.
 - [x] Delivery: context entry; synthetic only for `block`.
-- [ ] One `nudge` agent tool: `status|mute|unmute|rules|...` (next).
-- [ ] Registration race: if `nudge` is taken, later adapter copies skip the tool but still share state.
+- [x] One generic `nudge` tool definition: `status|mute|unmute|clear`.
+- [x] Register it from the host adapter (first loader wins).
+- [x] Registration race: if `nudge` is taken, later adapter copies skip the tool but still share state.
 - [x] Basic telemetry: fired/deduped/muted/gap/grace/cap with producer + rule id.
 - [x] Single-process conformance test: one gate, one key, priority/gap/grace/cap.
 - [ ] Cross-process concurrency stress test.
+- [x] `plugin/scripts/nudge-report.mjs`: streaming summary of the JSONL log
+      (fires by source/severity, suppressions, shared events, `--json`).
+- [x] Desktop **Nudges** sidebar panel: launcher on the New tab page, live
+      engine/standing/mute state, per-session event tail, 30-minute mute.
 
 ## 4. Config + migration
 
-- [ ] `~/.config/opencode/nudge.json`, `<project>/.opencode/nudge.json`
+- [x] `~/.config/opencode/nudge.json`, `<project>/.opencode/nudge.json`
 - [ ] Session rules in the existing session store.
-- [ ] Read legacy `progress-nudge.json` once and write forward to `nudge.json`.
+- [x] Read legacy `progress-nudge.json` as fallback when `nudge.json` is absent.
+- [ ] Write migrated legacy rules forward to `nudge.json` (optional).
 - [ ] Map `strictMode`, `sayNudge*`, `nudgeGapMs`, `nudgeGraceMs`,
       `customNudges` into producer config; do not import them into core.
 - [ ] Document schema + examples.
@@ -91,16 +99,18 @@
 
 ## 5. Progress/say refactor
 
-- [ ] Replace `putReminder`, `lastReminderAt`, mute/gap/grace/cap, delivery and
-      `progress_nudge` plumbing with adapter calls.
+- [x] Add a shadow adapter path behind `nudgeEngine: "shadow"`; submit legacy
+      reminders without changing delivery.
+- [x] Shared mode routes built-in reminders and `progress_nudge` mute/status through
+      the adapter. Legacy delivery remains the default.
+- [ ] Remove legacy delivery/custom engine and make `shared` the default.
 - [ ] Keep progress signal detection and message builders.
 - [ ] Submit candidates:
       `progress.tree` (strict/wall), `progress.idle`, `progress.relay`,
       `say`, custom rules.
 - [ ] Move `progress_nudge` behind the shared `nudge` tool (alias for one release).
 - [ ] Delete duplicated policy modules after regression tests pass.
-- [ ] Keep existing behavior behind feature flag `nudgeEngine: "shared"|"legacy"`
-      for one release.
+- [x] Keep existing behavior behind `nudgeEngine: "shared" | "shadow" | "legacy"`.
 
 ## 6. Voice integration
 

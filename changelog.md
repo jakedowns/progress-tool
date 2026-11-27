@@ -223,6 +223,22 @@ Shipped since `mcp-server@2.10.2`:
 - **Store and mirror support** for cleared/dismissed entries plus expanded MCP
   smoke and task-list suites (**57 tests**).
 
+## 2.28.0 — shared nudge adapter (unreleased)
+
+- **Shared packages published.** `@jakedowns/opencode-nudge-core@0.1.2` and
+  `@jakedowns/opencode-nudge@0.1.2` are live with trusted publishing verified.
+- **`nudgeEngine` selector.** `shared` (default) delivers built-in
+  progress/say/relay/idle reminders through the adapter; `legacy` remains an
+  explicit opt-in if shared delivery degrades in a given setup. The temporary
+  `shadow` comparison mode was removed.
+- **Shared delivery.** One `nudge` context key, shared mute/gap/grace/cap,
+  block-only synthetic delivery, and the generic `nudge` agent tool.
+- **Lazy adapter import.** The adapter is imported only in shared mode; if it
+  cannot attach, the plugin warns and falls back to legacy delivery so the
+  engine reported in telemetry matches what actually runs.
+- **Custom rules** remain on the legacy engine; `shared` + `customNudges` falls back to legacy with a warning.
+- Tests: 234 plugin, 93 shared packages.
+
 ## 2.27.0 — nudge redesign (released, `plugin@2.27.0`)
 
 Feedback round from a long authoring + subagent session.

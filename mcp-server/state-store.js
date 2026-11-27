@@ -605,9 +605,13 @@ function applyUpsert(state, input, now) {
     if (!(wasDismissedTerminal && nextTerminal)) {
       entry.dismissed = undefined;
     }
-    clearAncestorDismissals(state, entry.parentId, sessionId);
+    clearAncestorHides(state, entry.parentId, sessionId);
   } else if (isRestart) {
+    // A relay-driven lifecycle restart is real activity, not a 4Hz tick:
+    // revive the entry and any hidden ancestors just like an agent write.
     entry.dismissed = undefined;
+    entry.cleared = undefined;
+    clearAncestorHides(state, entry.parentId, sessionId);
   }
 
   // View-plane marker: the row was created by a subagent, with its agent
@@ -628,23 +632,20 @@ function applyUpsert(state, input, now) {
 }
 
 /**
- * Clear the persisted dismissal on every ancestor of an actively updated
- * entry (§4.9): dismissing a tree must not hide later real updates inside it.
- * Walks parentId links within the same session scope, bounded for safety.
+ * Clear the persisted dismissal and soft-clear tombstone on every ancestor of
+ * an actively updated entry (§4.9): hiding a tree must not hide later real
+ * updates inside it. Walks parentId links within the same session scope,
+ * bounded for safety.
  */
-function clearAncestorDismissals(state, parentId, sessionId) {
+function clearAncestorHides(state, parentId, sessionId) {
   let current = parentId;
   for (let depth = 0; depth < 10 && current; depth++) {
     const key = storageKey(current, sessionId);
     const ancestor = state.entries[key];
     if (!ancestor) return;
-    let changed = false;
-    if (ancestor.dismissed !== undefined) {
-      ancestor.dismissed = undefined;
-      changed = true;
-    }
+    if (ancestor.dismissed !== undefined) ancestor.dismissed = undefined;
+    if (ancestor.cleared !== undefined) ancestor.cleared = undefined;
     current = ancestor.parentId || null;
-    if (!changed && !current) return;
   }
 }
 

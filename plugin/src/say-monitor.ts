@@ -49,6 +49,8 @@ export interface SayNudgeInput {
   callsSinceSay: number;
   saidThisTurn: boolean;
   progressNudgeActive: boolean;
+  /** Consecutive say nudges since the last accepted note (1 = first). */
+  strike?: number;
   now: number;
 }
 
@@ -156,42 +158,83 @@ function truncateMessage(message: string): string {
     : message;
 }
 
-export function sayNudgeMessage(tool: string, durationMs: number): string {
+export function sayNudgeMessage(
+  tool: string,
+  durationMs: number,
+  strike = 1
+): string {
   const seconds = formatSeconds(durationMs);
+  const name = shortToolName(tool);
+  if (strike >= 3) {
+    return truncateMessage(
+      `Say nudge ignored ${strike} times. Stop and call say now: one line on what you are doing and a rough ETA, before any more tools.`
+    );
+  }
+  if (strike === 2) {
+    return truncateMessage(
+      `Still no say note. That ${name} call ran ${seconds}s without narration. ` +
+        `Post a one-line say before the next step so the user is not flying blind.`
+    );
+  }
   return truncateMessage(
-    `That ${shortToolName(tool)} call ran ${seconds}s with no narration this turn. ` +
+    `That ${name} call ran ${seconds}s with no narration this turn. ` +
       `Before the next long-running step, post a say with what it is doing and a rough ETA.`
   );
 }
 
-export function saySilentRunNudgeMessage(calls: number): string {
+export function saySilentRunNudgeMessage(calls: number, strike = 1): string {
   const count = Math.max(1, Math.floor(calls));
+  if (strike >= 3) {
+    return truncateMessage(
+      `Say nudge ignored ${strike} times. Stop and call say now: one line on what you are doing and a rough ETA, before any more tools.`
+    );
+  }
+  if (strike === 2) {
+    return truncateMessage(
+      `Still no say note after ${count} tool calls this turn. ` +
+        `Post a one-line say before the next step so the user can follow along.`
+    );
+  }
   return truncateMessage(
     `That was tool call ${count} in a row this turn with no say note. ` +
       `Before the next step, post a say with what you are doing and a rough ETA.`
   );
 }
 
-function sayBothNudgeMessage(tool: string, durationMs: number, calls: number): string {
+function sayBothNudgeMessage(
+  tool: string,
+  durationMs: number,
+  calls: number,
+  strike = 1
+): string {
+  if (strike >= 3) {
+    return truncateMessage(
+      `Say nudge ignored ${strike} times. Stop and call say now: one line on what you are doing and a rough ETA, before any more tools.`
+    );
+  }
   const seconds = formatSeconds(durationMs);
   const count = Math.max(1, Math.floor(calls));
+  const lead =
+    strike === 2
+      ? `Still no say note after ${count} calls; the last ${shortToolName(tool)} call ran ${seconds}s.`
+      : `That ${shortToolName(tool)} call ran ${seconds}s after ${count} tool calls with no say note this turn.`;
   return truncateMessage(
-    `That ${shortToolName(tool)} call ran ${seconds}s after ${count} tool calls with no say note this turn. ` +
-      `Before the next step, post a say with what you are doing and a rough ETA.`
+    `${lead} Before the next step, post a say with what you are doing and a rough ETA.`
   );
 }
 
 function acceptMessage(input: SayNudgeInput, options: SayNudgeOptions): string {
   const longEnough = input.durationMs >= options.afterMs;
   const enoughCalls = input.callsSinceSay >= options.minCalls;
-  if (options.mode === "silent-run") return saySilentRunNudgeMessage(input.callsSinceSay);
-  if (options.mode === "long-tool") return sayNudgeMessage(input.tool, input.durationMs);
+  const strike = Math.max(1, Math.floor(input.strike ?? 1));
+  if (options.mode === "silent-run") return saySilentRunNudgeMessage(input.callsSinceSay, strike);
+  if (options.mode === "long-tool") return sayNudgeMessage(input.tool, input.durationMs, strike);
   if (longEnough && enoughCalls) {
-    return sayBothNudgeMessage(input.tool, input.durationMs, input.callsSinceSay);
+    return sayBothNudgeMessage(input.tool, input.durationMs, input.callsSinceSay, strike);
   }
   return enoughCalls
-    ? saySilentRunNudgeMessage(input.callsSinceSay)
-    : sayNudgeMessage(input.tool, input.durationMs);
+    ? saySilentRunNudgeMessage(input.callsSinceSay, strike)
+    : sayNudgeMessage(input.tool, input.durationMs, strike);
 }
 
 /**

@@ -60,6 +60,118 @@ export function logNudge(event: Record<string, unknown>): void {
  */
 export type StatusSnapshot = Record<string, string>;
 
+export interface NudgeSourceStats {
+  attempts: number;
+  applied: number;
+  suppressed: Record<string, number>;
+}
+
+export interface NudgeHealth {
+  /** Applied reminders by producer/source. */
+  bySource: Record<string, number>;
+  /** Suppressed attempts by reason. */
+  rejects: Record<string, number>;
+  /** Attempt/applied/suppressed counts per producer. */
+  sources: Record<string, NudgeSourceStats>;
+  /** Nudge-to-progress latency samples (ms). */
+  compliance: { samples: number; medianMs: number; p90Ms: number };
+}
+
+const percentile = (sorted: ReadonlyArray<number>, p: number) => {
+  if (sorted.length === 0) return 0;
+  const index = Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1);
+  return sorted[Math.max(0, index)] ?? 0;
+};
+
+/**
+ * Summarize a chronological event window for the sidebar health strip.
+ * Handles both legacy (`reminder`, `compliance`) and shared (`nudge`,
+ * `nudge-touch`) shapes; unknown events are ignored.
+ */
+export function summarizeNudgeEvents(
+  events: ReadonlyArray<Record<string, unknown>>
+): NudgeHealth {
+  const bySource: Record<string, number> = {};
+  const rejects: Record<string, number> = {};
+  const sources: Record<string, NudgeSourceStats> = {};
+  const latencies: number[] = [];
+  let lastAppliedAt = 0;
+
+  const bump = (map: Record<string, number>, key: string) => {
+    if (!key) return;
+    map[key] = (map[key] ?? 0) + 1;
+  };
+  const statsFor = (source: string) =>
+    (sources[source] ??= { attempts: 0, applied: 0, suppressed: {} });
+  const time = (value: unknown) => {
+    const parsed = typeof value === "string" ? Date.parse(value) : NaN;
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  for (const event of events) {
+    const name = String(event.event ?? "");
+    if (name === "reminder") {
+      const source = String(event.source ?? "unknown");
+      const stats = statsFor(source);
+      stats.attempts += 1;
+      if (typeof event.suppressed === "string") {
+        bump(stats.suppressed, event.suppressed);
+        bump(rejects, event.suppressed);
+      } else if (event.deduped === true) {
+        bump(stats.suppressed, "duplicate");
+      } else {
+        stats.applied += 1;
+        bump(bySource, source);
+      }
+    } else if (name === "nudge") {
+      const producer = String(event.producer ?? "unknown");
+      const stats = statsFor(producer);
+      stats.attempts += 1;
+      if (typeof event.delivery === "string") {
+        stats.applied += 1;
+        bump(bySource, producer);
+        lastAppliedAt = time(event.ts);
+      } else if (typeof event.reason === "string") {
+        bump(stats.suppressed, event.reason);
+        bump(rejects, event.reason);
+      }
+    } else if (name === "custom-nudge") {
+      const source = `custom:${String(event.ruleId ?? "rule")}`;
+      const stats = statsFor(source);
+      stats.attempts += 1;
+      if (typeof event.severity === "string" && typeof event.text === "string") {
+        stats.applied += 1;
+        bump(bySource, source);
+        lastAppliedAt = time(event.ts);
+      } else if (typeof event.reason === "string") {
+        bump(stats.suppressed, event.reason);
+      }
+    } else if (
+      name === "compliance" &&
+      typeof event.afterMs === "number" &&
+      Number.isFinite(event.afterMs)
+    ) {
+      latencies.push(Math.max(0, event.afterMs));
+    } else if (name === "nudge-touch" && lastAppliedAt > 0) {
+      const at = time(event.ts);
+      if (at > lastAppliedAt) latencies.push(at - lastAppliedAt);
+      lastAppliedAt = 0;
+    }
+  }
+
+  const sorted = [...latencies].sort((a, b) => a - b);
+  return {
+    bySource,
+    rejects,
+    sources,
+    compliance: {
+      samples: sorted.length,
+      medianMs: percentile(sorted, 50),
+      p90Ms: percentile(sorted, 90),
+    },
+  };
+}
+
 export interface StatusTransition {
   id: string;
   from: string | null;
@@ -68,13 +180,15 @@ export interface StatusTransition {
 
 export function diffStatuses(
   prev: StatusSnapshot,
-  entries: ReadonlyArray<{ id: string; status: string }>
+  entries: ReadonlyArray<{ id: string; status: string }>,
+  options: { baseline?: boolean } = {}
 ): { transitions: StatusTransition[]; next: StatusSnapshot } {
   const next: StatusSnapshot = {};
   const transitions: StatusTransition[] = [];
   for (const entry of entries) {
     if (!entry || typeof entry.id !== "string") continue;
     next[entry.id] = entry.status;
+    if (options.baseline) continue;
     const from = prev[entry.id] ?? null;
     if (from !== entry.status) transitions.push({ id: entry.id, from, to: entry.status });
   }

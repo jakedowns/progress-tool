@@ -35,6 +35,7 @@ const {
   buildNoteToast,
   buildNotesPill,
   noteAuthorLabel,
+  nudgeFeedRows,
 } = require(path.join(OUT, 'gui-view.cjs'));
 
 test('layout normalizes and swaps between composer and sidebar', () => {
@@ -130,4 +131,39 @@ test('note toasts keep child attribution and warn on blocked/question', () => {
     buildNoteToast(note('anonymous child', 4, { sessionId: 'c' }), 's').title,
     '[Subagent] update note'
   );
+});
+
+test('nudgeFeedRows hides transitions by default', () => {
+  const events = [
+    { event: 'nudge', producer: 'progress.tree' },
+    { event: 'transition', id: 'task', from: 'running', to: 'done' },
+    { event: 'nudge-touch' },
+  ];
+  assert.deepEqual(
+    nudgeFeedRows(events, false).map((row) => row.event),
+    ['nudge', 'nudge-touch']
+  );
+});
+
+test('nudgeFeedRows collapses consecutive transitions per entry', () => {
+  const events = [
+    { event: 'transition', id: 'a', from: 'running', to: 'done' },
+    { event: 'transition', id: 'a', from: 'waiting', to: 'running' },
+    { event: 'transition', id: 'a', from: 'pending', to: 'waiting' },
+    { event: 'transition', id: 'b', from: null, to: 'running' },
+    { event: 'nudge', producer: 'say' },
+    { event: 'transition', id: 'b', from: 'running', to: 'done' },
+  ];
+  const rows = nudgeFeedRows(events, true);
+  assert.equal(rows.length, 4);
+  assert.equal(rows[0].id, 'a');
+  assert.equal(rows[0].to, 'done');
+  assert.equal(rows[0].transitionCount, 3);
+  assert.equal(rows[0].transitionFrom, 'pending');
+  assert.equal(rows[1].id, 'b');
+  assert.equal(rows[1].transitionCount, 1);
+  assert.equal(rows[1].transitionFrom, null);
+  assert.equal(rows[2].event, 'nudge');
+  assert.equal(rows[3].id, 'b');
+  assert.equal(rows[3].transitionCount, 1);
 });
