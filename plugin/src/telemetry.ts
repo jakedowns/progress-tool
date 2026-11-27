@@ -60,6 +60,87 @@ export function logNudge(event: Record<string, unknown>): void {
  */
 export type StatusSnapshot = Record<string, string>;
 
+export interface NudgeHealth {
+  /** Applied reminders by producer/source. */
+  bySource: Record<string, number>;
+  /** Suppressed attempts by reason. */
+  rejects: Record<string, number>;
+  /** Nudge-to-progress latency samples (ms). */
+  compliance: { samples: number; medianMs: number; p90Ms: number };
+}
+
+const percentile = (sorted: ReadonlyArray<number>, p: number) => {
+  if (sorted.length === 0) return 0;
+  const index = Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1);
+  return sorted[Math.max(0, index)] ?? 0;
+};
+
+/**
+ * Summarize a chronological event window for the sidebar health strip.
+ * Handles both legacy (`reminder`, `compliance`) and shared (`nudge`,
+ * `nudge-touch`) shapes; unknown events are ignored.
+ */
+export function summarizeNudgeEvents(
+  events: ReadonlyArray<Record<string, unknown>>
+): NudgeHealth {
+  const bySource: Record<string, number> = {};
+  const rejects: Record<string, number> = {};
+  const latencies: number[] = [];
+  let lastAppliedAt = 0;
+
+  const bump = (map: Record<string, number>, key: string) => {
+    if (!key) return;
+    map[key] = (map[key] ?? 0) + 1;
+  };
+  const time = (value: unknown) => {
+    const parsed = typeof value === "string" ? Date.parse(value) : NaN;
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  for (const event of events) {
+    const name = String(event.event ?? "");
+    if (name === "reminder") {
+      if (typeof event.suppressed === "string") bump(rejects, event.suppressed);
+      else if (event.deduped !== true) bump(bySource, String(event.source ?? "unknown"));
+    } else if (name === "nudge") {
+      if (typeof event.delivery === "string") {
+        bump(bySource, String(event.producer ?? "unknown"));
+        lastAppliedAt = time(event.ts);
+      } else if (typeof event.reason === "string") {
+        bump(rejects, event.reason);
+      }
+    } else if (name === "custom-nudge") {
+      if (typeof event.severity === "string" && typeof event.text === "string") {
+        bump(bySource, `custom:${String(event.ruleId ?? "rule")}`);
+        lastAppliedAt = time(event.ts);
+      } else if (typeof event.reason === "string") {
+        bump(rejects, event.reason);
+      }
+    } else if (
+      name === "compliance" &&
+      typeof event.afterMs === "number" &&
+      Number.isFinite(event.afterMs)
+    ) {
+      latencies.push(Math.max(0, event.afterMs));
+    } else if (name === "nudge-touch" && lastAppliedAt > 0) {
+      const at = time(event.ts);
+      if (at > lastAppliedAt) latencies.push(at - lastAppliedAt);
+      lastAppliedAt = 0;
+    }
+  }
+
+  const sorted = [...latencies].sort((a, b) => a - b);
+  return {
+    bySource,
+    rejects,
+    compliance: {
+      samples: sorted.length,
+      medianMs: percentile(sorted, 50),
+      p90Ms: percentile(sorted, 90),
+    },
+  };
+}
+
 export interface StatusTransition {
   id: string;
   from: string | null;

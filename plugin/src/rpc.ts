@@ -257,6 +257,27 @@ export const ProgressRpc = Rpc.define({
           gapMs: { type: "number" },
           graceMs: { type: "number" },
           capPerSession: { type: "number" },
+          entryView: { type: "object", additionalProperties: true },
+          health: {
+            type: "object",
+            properties: {
+              bySource: { type: "object", additionalProperties: true },
+              rejects: { type: "object", additionalProperties: true },
+              compliance: {
+                type: "object",
+                properties: {
+                  samples: { type: "number" },
+                  medianMs: { type: "number" },
+                  p90Ms: { type: "number" },
+                },
+                required: ["samples", "medianMs", "p90Ms"],
+                additionalProperties: false,
+              },
+            },
+            required: ["bySource", "rejects", "compliance"],
+            additionalProperties: false,
+          },
+          logBytes: { type: "number" },
           events: {
             type: "array",
             items: { type: "object", additionalProperties: true },
@@ -273,6 +294,9 @@ export const ProgressRpc = Rpc.define({
           "gapMs",
           "graceMs",
           "capPerSession",
+          "entryView",
+          "health",
+          "logBytes",
           "events",
           "counts",
         ],

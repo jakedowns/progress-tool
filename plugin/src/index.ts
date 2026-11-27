@@ -5,7 +5,7 @@
  * relay and exposes it to the TUI and GUI parts through RPC.
  */
 
-import { closeSync, fstatSync, openSync, readFileSync, readSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
@@ -110,7 +110,14 @@ import {
   type IdleTracker,
   type WallClockState,
 } from "./monitor.js";
-import { logNudge, nudgeLogPath, nudgeLoggingEnabled, diffStatuses, type StatusSnapshot } from "./telemetry.js";
+import {
+  logNudge,
+  nudgeLogPath,
+  nudgeLoggingEnabled,
+  diffStatuses,
+  summarizeNudgeEvents,
+  type StatusSnapshot,
+} from "./telemetry.js";
 import { resolveMcpLaunch, taskListEnvironment } from "./mcp.js";
 import { injectParentSession, isSubagentTool } from "./subagent.js";
 import {
@@ -679,9 +686,13 @@ export default Plugin.define({
           counts[eventName] = (counts[eventName] ?? 0) + 1;
           events.push(subagent ? { ...parsed, subagent } : parsed);
         }
-        return { events: events.slice(-limit).reverse(), counts };
+        return {
+          events: events.slice(-limit).reverse(),
+          counts,
+          health: summarizeNudgeEvents(events),
+        };
       } catch {
-        return { events: [], counts: {} };
+        return { events: [], counts: {}, health: summarizeNudgeEvents([]) };
       } finally {
         if (fd != null) {
           try {
@@ -879,6 +890,23 @@ export default Plugin.define({
         const tail = readNudgeTail(sessionID, Math.min(200, Math.max(10, limit ?? 60)));
         const status = sharedNudge?.adapter.status(sessionID);
         const state = readSharedNudgeSession(sessionID);
+        const progress = readProgressState();
+        const entryView: Record<string, string> = {};
+        for (const entry of Object.values(progress.entries ?? {})) {
+          if (!entry || typeof entry.id !== "string") continue;
+          const key = `${entry.sessionId ?? ""}:${entry.id}`;
+          entryView[key] = entry.cleared
+            ? "cleared"
+            : entry.dismissed
+              ? "dismissed"
+              : "visible";
+        }
+        let logBytes = 0;
+        try {
+          logBytes = statSync(nudgeLogPath()).size;
+        } catch {
+          // Missing log reads as empty.
+        }
         const gapOption = ctx.options?.nudgeGapMs;
         const graceOption = ctx.options?.nudgeGraceMs;
         const defaults = state?.defaults ?? {};
@@ -908,6 +936,9 @@ export default Plugin.define({
             typeof capOption === "number" && Number.isFinite(capOption) && capOption >= 0
               ? Math.floor(capOption)
               : 2,
+          entryView,
+          health: tail.health,
+          logBytes,
           events: tail.events,
           counts: tail.counts,
         };

@@ -21,6 +21,7 @@ import {
   normalizeGuiDetailLines,
   normalizeGuiLayout,
   normalizeGuiSidebarWidth,
+  nudgeFeedRows,
   type GuiLayout,
 } from "./gui-view.js";
 import {
@@ -842,6 +843,13 @@ export default Plugin.define({
         gapMs: number;
         graceMs: number;
         capPerSession: number;
+        entryView: Record<string, string>;
+        health: {
+          bySource: Record<string, number>;
+          rejects: Record<string, number>;
+          compliance: { samples: number; medianMs: number; p90Ms: number };
+        };
+        logBytes: number;
         events: Array<Record<string, unknown>>;
         counts: Record<string, number>;
       }>;
@@ -2839,8 +2847,14 @@ export default Plugin.define({
         parts.push(raw.length > 28 ? `${raw.slice(0, 27)}…` : raw);
       }
       if (typeof event.to === "string" && event.to) {
-        const from = typeof event.from === "string" && event.from ? event.from : "new";
-        parts.push(`${from} → ${event.to}`);
+        const rawFrom =
+          event.transitionFrom !== undefined ? event.transitionFrom : event.from;
+        const from = typeof rawFrom === "string" && rawFrom ? rawFrom : "new";
+        const count =
+          typeof event.transitionCount === "number" && event.transitionCount > 1
+            ? ` ×${event.transitionCount}`
+            : "";
+        parts.push(`${from} → ${event.to}${count}`);
       }
       if (typeof event.action === "string" && event.action) parts.push(event.action);
       if (typeof event.count === "number") parts.push(`#${event.count}`);
@@ -3063,8 +3077,29 @@ export default Plugin.define({
         }
       };
 
+      const [showTransitions, setShowTransitions] = createSignal(false);
       const events = () => telemetry()?.events ?? [];
+      const feedRows = createMemo(() => nudgeFeedRows(events(), showTransitions()));
       const counts = () => telemetry()?.counts ?? {};
+
+      const eventEntryStatus = (event: Record<string, unknown>) => {
+        const id = typeof event.id === "string" ? event.id : "";
+        const session = typeof event.sessionID === "string" ? event.sessionID : "";
+        if (!id || !session) return "";
+        return telemetry()?.entryView?.[`${session}:${id}`] ?? "";
+      };
+
+      const topCounts = (map: Record<string, number> | undefined) =>
+        Object.entries(map ?? {})
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 5);
+
+      const shortMs = (ms: number) => {
+        if (!Number.isFinite(ms) || ms <= 0) return "—";
+        return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`;
+      };
+
+      const health = () => telemetry()?.health;
       const standing = () => telemetry()?.standing;
       const standingActive = () => {
         const value = standing();
@@ -3173,6 +3208,73 @@ export default Plugin.define({
             </For>
           </div>
 
+          <Show when={health()}>
+            <div
+              style={{
+                display: "flex",
+                "flex-direction": "column",
+                gap: "2px",
+                "font-size": "11px",
+                opacity: "0.62",
+                "flex": "0 0 auto",
+              }}
+            >
+              <div
+                title="Applied reminders by producer in the current log window"
+                style={{
+                  "white-space": "nowrap",
+                  overflow: "hidden",
+                  "text-overflow": "ellipsis",
+                }}
+              >
+                fires{" "}
+                {topCounts(health()?.bySource)
+                  .map(([key, value]) => `${key} ${value}`)
+                  .join(" · ") || "—"}
+              </div>
+              <div
+                title="Suppressed attempts by reason"
+                style={{
+                  "white-space": "nowrap",
+                  overflow: "hidden",
+                  "text-overflow": "ellipsis",
+                }}
+              >
+                rejects{" "}
+                {topCounts(health()?.rejects)
+                  .map(([key, value]) => `${key} ${value}`)
+                  .join(" · ") || "—"}
+                {health()!.compliance.samples > 0
+                  ? ` · compliance ${shortMs(health()!.compliance.medianMs)} median`
+                  : ""}
+              </div>
+            </div>
+          </Show>
+
+          <div
+            style={{
+              display: "flex",
+              gap: "4px",
+              "flex-wrap": "wrap",
+              "flex": "0 0 auto",
+            }}
+          >
+            <button
+              type="button"
+              class="progress-pill-button"
+              aria-pressed={showTransitions()}
+              title={
+                showTransitions()
+                  ? "Hide transition rows"
+                  : "Show transition rows (hidden by default)"
+              }
+              onClick={() => setShowTransitions((value) => !value)}
+              style={sidebarHeaderButtonStyle}
+            >
+              {showTransitions() ? "Hide transitions" : "Show transitions"}
+            </button>
+          </div>
+
           <Show when={error()}>
             <div style={{ "font-size": "11px", color: "#f87171" }}>{error()}</div>
           </Show>
@@ -3232,7 +3334,7 @@ export default Plugin.define({
                 </div>
               }
             >
-              <For each={events()}>
+              <For each={feedRows()}>
                 {(event) => (
                   <div
                     style={{
@@ -3271,6 +3373,25 @@ export default Plugin.define({
                           }}
                         >
                           [{nudgeDirection(event)}]
+                        </span>
+                      </Show>
+                      <Show when={eventEntryStatus(event)}>
+                        <span
+                          title={
+                            eventEntryStatus(event) === "visible"
+                              ? "Entry is visible in the current progress tree"
+                              : `Entry is hidden from the tree (${eventEntryStatus(event)})`
+                          }
+                          style={{
+                            color:
+                              eventEntryStatus(event) === "visible" ? "#34d399" : "#fbbf24",
+                            opacity: eventEntryStatus(event) === "visible" ? "0.55" : "0.9",
+                            "font-weight": "600",
+                          }}
+                        >
+                          {eventEntryStatus(event) === "visible"
+                            ? "[tree]"
+                            : `[hidden ${eventEntryStatus(event)}]`}
                         </span>
                       </Show>
                       <span
