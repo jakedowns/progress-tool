@@ -295,6 +295,7 @@ export const ProgressRpc = Rpc.define({
             },
           },
           graceByType: { type: "object", additionalProperties: true },
+          graceWindows: { type: "object", additionalProperties: true },
           logBytes: { type: "number" },
           events: {
             type: "array",
@@ -316,6 +317,7 @@ export const ProgressRpc = Rpc.define({
           "health",
           "usage",
           "graceByType",
+          "graceWindows",
           "logBytes",
           "events",
           "counts",

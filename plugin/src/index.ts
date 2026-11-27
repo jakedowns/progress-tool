@@ -615,9 +615,16 @@ export default Plugin.define({
                 at: note.at,
               });
               // A real note is compliance: reset the forgot-to-narrate counter
-              // and clear a say-sourced standing reminder.
+              // and clear a say-sourced standing reminder. In shared mode it
+              // also resets the say-specific grace clock, independent of
+              // progress writes.
               sayCallsSinceNote.set(note.sessionID, 0);
               clearReminder(note.sessionID, 'say');
+              if (sharedNudge && nudgeMode === "shared") {
+                void Promise.resolve(
+                  sharedNudge.adapter.touch(note.sessionID, "say")
+                ).catch(() => {});
+              }
             },
             synthetic: (input) =>
               hasActiveReplace(input.sessionID)
@@ -751,7 +758,12 @@ export default Plugin.define({
         ) as {
           sessions?: Record<
             string,
-            { lastReminderAt?: number; lastProgressAt?: number; fires?: number }
+            {
+              lastReminderAt?: number;
+              lastProgressAt?: number;
+              fires?: number;
+              activity?: Record<string, number>;
+            }
           >;
         };
         let defaults: Record<string, unknown> = {};
@@ -773,6 +785,10 @@ export default Plugin.define({
           lastProgressAt:
             typeof session.lastProgressAt === "number" ? session.lastProgressAt : 0,
           fires: typeof session.fires === "number" ? session.fires : 0,
+          activity:
+            session.activity && typeof session.activity === "object"
+              ? session.activity
+              : undefined,
           defaults,
         };
       } catch {
@@ -1028,6 +1044,33 @@ export default Plugin.define({
           else if (row.tool === "say") row.uses = sayNotes;
         }
         const usage = [...usageByTool.values()].sort((a, b) => b.nudges - a.nudges);
+
+        // Per-producer grace windows. `activity` exists after the first
+        // group-aware touch; older sessions fall back to lastProgressAt.
+        const activity = status?.activity ?? state?.activity;
+        const lastProgressAt = status?.lastProgressAt ?? state?.lastProgressAt ?? 0;
+        const graceWindows: Record<string, number> = {};
+        for (const group of ["say", "progress.tree", "progress.stale"]) {
+          const at = activity
+            ? activity[group] ?? (group === "say" ? 0 : lastProgressAt)
+            : lastProgressAt;
+          if (at > 0) graceWindows[group] = at;
+        }
+        const graceTypeFor = (producer: string) => {
+          for (const prefix of ["say", "progress.tree", "progress.stale"]) {
+            if (producer === prefix || producer.startsWith(`${prefix}.`)) return prefix;
+          }
+          return producer.split(".")[0] || "other";
+        };
+        const graceByType: Record<string, number> = {};
+        for (const reject of tail.graceRejects) {
+          const type = graceTypeFor(reject.producer);
+          const start = graceWindows[type] ?? 0;
+          const at = Date.parse(reject.ts);
+          if (!Number.isFinite(at) || at < start) continue;
+          graceByType[type] = (graceByType[type] ?? 0) + 1;
+        }
+
         let logBytes = 0;
         try {
           logBytes = statSync(nudgeLogPath()).size;
@@ -1066,26 +1109,8 @@ export default Plugin.define({
           entryView,
           health: tail.health,
           usage,
-          graceByType: (() => {
-            // Grace is one per-session window (lastProgressAt), but it only
-            // gates these producers; count suppressed attempts per type so the
-            // panel can show a chip for each affected producer.
-            const start = Math.max(0, state?.lastProgressAt ?? 0);
-            const typeFor = (producer: string) => {
-              for (const prefix of ["say", "progress.tree", "progress.stale"]) {
-                if (producer === prefix || producer.startsWith(`${prefix}.`)) return prefix;
-              }
-              return producer.split(".")[0] || "other";
-            };
-            const byType: Record<string, number> = {};
-            for (const reject of tail.graceRejects) {
-              const at = Date.parse(reject.ts);
-              if (!Number.isFinite(at) || at < start) continue;
-              const type = typeFor(reject.producer);
-              byType[type] = (byType[type] ?? 0) + 1;
-            }
-            return byType;
-          })(),
+          graceByType,
+          graceWindows,
           logBytes,
           events: tail.events,
           counts: tail.counts,
@@ -1482,14 +1507,9 @@ export default Plugin.define({
             lastProgressWriteAt.set(event.sessionID, now);
             nudgeFireCount.delete(event.sessionID);
             if (sharedNudge && nudgeMode === "shared") {
-              void Promise.resolve(sharedNudge.adapter.touch(event.sessionID)).catch(() => {});
-              if (verbose) {
-                logNudge({
-                  event: "nudge-touch",
-                  sessionID: event.sessionID,
-                  engine: nudgeMode,
-                });
-              }
+              void Promise.resolve(
+                sharedNudge.adapter.touch(event.sessionID, "progress")
+              ).catch(() => {});
             }
             clearReminder(event.sessionID);
           }

@@ -867,6 +867,7 @@ export default Plugin.define({
           producers: Record<string, number>;
         }>;
         graceByType: Record<string, number>;
+        graceWindows: Record<string, number>;
         logBytes: number;
         events: Array<Record<string, unknown>>;
         counts: Record<string, number>;
@@ -3053,23 +3054,25 @@ export default Plugin.define({
             title: `Standing ${view.standing.severity} reminder from ${view.standing.source}`,
           });
         }
-        if (view.graceMs > 0 && view.lastProgressAt > 0) {
-          const elapsed = now - view.lastProgressAt;
-          if (elapsed >= 0 && elapsed < view.graceMs) {
+        if (view.graceMs > 0) {
+          const counts = view.graceByType ?? {};
+          const windows = view.graceWindows ?? {};
+          const types = new Set(["say", "progress.tree", "progress.stale"]);
+          for (const [type, count] of Object.entries(counts)) {
+            if (count > 0) types.add(type);
+          }
+          for (const type of types) {
+            const at = windows[type] ?? 0;
+            if (!at) continue;
+            const elapsed = now - at;
+            if (elapsed < 0 || elapsed >= view.graceMs) continue;
             const left = shortDuration(view.graceMs - elapsed);
-            const counts = view.graceByType ?? {};
-            const types = new Set(["say", "progress.tree", "progress.stale"]);
-            for (const [type, count] of Object.entries(counts)) {
-              if (count > 0) types.add(type);
-            }
-            for (const type of types) {
-              const skipped = counts[type] ?? 0;
-              chips.push({
-                label: `grace ${type} • ${left} left`,
-                color: "#34d399",
-                title: `${skipped} nudge${skipped === 1 ? "" : "s"} skipped for ${type} during this grace window`,
-              });
-            }
+            const skipped = counts[type] ?? 0;
+            chips.push({
+              label: `grace ${type} • ${left} left`,
+              color: "#34d399",
+              title: `${skipped} nudge${skipped === 1 ? "" : "s"} skipped for ${type} during this grace window`,
+            });
           }
         }
         if (view.gapMs > 0 && view.lastReminderAt > 0) {
