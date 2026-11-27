@@ -3427,7 +3427,7 @@ export default Plugin.define({
                     row.tool === "say"
                       ? "notes"
                       : row.tool === "progress"
-                        ? "writes"
+                        ? "updates"
                         : row.tool === "relay"
                           ? "runs"
                           : "uses";

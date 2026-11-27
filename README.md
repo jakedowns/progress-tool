@@ -202,7 +202,9 @@ files, presets, and semantics.
   hidden by default (**Show transitions**) and consecutive runs collapse to
   `pending → done ×3`; each row also shows `[tree]` or `[hidden dismissed/cleared]`
   against the current view. A health line sums fires by producer, rejection
-  reasons, and median nudge-to-progress latency. **Test nudge** fires custom
+  reasons, and median nudge-to-progress latency; a usage table below it shows
+  applied nudges → agent usage per tool (say notes, progress updates), with
+  skipped attempts by reason on hover. **Test nudge** fires custom
   text through the real gate (context only), **Clear log** truncates the JSONL,
   and **Purge** resets this session's mute, standing reminder, gap clock, and
   fire count without touching the log. A dot on the tab marks new warn/block

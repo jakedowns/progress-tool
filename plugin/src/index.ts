@@ -694,12 +694,17 @@ export default Plugin.define({
           counts[eventName] = (counts[eventName] ?? 0) + 1;
           events.push(subagent ? { ...parsed, subagent } : parsed);
         }
-        let progressUses = 0;
+        let touches = 0;
+        let transitions = 0;
+        let compliance = 0;
         for (const event of events) {
-          if (event.event === "nudge-touch" || event.event === "compliance") {
-            progressUses += 1;
-          }
+          if (event.event === "nudge-touch") touches += 1;
+          else if (event.event === "transition") transitions += 1;
+          else if (event.event === "compliance") compliance += 1;
         }
+        // Prefer explicit progress-write touches; older logs only have
+        // status transitions (or legacy compliance clears).
+        const progressUses = touches > 0 ? touches : transitions > 0 ? transitions : compliance;
         return {
           events: events.slice(-limit).reverse(),
           counts,
@@ -1478,6 +1483,13 @@ export default Plugin.define({
             nudgeFireCount.delete(event.sessionID);
             if (sharedNudge && nudgeMode === "shared") {
               void Promise.resolve(sharedNudge.adapter.touch(event.sessionID)).catch(() => {});
+              if (verbose) {
+                logNudge({
+                  event: "nudge-touch",
+                  sessionID: event.sessionID,
+                  engine: nudgeMode,
+                });
+              }
             }
             clearReminder(event.sessionID);
           }
