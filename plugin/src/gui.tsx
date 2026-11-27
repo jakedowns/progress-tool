@@ -839,7 +839,7 @@ export default Plugin.define({
         id: string;
       }): Promise<{ ok: boolean; error?: string }>;
       nudgeTelemetry(input: { sessionID: string; limit?: number }): Promise<{
-        engine: "legacy" | "shadow" | "shared";
+        engine: "shared" | "legacy";
         mutedUntil: number;
         standing: { severity: string; source: string; text: string; at: number };
         fires: number;
@@ -3029,7 +3029,6 @@ export default Plugin.define({
     ]);
     const NUDGE_OUTBOUND = new Set([
       "nudge",
-      "nudge-shadow",
       "reminder",
       "strict",
       "wall-clock",
@@ -3185,7 +3184,8 @@ export default Plugin.define({
             {
               label: "legacy engine",
               color: "#94a3b8",
-              title: "Set nudgeEngine: shared to use the shared gate",
+              title:
+                "nudgeEngine: legacy is an explicit opt-in; set shared (or remove the option) to use the shared gate",
             },
           ];
         }

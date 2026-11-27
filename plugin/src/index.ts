@@ -54,6 +54,7 @@ import {
   normalizeSayOptions,
   type SayController,
 } from "./say.js";
+import { resolveNudgeEngine, type NudgeEngine } from "./nudge-engine.js";
 import {
   formatReminder,
   isHealthyWaiting,
@@ -237,15 +238,10 @@ export default Plugin.define({
     const standingReminders = new Map<string, ReminderState>();
     const REMINDER_KEY = 'progress-reminder';
     const customNudgesOn = customNudgesEnabled(ctx.options);
-    const requestedNudgeMode =
-      ctx.options?.nudgeEngine === "shared"
-        ? "shared"
-        : ctx.options?.nudgeEngine === "shadow"
-          ? "shadow"
-          : "legacy";
+    const requestedNudgeMode = resolveNudgeEngine(ctx.options?.nudgeEngine);
     // Custom rules still use the legacy replace/alongside engine. Do not
     // half-enable shared mode and silently disable them.
-    const nudgeMode =
+    let nudgeMode: NudgeEngine =
       requestedNudgeMode === "shared" && customNudgesOn ? "legacy" : requestedNudgeMode;
     if (requestedNudgeMode === "shared" && customNudgesOn) {
       console.warn(
@@ -363,35 +359,6 @@ export default Plugin.define({
       // twice; helpers that return only a body get the prefix here.
       const isCustom = source.startsWith("custom:");
       const now = Date.now();
-      if (sharedNudge && nudgeMode === "shadow") {
-        const shadowText = /^\[(info|warn|block)\]\s/.test(body)
-          ? body.trim()
-          : formatReminder(severity, body);
-        const producer =
-          source === "strict"
-            ? "progress.tree"
-            : source === "wall"
-              ? "progress.wall"
-              : source === "idle"
-                ? "progress.idle"
-                : source === "relay"
-                  ? "progress.relay"
-                  : source === "say"
-                    ? "say"
-                    : `custom.${source}`;
-        void Promise.resolve(
-          sharedNudge.adapter.submit({
-            sessionId: sessionID,
-            producer,
-            ruleId: source,
-            severity,
-            text: shadowText,
-            channel: severity === "block" ? "synthetic" : "context",
-            at: now,
-            metadata: { shadow: true },
-          })
-        ).catch((error) => console.warn("[opencode-progress] shadow nudge failed", String(error)));
-      }
       if (sharedNudge && nudgeMode === "shared" && !source.startsWith("custom:")) {
         const sharedText = /^\[(info|warn|block)\]\s/.test(body)
           ? body.trim()
@@ -2434,8 +2401,7 @@ export default Plugin.define({
       try {
         const { attachNudge } = await import("@jakedowns/opencode-nudge");
         sharedNudge = await attachNudge(ctx as never, {
-          shadow: nudgeMode === "shadow",
-          registerTool: nudgeMode === "shared",
+          registerTool: true,
           gapMs: typeof ctx.options?.nudgeGapMs === "number" ? ctx.options.nudgeGapMs : undefined,
           graceMs:
             typeof ctx.options?.nudgeGraceMs === "number"
@@ -2446,7 +2412,13 @@ export default Plugin.define({
           },
         });
       } catch (error) {
-        console.warn(`[opencode-progress] shared nudge attach failed: ${String(error)}`);
+        // Keep delivery and telemetry honest: if the adapter cannot attach,
+        // fall back to the legacy engine instead of reporting "shared" while
+        // the legacy path does the work.
+        nudgeMode = "legacy";
+        console.warn(
+          `[opencode-progress] shared nudge attach failed; falling back to legacy: ${String(error)}`
+        );
       }
     }
 

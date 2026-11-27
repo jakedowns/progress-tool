@@ -238,7 +238,7 @@ export const ProgressRpc = Rpc.define({
       output: {
         type: "object",
         properties: {
-          engine: { type: "string", enum: ["legacy", "shadow", "shared"] },
+          engine: { type: "string", enum: ["shared", "legacy"] },
           mutedUntil: { type: "number" },
           standing: {
             type: "object",

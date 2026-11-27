@@ -227,13 +227,15 @@ Shipped since `mcp-server@2.10.2`:
 
 - **Shared packages published.** `@jakedowns/opencode-nudge-core@0.1.2` and
   `@jakedowns/opencode-nudge@0.1.2` are live with trusted publishing verified.
-- **`nudgeEngine` selector.** `legacy` (default), `shadow`, or `shared`.
-  `shadow` records shared-gate decisions without changing delivery; `shared`
-  delivers built-in progress/say/relay/idle reminders through the adapter.
+- **`nudgeEngine` selector.** `shared` (default) delivers built-in
+  progress/say/relay/idle reminders through the adapter; `legacy` remains an
+  explicit opt-in if shared delivery degrades in a given setup. The temporary
+  `shadow` comparison mode was removed.
 - **Shared delivery.** One `nudge` context key, shared mute/gap/grace/cap,
   block-only synthetic delivery, and the generic `nudge` agent tool.
-- **Lazy adapter import.** Legacy mode never imports the new package, so a
-  missing install cannot break plugin startup.
+- **Lazy adapter import.** The adapter is imported only in shared mode; if it
+  cannot attach, the plugin warns and falls back to legacy delivery so the
+  engine reported in telemetry matches what actually runs.
 - **Custom rules** remain on the legacy engine; `shared` + `customNudges` falls back to legacy with a warning.
 - Tests: 234 plugin, 93 shared packages.
 

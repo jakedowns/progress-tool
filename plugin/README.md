@@ -97,6 +97,7 @@ Pass under the plugin entry's `options` in `opencode.json`:
 | `customNudges` | `false` | opt-in custom rule editor and TUI/palette commands; agent mute stays available |
 | `idleStaleMs` | `600000` | owned-entry staleness before the turn-end nudge |
 | `nudgeGapMs` | `60000` | quiet period between non-block reminders |
+| `nudgeEngine` | `"shared"` | `"shared"` (default) or `"legacy"`; opt back to legacy if shared delivery degrades after an update |
 | `unhinged` | `false` | append a task-list reminder to every user message |
 | `verboseLogging` | `false` | JSONL nudge telemetry (`~/.opencode-progress-nudges.log`) |
 | `autoHideDone` | `false` | hide completed tasks after the success hold |

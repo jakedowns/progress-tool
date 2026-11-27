@@ -188,9 +188,10 @@ files, presets, and semantics.
   Expanded child rows use the same `└─` branch prefix as the TUI, placed before
   the status dot.
 - **Nudges panel (desktop):** the sidebar's New tab page lists **Nudges** next
-  to Progress. It opens a live tab with the active engine (legacy/shadow/shared),
-  the standing reminder text, mute state with a 30-minute mute/unmute action for
-  the shared engine, and the newest nudge events for the routed session — fires,
+  to Progress. It opens a live tab with the active engine (`shared` by default,
+  `legacy` when opted in), the standing reminder text, mute state with a
+  30-minute mute/unmute action for the shared engine, and the newest nudge
+  events for the routed session — fires,
   gate rejections, clears, touches, and legacy suppressions. Each row is tagged
   `[in]` (an agent wrote progress or used the nudge tool) or `[out]` (a reminder
   aimed at the agent); child-session traffic also carries a `[sub]` tag with
@@ -294,6 +295,7 @@ files, presets, and semantics.
 | `strictMode` | `"nudge"` / `"force"` / `"off"` silent-work nudges |
 | `staleEscalateAfter` | Entry reminders before one synthetic escalation (default 3; `0` disables) |
 | `idleReminder` | Turn-end nudge when tasks remain (default on) |
+| `nudgeEngine` | `"shared"` (default) or `"legacy"`; opt back to legacy if shared delivery degrades after an update |
 | `demoSkills` | Register the demo skills (default off) |
 | `barStyle` | `"blocks"` (ASCII) or `"emoji"`; the **Progress: switch tree theme** presets set this with `treeTheme` |
 | `refreshMs` | View refresh interval (default 1000) |
