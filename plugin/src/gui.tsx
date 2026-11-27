@@ -854,6 +854,7 @@ export default Plugin.define({
           rejects: Record<string, number>;
           compliance: { samples: number; medianMs: number; p90Ms: number };
         };
+        graceByType: Record<string, number>;
         logBytes: number;
         events: Array<Record<string, unknown>>;
         counts: Record<string, number>;
@@ -3043,11 +3044,20 @@ export default Plugin.define({
         if (view.graceMs > 0 && view.lastProgressAt > 0) {
           const elapsed = now - view.lastProgressAt;
           if (elapsed >= 0 && elapsed < view.graceMs) {
-            chips.push({
-              label: `grace • ${shortDuration(view.graceMs - elapsed)} left`,
-              color: "#34d399",
-              title: "Grace after the last progress write; non-block reminders wait",
-            });
+            const left = shortDuration(view.graceMs - elapsed);
+            const counts = view.graceByType ?? {};
+            const types = new Set(["say", "progress.tree", "progress.stale"]);
+            for (const [type, count] of Object.entries(counts)) {
+              if (count > 0) types.add(type);
+            }
+            for (const type of types) {
+              const skipped = counts[type] ?? 0;
+              chips.push({
+                label: `grace ${type} • ${left} left`,
+                color: "#34d399",
+                title: `${skipped} nudge${skipped === 1 ? "" : "s"} skipped for ${type} during this grace window`,
+              });
+            }
           }
         }
         if (view.gapMs > 0 && view.lastReminderAt > 0) {

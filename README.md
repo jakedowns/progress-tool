@@ -195,8 +195,10 @@ files, presets, and semantics.
   `[in]` (an agent wrote progress or used the nudge tool) or `[out]` (a reminder
   aimed at the agent); child-session traffic also carries a `[sub]` tag with
   the subagent's name. State chips above the log show the live gate:
-  `[muted • 3m remaining]`, `[nudged • 2m ago]`, `[grace • 7m left]`,
-  `[gap • 40s left]`, `[capped • 2/2]`, or `[listening]`. Transition rows are
+  `[muted • 3m remaining]`, `[nudged • 2m ago]`, `[grace say • 7m left]`,
+  `[grace progress.tree • 7m left]`, `[gap • 40s left]`, `[capped • 2/2]`, or
+  `[listening]`. Grace is split per gated producer, and its hover shows how many
+  attempts that producer had skipped in the current window. Transition rows are
   hidden by default (**Show transitions**) and consecutive runs collapse to
   `pending → done ×3`; each row also shows `[tree]` or `[hidden dismissed/cleared]`
   against the current view. A health line sums fires by producer, rejection

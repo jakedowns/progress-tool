@@ -277,6 +277,7 @@ export const ProgressRpc = Rpc.define({
             required: ["bySource", "rejects", "compliance"],
             additionalProperties: false,
           },
+          graceByType: { type: "object", additionalProperties: true },
           logBytes: { type: "number" },
           events: {
             type: "array",
@@ -296,6 +297,7 @@ export const ProgressRpc = Rpc.define({
           "capPerSession",
           "entryView",
           "health",
+          "graceByType",
           "logBytes",
           "events",
           "counts",

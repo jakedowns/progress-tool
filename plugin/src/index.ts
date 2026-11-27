@@ -698,9 +698,23 @@ export default Plugin.define({
           events: events.slice(-limit).reverse(),
           counts,
           health: summarizeNudgeEvents(events),
+          graceRejects: events
+            .filter(
+              (event) =>
+                event.reason === "grace" || event.suppressed === "grace"
+            )
+            .map((event) => ({
+              producer: String(event.producer ?? event.source ?? ""),
+              ts: String(event.ts ?? ""),
+            })),
         };
       } catch {
-        return { events: [], counts: {}, health: summarizeNudgeEvents([]) };
+        return {
+          events: [],
+          counts: {},
+          health: summarizeNudgeEvents([]),
+          graceRejects: [] as Array<{ producer: string; ts: string }>,
+        };
       } finally {
         if (fd != null) {
           try {
@@ -946,6 +960,26 @@ export default Plugin.define({
               : 2,
           entryView,
           health: tail.health,
+          graceByType: (() => {
+            // Grace is one per-session window (lastProgressAt), but it only
+            // gates these producers; count suppressed attempts per type so the
+            // panel can show a chip for each affected producer.
+            const start = Math.max(0, state?.lastProgressAt ?? 0);
+            const typeFor = (producer: string) => {
+              for (const prefix of ["say", "progress.tree", "progress.stale"]) {
+                if (producer === prefix || producer.startsWith(`${prefix}.`)) return prefix;
+              }
+              return producer.split(".")[0] || "other";
+            };
+            const byType: Record<string, number> = {};
+            for (const reject of tail.graceRejects) {
+              const at = Date.parse(reject.ts);
+              if (!Number.isFinite(at) || at < start) continue;
+              const type = typeFor(reject.producer);
+              byType[type] = (byType[type] ?? 0) + 1;
+            }
+            return byType;
+          })(),
           logBytes,
           events: tail.events,
           counts: tail.counts,
